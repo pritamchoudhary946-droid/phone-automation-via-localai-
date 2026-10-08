@@ -205,6 +205,40 @@ class ExampleRobolectricTest {
         assertEquals("Thinking", thinkingStatus.label)
         assertEquals("Acting", actingStatus.label)
     }
+
+    @Test
+    fun `tap result records execution method and failure reason`() {
+        val failedResult = com.example.accessibility.TapResult(
+            success = false,
+            method = "FAILED",
+            failureReason = "Target 'Search' not found in accessibility hierarchy"
+        )
+        assertFalse(failedResult.success)
+        assertEquals("FAILED", failedResult.method)
+        assertEquals("Target 'Search' not found in accessibility hierarchy", failedResult.failureReason)
+
+        val successResult = com.example.accessibility.TapResult(
+            success = true,
+            method = "ACTION_CLICK_NODE",
+            bounds = android.graphics.Rect(800, 50, 950, 150),
+            nodeFound = true
+        )
+        assertTrue(successResult.success)
+        assertEquals("ACTION_CLICK_NODE", successResult.method)
+        assertTrue(successResult.nodeFound)
+    }
+
+    @Test
+    fun `text input result verifies direct action set text method`() {
+        val result = com.example.accessibility.TextInputResult(
+            success = true,
+            method = "ACTION_SET_TEXT",
+            targetNodeFound = true
+        )
+        assertTrue(result.success)
+        assertEquals("ACTION_SET_TEXT", result.method)
+    }
 }
+
 
 

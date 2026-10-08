@@ -37,6 +37,12 @@ sealed class OrchestratorState {
     data class Failed(val taskId: String, val reason: String) : OrchestratorState()
 }
 
+data class StepExecutionOutput(
+    val success: Boolean,
+    val method: String,
+    val message: String
+)
+
 class TaskOrchestrator(
     private val context: Context,
     private val liteRtEngine: LiteRtEngine,
@@ -97,9 +103,11 @@ class TaskOrchestrator(
             var lastVerificationResult: String? = null
             var lastActionName = ""
 
+            // Anti-loop tracker: records failure counts per action signature
+            val failedActionTracker = mutableMapOf<String, Int>()
+
             try {
                 while (currentStepIndex < maxSteps) {
-                    // Check if Accessibility Service is enabled
                     val a11yService = AgentAccessibilityService.instance
                     if (a11yService == null) {
                         val failReason = "Accessibility Service is not active. Please enable OmniAgent in Android Accessibility settings."
@@ -118,7 +126,7 @@ class TaskOrchestrator(
                     // Step 2: Stuck loop detection
                     val stuckStatus = stuckDetector.recordStep(screenFingerprint, lastActionName)
                     if (stuckStatus.isStuck) {
-                        Log.w(TAG, "Stuck detected: ${stuckStatus.reason}")
+                        Log.w(TAG, "[STUCK] Stuck loop detected: ${stuckStatus.reason}")
                         _orchestratorState.value = OrchestratorState.Replanning(stuckStatus.reason, stuckStatus.suggestedRecovery)
 
                         when (stuckStatus.suggestedRecovery) {
@@ -141,8 +149,8 @@ class TaskOrchestrator(
                     }
 
                     // Step 3: Gemma Reasoning & Planning
-                    val historySummary = _currentSteps.value.takeLast(3).joinToString("\n") {
-                        "Step ${it.stepIndex}: Action ${it.actionType} -> ${it.verificationResult}"
+                    val historySummary = _currentSteps.value.takeLast(4).joinToString("\n") {
+                        "Step ${it.stepIndex}: Action ${it.actionType} (${it.actionPayloadJson}) -> ${it.verificationResult}"
                     }
 
                     val decision = liteRtEngine.reasonAndPlan(
@@ -152,7 +160,46 @@ class TaskOrchestrator(
                         lastActionVerification = lastVerificationResult
                     )
 
-                    val action = decision.action
+                    var action = decision.action
+                    val actionKey = action.getDisplayName()
+
+                    // Step 6 Rule: Never retry the identical failed action indefinitely; trigger recovery/replan.
+                    val previousFailures = failedActionTracker[actionKey] ?: 0
+                    if (previousFailures >= 1) {
+                        Log.w(TAG, "[ANTI_LOOP] Action '$actionKey' has failed before ($previousFailures times). Triggering recovery.")
+
+                        if (action is AgentAction.Tap && action.targetText?.equals("Search", ignoreCase = true) == true) {
+                            // Recovery A: Look up search node coordinates directly from current tree
+                            val searchNode = uiSnapshot.findNodeByText("Search")
+                            if (searchNode != null) {
+                                Log.i(TAG, "[RECOVERY] Retrying Search with coordinate bounds: (${searchNode.bounds.centerX()}, ${searchNode.bounds.centerY()})")
+                                action = AgentAction.Tap(null, searchNode.bounds.centerX(), searchNode.bounds.centerY())
+                            } else {
+                                // Recovery B: If in YouTube, launch native search intent directly
+                                val targetQuery = extractQueryFromGoal(task.userGoal)
+                                if (targetQuery != null && (uiSnapshot.packageName?.contains("youtube") == true || task.userGoal.lowercase().contains("youtube"))) {
+                                    Log.i(TAG, "[RECOVERY] Launching native YouTube search intent for '$targetQuery'")
+                                    appDirectory.launchSearch(targetQuery, "com.google.android.youtube")
+                                    delay(1200)
+                                    currentStepIndex++
+                                    continue
+                                }
+                            }
+                        } else {
+                            // Generic replanning recovery
+                            _orchestratorState.value = OrchestratorState.Replanning(
+                                reason = "Action '$actionKey' failed previously. Choosing alternative path.",
+                                recoveryStrategy = RecoveryStrategy.REPLAN_NEW_APPROACH
+                            )
+                            if (uiSnapshot.findScrollable() != null) {
+                                a11yService.scroll("down")
+                            } else {
+                                a11yService.pressBack()
+                            }
+                            delay(600)
+                        }
+                    }
+
                     lastActionName = action.getDisplayName()
 
                     // Step 4: Risk Assessment Check
@@ -198,12 +245,19 @@ class TaskOrchestrator(
                     // Step 6: Action Execution
                     _orchestratorState.value = OrchestratorState.Executing(currentStepIndex, action, decision.thought)
 
-                    val actionSuccess = executeAtomicAction(action, a11yService)
-                    delay(700) // Yield for UI update and animation
+                    val actionOutput = executeAtomicAction(action, a11yService, uiSnapshot, task.userGoal)
+                    delay(500) // Yield for UI update and transition
+
+                    // Track failures to prevent indefinite repeating
+                    if (!actionOutput.success) {
+                        failedActionTracker[actionKey] = previousFailures + 1
+                    } else {
+                        failedActionTracker.remove(actionKey)
+                    }
 
                     // Step 7: Action Verification
                     val postSnapshot = a11yService.dumpHierarchy()
-                    val verification = verifyStepOutcome(action, uiSnapshot, postSnapshot, actionSuccess)
+                    val verification = verifyStepOutcome(action, uiSnapshot, postSnapshot, actionOutput)
                     lastVerificationResult = verification
 
                     // Step 8: Persist Step & Checkpoint
@@ -215,7 +269,7 @@ class TaskOrchestrator(
                         actionPayloadJson = action.getDisplayName(),
                         observationSummary = screenSummary.take(250),
                         verificationResult = verification,
-                        status = if (actionSuccess) "SUCCESS" else "FAILED"
+                        status = if (actionOutput.success) "SUCCESS" else "FAILED"
                     )
 
                     taskStepDao.insertStep(stepEntity)
@@ -248,50 +302,91 @@ class TaskOrchestrator(
 
     private suspend fun executeAtomicAction(
         action: AgentAction,
-        a11y: AgentAccessibilityService
-    ): Boolean = withContext(Dispatchers.Default) {
+        a11y: AgentAccessibilityService,
+        currentSnapshot: UiTreeSnapshot,
+        userGoal: String
+    ): StepExecutionOutput = withContext(Dispatchers.Default) {
+        val preFingerprint = currentSnapshot.getFingerprint()
+        val prePackage = currentSnapshot.packageName
+
+        val verifyUiChanged: suspend () -> Boolean = {
+            delay(250)
+            val current = a11y.dumpHierarchy()
+            val fingerprintDiff = current.getFingerprint() != preFingerprint
+            val packageDiff = current.packageName != prePackage
+            fingerprintDiff || packageDiff
+        }
+
         return@withContext when (action) {
             is AgentAction.OpenApp -> {
                 val targetPkg = action.packageName ?: appDirectory.resolvePackage(action.appQuery)
                 if (targetPkg != null) {
-                    appDirectory.launchApp(targetPkg)
+                    val launched = appDirectory.launchApp(targetPkg)
+                    StepExecutionOutput(
+                        success = launched,
+                        method = "LAUNCH_INTENT",
+                        message = if (launched) "Launched $targetPkg" else "Failed to launch $targetPkg"
+                    )
                 } else {
-                    false
+                    StepExecutionOutput(
+                        success = false,
+                        method = "RESOLVE_APP",
+                        message = "App '${action.appQuery}' not found on device"
+                    )
                 }
             }
             is AgentAction.Tap -> {
-                if (action.targetText != null) {
-                    a11y.clickByText(action.targetText)
-                } else if (action.x != null && action.y != null) {
-                    a11y.clickCoordinates(action.x.toFloat(), action.y.toFloat())
-                } else {
-                    false
-                }
+                val tapResult = a11y.performTap(action.targetText, action.x, action.y, verifyUiChanged)
+                StepExecutionOutput(
+                    success = tapResult.success,
+                    method = tapResult.method,
+                    message = if (tapResult.success) {
+                        "Tap succeeded via ${tapResult.method} (${tapResult.bounds?.toShortString() ?: "target"})"
+                    } else {
+                        tapResult.failureReason ?: "Target element could not be found or clicked"
+                    }
+                )
             }
             is AgentAction.TypeText -> {
-                a11y.typeText(action.text)
+                val textResult = a11y.performTextInput(action.text, action.targetNodeId)
+                StepExecutionOutput(
+                    success = textResult.success,
+                    method = textResult.method,
+                    message = if (textResult.success) {
+                        "Typed \"${action.text}\" into field via ${textResult.method}"
+                    } else {
+                        textResult.failureReason ?: "Failed to set text into input field"
+                    }
+                )
             }
             is AgentAction.Scroll -> {
-                a11y.scroll(action.direction)
+                val scrolled = a11y.scroll(action.direction)
+                StepExecutionOutput(success = scrolled, method = "SCROLL", message = "Scrolled ${action.direction}")
             }
             is AgentAction.Back -> {
-                a11y.pressBack()
+                val backed = a11y.pressBack()
+                StepExecutionOutput(success = backed, method = "GLOBAL_BACK", message = "Pressed Back")
             }
             is AgentAction.Home -> {
-                a11y.pressHome()
+                val homed = a11y.pressHome()
+                StepExecutionOutput(success = homed, method = "GLOBAL_HOME", message = "Pressed Home")
             }
             is AgentAction.Wait -> {
                 delay(action.durationMs)
-                true
+                StepExecutionOutput(success = true, method = "WAIT", message = "Waited ${action.durationMs}ms")
             }
             is AgentAction.ReadScreen -> {
-                true
+                StepExecutionOutput(success = true, method = "READ", message = "Screen hierarchy refreshed")
             }
             is AgentAction.Screenshot -> {
                 val bmp = a11y.takeScreenshotFallback()
-                bmp != null
+                StepExecutionOutput(
+                    success = bmp != null,
+                    method = "SCREENSHOT",
+                    message = if (bmp != null) "Screenshot captured successfully" else "Screenshot fallback not supported or failed"
+                )
             }
-            else -> false
+            else -> StepExecutionOutput(success = false, method = "UNKNOWN", message = "Unhandled action type")
         }
     }
 
@@ -299,30 +394,55 @@ class TaskOrchestrator(
         action: AgentAction,
         pre: UiTreeSnapshot,
         post: UiTreeSnapshot,
-        executionResult: Boolean
+        executionOutput: StepExecutionOutput
     ): String {
-        if (!executionResult) return "Execution failed (gesture or intent unhandled)"
+        if (!executionOutput.success) {
+            return "Failed: ${executionOutput.message} [method: ${executionOutput.method}]"
+        }
 
-        val changed = pre.getFingerprint() != post.getFingerprint()
+        val screenChanged = pre.getFingerprint() != post.getFingerprint()
+        val packageChanged = pre.packageName != post.packageName
+
         return when (action) {
             is AgentAction.OpenApp -> {
-                if (post.packageName != null && post.packageName != pre.packageName) {
+                if (packageChanged && post.packageName != null) {
                     "Success: Switched package to ${post.packageName}"
+                } else if (executionOutput.success) {
+                    "Success: Launched ${action.appQuery} (transitioning)"
                 } else {
-                    "Pending: Package transition loading"
+                    "Failed: App could not be launched"
                 }
             }
             is AgentAction.Tap -> {
-                if (changed) "Success: Screen state changed after tap" else "Unchanged: Tap did not alter visible elements"
+                if (screenChanged) {
+                    "Success: ${executionOutput.method} altered screen state"
+                } else {
+                    "Success: ${executionOutput.method} completed (${executionOutput.message})"
+                }
             }
             is AgentAction.TypeText -> {
-                if (changed) "Success: Input field updated" else "Input verified"
+                if (screenChanged) {
+                    "Success: Text \"${action.text}\" injected into input field"
+                } else {
+                    "Success: ${executionOutput.message}"
+                }
             }
             is AgentAction.Scroll -> {
-                if (changed) "Success: New elements scrolled into view" else "End of scrollable region"
+                if (screenChanged) "Success: Scrolled to new viewport" else "End of scrollable region"
             }
-            else -> "Success"
+            else -> "Success: ${executionOutput.message}"
         }
+    }
+
+    private fun extractQueryFromGoal(goal: String): String? {
+        val patterns = listOf("search for ", "search ", "find ")
+        for (pattern in patterns) {
+            val idx = goal.indexOf(pattern, ignoreCase = true)
+            if (idx != -1) {
+                return goal.substring(idx + pattern.length).trim().removeSurrounding("\"")
+            }
+        }
+        return null
     }
 
     fun confirmRiskAction(confirmed: Boolean) {
@@ -337,10 +457,10 @@ class TaskOrchestrator(
             val task = taskDao.getTaskById(taskId) ?: return@launch
             if (confirmed) {
                 taskDao.updateTask(task.copy(status = "RUNNING", requiresRiskConfirmation = false))
-                // Execute confirmed action and continue
                 val a11y = AgentAccessibilityService.instance
                 if (a11y != null) {
-                    executeAtomicAction(action, a11y)
+                    val currentSnapshot = a11y.dumpHierarchy()
+                    executeAtomicAction(action, a11y, currentSnapshot, task.userGoal)
                 }
                 runAgentLoop(task.copy(currentStep = task.currentStep + 1))
             } else {

@@ -103,7 +103,7 @@ class LiteRtEngine(
         // Simulate inference compute latency or invoke on-device runtime
         delay(180) // Fast snappy reasoning pass
 
-        val decision = parseGemmaOutput(goal, screenSummary, lastActionVerification)
+        val decision = parseGemmaOutput(goal, screenSummary, historySummary, lastActionVerification)
         return@withContext decision
     }
 
@@ -165,6 +165,7 @@ class LiteRtEngine(
     private fun parseGemmaOutput(
         goal: String,
         screenSummary: String,
+        historySummary: String,
         lastActionVerification: String?
     ): AgentDecision {
         val lowerGoal = goal.lowercase().trim()
@@ -186,20 +187,46 @@ class LiteRtEngine(
         if (lowerGoal.contains("search for") || lowerGoal.contains("search")) {
             val searchQuery = extractSearchQuery(goal)
             if (searchQuery != null) {
-                if (lowerScreen.contains("edittext") || lowerScreen.contains("search") || lowerScreen.contains("find")) {
-                    if (lowerScreen.contains("focused: true") || lowerScreen.contains("is_focused: true")) {
+                val cleanQueryLower = searchQuery.lowercase()
+                val queryAlreadyTyped = lowerScreen.contains("\"$cleanQueryLower\"") ||
+                        historySummary.lowercase().contains("type_text")
+
+                val hasVideoResults = lowerScreen.contains(cleanQueryLower) &&
+                        (lowerScreen.contains("video") || lowerScreen.contains("views") ||
+                                lowerScreen.contains("channel") || lowerScreen.contains("results") ||
+                                lowerScreen.contains("radio") || lowerScreen.contains("stream") ||
+                                lowerScreen.contains("watch"))
+
+                if (hasVideoResults && queryAlreadyTyped) {
+                    return AgentDecision(
+                        thought = "Search results matching '$searchQuery' are visible and verified on screen.",
+                        action = AgentAction.FinishTask("Found and verified search results for '$searchQuery'."),
+                        rawOutput = "Thought: Results verified.\nAction: finish_task(\"Verified search results\")"
+                    )
+                }
+
+                if (lowerScreen.contains("edittext") || lowerScreen.contains("[input]") || lowerScreen.contains("search youtube")) {
+                    if (!queryAlreadyTyped) {
                         return AgentDecision(
-                            thought = "Search bar is focused. Typing query '$searchQuery'.",
+                            thought = "Search input field is ready. Focusing and typing query '$searchQuery' via ACTION_SET_TEXT.",
                             action = AgentAction.TypeText(searchQuery, null),
-                            rawOutput = "Thought: Entering search query.\nAction: type_text(\"$searchQuery\")"
+                            rawOutput = "Thought: Typing search query.\nAction: type_text(\"$searchQuery\")"
                         )
                     } else {
+                        // Query is typed: submit by tapping suggestion or search icon
+                        val suggestionToTap = if (lowerScreen.contains(cleanQueryLower)) searchQuery else "Search"
                         return AgentDecision(
-                            thought = "Found search field on screen. Tapping search field to activate.",
-                            action = AgentAction.Tap("Search", null, null),
-                            rawOutput = "Thought: Tapping search box.\nAction: tap(\"Search\")"
+                            thought = "Query '$searchQuery' is entered. Tapping suggestion to display results.",
+                            action = AgentAction.Tap(suggestionToTap, null, null),
+                            rawOutput = "Thought: Submitting search.\nAction: tap(\"$suggestionToTap\")"
                         )
                     }
+                } else if (lowerScreen.contains("search") || lowerScreen.contains("find")) {
+                    return AgentDecision(
+                        thought = "Found 'Search' button on screen. Tapping to open search interface.",
+                        action = AgentAction.Tap("Search", null, null),
+                        rawOutput = "Thought: Tapping Search icon.\nAction: tap(\"Search\")"
+                    )
                 }
             }
         }

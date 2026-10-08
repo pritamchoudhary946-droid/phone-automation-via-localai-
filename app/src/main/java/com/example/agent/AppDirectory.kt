@@ -81,4 +81,19 @@ class AppDirectory(private val context: Context) {
             false
         }
     }
+
+    fun launchSearch(query: String, packageName: String? = null): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_SEARCH).apply {
+                if (packageName != null) setPackage(packageName)
+                putExtra(android.app.SearchManager.QUERY, query)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
 }
+
