@@ -1,0 +1,6 @@
+{
+  "name": "OmniAgent",
+  "description": "Autonomous on-device AI phone agent powered by local Gemma 4 E2B and LiteRT-LM with AccessibilityService automation, task planning, and continuous multi-step execution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

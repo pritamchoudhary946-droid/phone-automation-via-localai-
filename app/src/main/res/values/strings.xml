@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">OmniAgent</string>
+    <string name="accessibility_service_label">OmniAgent Accessibility Automation</string>
+    <string name="accessibility_service_description">Enables OmniAgent to read screen elements and execute automated taps, scrolls, and text input on your behalf.</string>
+</resources>
