@@ -11,44 +11,56 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
-private val DarkColorScheme = darkColorScheme(
-    primary = CyanPrimary,
-    onPrimary = Color(0xFF00363D),
-    primaryContainer = Color(0xFF004F58),
-    onPrimaryContainer = Color(0xFF9CF4FF),
-    secondary = ElectricBlue,
-    onSecondary = Color(0xFF00344F),
-    secondaryContainer = Color(0xFF004B70),
-    onSecondaryContainer = Color(0xFFCAE6FF),
-    tertiary = MintSuccess,
-    background = DarkBackground,
-    onBackground = TextPrimary,
-    surface = DarkSurface,
-    onSurface = TextPrimary,
-    surfaceVariant = DarkSurfaceVariant,
-    onSurfaceVariant = TextSecondary,
-    outline = DarkSurfaceBorder,
-    error = CrimsonDanger
-)
-
 private val LightColorScheme = lightColorScheme(
     primary = CyanPrimaryDark,
     onPrimary = Color.White,
+    primaryContainer = Color(0xFFE3E2FF),
+    onPrimaryContainer = Color(0xFF1E1B7A),
     secondary = ElectricBlue,
-    tertiary = MintSuccess,
-    background = Color(0xFFF8FAFC),
-    onBackground = Color(0xFF0F172A),
-    surface = Color.White,
-    onSurface = Color(0xFF0F172A),
-    surfaceVariant = Color(0xFFE2E8F0),
-    onSurfaceVariant = Color(0xFF475569),
-    outline = Color(0xFFCBD5E1),
-    error = CrimsonDanger
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFDCEBFF),
+    onSecondaryContainer = Color(0xFF0B2E5C),
+    tertiary = IndigoAccent,
+    onTertiary = Color.White,
+    background = LightBackground,
+    onBackground = TextPrimary,
+    surface = LightSurface,
+    onSurface = TextPrimary,
+    surfaceVariant = LightSurfaceVariant,
+    onSurfaceVariant = TextSecondary,
+    surfaceContainer = Color(0xFFF1F3FA),
+    outline = LightSurfaceBorder,
+    outlineVariant = Color(0xFFEDEFF7),
+    error = CrimsonDanger,
+    onError = Color.White
+)
+
+private val DarkColorScheme = darkColorScheme(
+    primary = Color(0xFFA5A3FF),
+    onPrimary = Color(0xFF201C6B),
+    primaryContainer = Color(0xFF3B3796),
+    onPrimaryContainer = Color(0xFFE3E2FF),
+    secondary = ElectricBlue,
+    onSecondary = Color(0xFF00344F),
+    secondaryContainer = Color(0xFF004B70),
+    onSecondaryContainer = Color(0xFFDCEBFF),
+    tertiary = IndigoAccent,
+    background = DarkBackground,
+    onBackground = DarkTextPrimary,
+    surface = DarkSurface,
+    onSurface = DarkTextPrimary,
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = DarkTextSecondary,
+    surfaceContainer = Color(0xFF1B2038),
+    outline = DarkSurfaceBorder,
+    outlineVariant = Color(0xFF2A3050),
+    error = CrimsonDanger,
+    onError = Color.White
 )
 
 @Composable
 fun MyApplicationTheme(
-    darkTheme: Boolean = true, // Default to sleek tech dark theme
+    darkTheme: Boolean = isSystemInDarkTheme(), // Light by default, follows the device
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {

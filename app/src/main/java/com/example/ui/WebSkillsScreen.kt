@@ -95,9 +95,9 @@ fun WebSkillsScreen(
                         .testTag("run_web_search_button"),
                     colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
                 ) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = Color.Black)
+                    Icon(Icons.Default.Search, contentDescription = null, tint = Color.White)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Execute Web Search Skill", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Execute Web Search Skill", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -140,9 +140,9 @@ fun WebSkillsScreen(
                         .testTag("run_pdf_parse_button"),
                     colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
                 ) {
-                    Icon(Icons.Default.FindInPage, contentDescription = null, tint = Color.Black)
+                    Icon(Icons.Default.FindInPage, contentDescription = null, tint = Color.White)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Parse & Analyze PDF", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Parse & Analyze PDF", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }

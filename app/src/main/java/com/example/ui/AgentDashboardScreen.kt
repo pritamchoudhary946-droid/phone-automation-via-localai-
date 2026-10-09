@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -230,24 +231,23 @@ fun AgentDashboardScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(40.dp)
                             .clip(CircleShape)
-                            .background(CyanPrimary.copy(alpha = 0.2f))
-                            .border(1.dp, CyanPrimary, CircleShape),
+                            .background(Brush.linearGradient(listOf(CyanPrimary, IndigoAccent))),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.SmartToy,
+                            imageVector = Icons.Default.AutoAwesome,
                             contentDescription = "OmniAgent",
-                            tint = CyanPrimary,
-                            modifier = Modifier.size(20.dp)
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
                             text = "OmniAgent",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -504,11 +504,11 @@ fun AgentDashboardScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "Run Phone Agent (Gemma 4 E2B)",
-                                    color = Color.Black,
+                                    color = Color.White,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
