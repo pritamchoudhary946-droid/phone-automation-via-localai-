@@ -181,7 +181,7 @@ class LiteRtEngine(
             val isComplete = when (sg.kind) {
                 SubGoalKind.LAUNCH_APP -> {
                     val appPkgOrName = sg.target ?: ""
-                    lowerHistory.contains("openapp") || (lowerScreen.contains(appPkgOrName) && !lowerScreen.contains("package: com.example") && !lowerScreen.contains("com.android.launcher"))
+                    lastActionVerification?.startsWith("Success: Switched package to ", ignoreCase = true) == true && lowerScreen.contains("active package:") && lowerScreen.contains(appPkgOrName.lowercase()) && !lowerScreen.contains("com.android.launcher")
                 }
                 SubGoalKind.SEARCH_QUERY -> {
                     val q = sg.target?.lowercase() ?: ""
@@ -241,7 +241,7 @@ class LiteRtEngine(
         if (activeSubGoal?.kind == SubGoalKind.LAUNCH_APP) {
             val appToOpen = activeSubGoal.target ?: "youtube"
             val appAlreadyOpen = lowerScreen.contains(appToOpen) && !lowerScreen.contains("package: com.example")
-            if (!appAlreadyOpen && !lowerHistory.contains("openapp")) {
+            if (!appAlreadyOpen) {
                 return AgentDecision(
                     thought = "Sub-goal: Launching target app '$appToOpen'.",
                     action = AgentAction.OpenApp(appToOpen, null),
@@ -255,9 +255,9 @@ class LiteRtEngine(
         if (activeSubGoal?.kind == SubGoalKind.SEARCH_QUERY) {
             val query = activeSubGoal.target ?: "search query"
             val cleanQueryLower = query.lowercase()
-            val queryAlreadyTyped = lowerHistory.contains("type_text") || lowerScreen.contains("\"$cleanQueryLower\"")
+            val queryAlreadyTyped = lowerHistory.contains("action typetext") && lastActionVerification?.startsWith("Success:", ignoreCase = true) == true
 
-            if (lowerScreen.contains("edittext") || lowerScreen.contains("[input]") || lowerScreen.contains("search youtube") || lowerScreen.contains("search ")) {
+            if (lowerScreen.contains("edittext") || Regex("editable:\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(screenSummary)) {
                 if (!queryAlreadyTyped) {
                     return AgentDecision(
                         thought = "Search bar active. Entering query \"$query\" via ACTION_SET_TEXT.",
@@ -267,7 +267,7 @@ class LiteRtEngine(
                     )
                 } else {
                     // Query is entered, submit search
-                    val suggestionToTap = if (lowerScreen.contains(cleanQueryLower)) query else "Search"
+                    val suggestionToTap = "Search"
                     return AgentDecision(
                         thought = "Submitting search for \"$query\" by tapping search button/suggestion.",
                         action = AgentAction.Tap(suggestionToTap, null, null),
