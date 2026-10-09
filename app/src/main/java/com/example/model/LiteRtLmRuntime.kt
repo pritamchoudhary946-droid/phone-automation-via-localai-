@@ -109,14 +109,21 @@ class LiteRtLmRuntime(
         }
 
     override suspend fun smokeTest(): Boolean = withContext(Dispatchers.IO) {
-        if (!isReady()) return@withContext false
+        if (!isReady()) {
+            Log.w(TAG, "Smoke test failed: engine not ready")
+            return@withContext false
+        }
         try {
             val result = generate(
                 prompt = "Reply with the single word: ready",
                 systemInstruction = "You are a minimal health check.",
                 maxOutputTokens = 8
             )
-            result.isNotBlank()
+            val success = result.isNotBlank()
+            if (!success) {
+                Log.w(TAG, "Smoke test failed: empty response")
+            }
+            return success
         } catch (e: Throwable) {
             Log.w(TAG, "Smoke test inference failed: ${e.message}")
             false

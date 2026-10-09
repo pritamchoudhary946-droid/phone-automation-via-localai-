@@ -169,7 +169,13 @@ class TaskOrchestrator(
                     }
                     else -> {
                         _usesModelPlanning.value = false
-                        liteRtEngine.fallbackPlan(task.userGoal)
+                        val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
+                        val reason = when (planOutcome) {
+                            is PlanOutcome.Unavailable -> planOutcome.reason
+                            is PlanOutcome.Rejected -> planOutcome.reason
+                        }
+                        Log.w(TAG, "Using fallback planner due to: $reason")
+                        fallbackPlan
                     }
                 }
                 _activePlan.value = plan
@@ -272,6 +278,14 @@ class TaskOrchestrator(
                     val usedModel = decision is com.example.planning.StepDecision.Act
                     if (fastPath is FastPathDecision.ModelReason) {
                         if (usedModel) _modelCalls.value += 1
+                        else {
+                            // Model was consulted but didn't return a valid action
+                            val reason = when (decision) {
+                                is com.example.planning.StepDecision.None -> decision.reason
+                                else -> "Unknown reason"
+                            }
+                            Log.w(TAG, "Model consulted but returned no valid action: $reason")
+                        }
                     } else {
                         _fastPathSteps.value += 1
                     }

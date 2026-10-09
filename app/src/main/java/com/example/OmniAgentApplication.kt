@@ -84,9 +84,20 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             return
         }
         appScope.launch {
-            val ok = inferenceEngine.initialize(modelFile)
-            if (ok && !inferenceEngine.smokeTest(modelFile)) {
-                Log.w(TAG, "Smoke test failed; marking engine unavailable")
+            try {
+                val ok = inferenceEngine.initialize(modelFile)
+                if (ok) {
+                    if (!inferenceEngine.smokeTest(modelFile)) {
+                        Log.w(TAG, "Smoke test failed; marking engine unavailable")
+                        inferenceEngine.shutdown()
+                    } else {
+                        Log.i(TAG, "Engine initialized and smoke test passed successfully")
+                    }
+                } else {
+                    Log.w(TAG, "Engine initialization failed")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing engine: ${e.message}", e)
                 inferenceEngine.shutdown()
             }
         }
