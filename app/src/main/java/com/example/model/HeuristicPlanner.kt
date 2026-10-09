@@ -138,7 +138,7 @@ class HeuristicPlanner {
     private fun nominalActionFor(subGoal: SubGoal): AgentAction = when (subGoal.kind) {
         SubGoalKind.LAUNCH_APP -> AgentAction.OpenApp(subGoal.target ?: "", null)
         SubGoalKind.SEARCH_QUERY -> AgentAction.OpenSearch(subGoal.target)
-        SubGoalKind.OPEN_ITEM -> AgentAction.Tap(subGoal.target ?: "results", null, null)
+        SubGoalKind.OPEN_ITEM -> AgentAction.OpenItem(subGoal.target ?: "results")
         SubGoalKind.TOGGLE_SETTING -> AgentAction.Tap(subGoal.target ?: "", null, null)
         SubGoalKind.RETURN_HOME -> AgentAction.Home
         SubGoalKind.NAVIGATE_BACK -> AgentAction.Back
@@ -278,8 +278,8 @@ class HeuristicPlanner {
             val tapTarget = if (query.isNotEmpty() && lowerScreen.contains(query.lowercase())) query else "results"
             return AgentDecision(
                 thought = "Opening the first matching result on screen.",
-                action = AgentAction.Tap(tapTarget, null, null),
-                rawOutput = "Thought: Opening selected result.\nAction: tap(\"$tapTarget\")",
+                action = AgentAction.OpenItem(tapTarget),
+                rawOutput = "Thought: Opening selected result.\nAction: open_item(\"$tapTarget\")",
                 activeSubGoal = activeSubGoal.description
             )
         }

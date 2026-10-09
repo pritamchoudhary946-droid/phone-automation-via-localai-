@@ -67,6 +67,8 @@ class TaskOrchestrator(
     private val taskStepDao = database.taskStepDao()
     private val checkpointDao = database.checkpointDao()
 
+    private val hybridStepExecutor = HybridStepExecutor(appDirectory)
+
     private val stuckDetector = StuckLoopDetector()
     private val riskEvaluator = RiskEvaluator()
     private val verifier = PostconditionVerifier
@@ -89,6 +91,14 @@ class TaskOrchestrator(
     private val _usesModelPlanning = MutableStateFlow(false)
     val usesModelPlanning: StateFlow<Boolean> = _usesModelPlanning.asStateFlow()
 
+    private val _modelCalls = MutableStateFlow(0)
+    /** Per-step model invocations, so the hybrid fast path is measurable. */
+    val modelCalls: StateFlow<Int> = _modelCalls.asStateFlow()
+
+    private val _fastPathSteps = MutableStateFlow(0)
+    /** Steps executed deterministically from the accessibility tree, without a model call. */
+    val fastPathSteps: StateFlow<Int> = _fastPathSteps.asStateFlow()
+
     private var executionJob: Job? = null
 
     private var pendingRiskAction: AgentAction? = null
@@ -104,6 +114,8 @@ class TaskOrchestrator(
         _currentTask.value = newTask
         _currentSteps.value = emptyList()
         _activePlan.value = null
+        _modelCalls.value = 0
+        _fastPathSteps.value = 0
         stuckDetector.reset()
         scope.launch {
             taskDao.insertTask(newTask)
@@ -117,6 +129,7 @@ class TaskOrchestrator(
             var lastActionResult: String? = null
             var consecutiveFailures = 0
             var completedCount = 0
+            var nudgedStepId: Int? = null
 
             try {
                 if (!deviceAutomation.isReady()) {
@@ -210,23 +223,64 @@ class TaskOrchestrator(
                         step
                     }
 
-                    // Let Gemma choose/refresh the action for this fresh observation.
-                    val decision = withTimeoutOrNull(STEP_DECISION_TIMEOUT_MS) {
-                        liteRtEngine.decideNextAction(
-                            goal = task.userGoal,
-                            activeSubGoal = effectiveStep.description,
-                            screenSummary = observation.summary,
-                            foregroundPackage = observation.packageName,
-                            historySummary = historySummary(),
-                            lastActionVerification = lastActionResult,
-                            remainingStepBudget = maxSteps - completedCount
-                        )
+                    // Hybrid fast path: when the step's intent can be satisfied
+                    // deterministically from the current accessibility tree (launch an
+                    // installed app, open the search UI, type into an observed field,
+                    // press Home/Back, open an observed result), the native action is
+                    // executed directly and the local model is never invoked. Only when
+                    // the fast path cannot decide is Gemma asked to choose/refresh the
+                    // action. Model output, when present, overrides the nominal action.
+                    val nudgeUsed = nudgedStepId == effectiveStep.id
+                    val fastPath = hybridStepExecutor.decide(
+                        plan.steps, plan.steps.indexOf(effectiveStep), observation, nudgeUsed
+                    )
+
+                    val decision = if (fastPath is FastPathDecision.ModelReason) {
+                        Log.i(TAG, "[MODEL_STEP] ${fastPath.reason}")
+                        withTimeoutOrNull(STEP_DECISION_TIMEOUT_MS) {
+                            liteRtEngine.decideNextAction(
+                                goal = task.userGoal,
+                                activeSubGoal = effectiveStep.description,
+                                screenSummary = observation.summary,
+                                foregroundPackage = observation.packageName,
+                                historySummary = historySummary(),
+                                lastActionVerification = lastActionResult,
+                                remainingStepBudget = maxSteps - completedCount
+                            )
+                        }
+                    } else {
+                        null
                     }
 
-                    var action = if (decision is com.example.planning.StepDecision.Act) {
-                        decision.action
+                    if (fastPath is FastPathDecision.Satisfied) {
+                        Log.i(TAG, "[FAST_PATH] Step ${effectiveStep.id} already satisfied: ${fastPath.reason}")
+                        _fastPathSteps.value += 1
+                        val satisfiedStep = effectiveStep.withAttempt().withStatus(PlanStepStatus.COMPLETED)
+                        plan = plan.replace(satisfiedStep)
+                        _activePlan.value = plan
+                        recordStep(task, completedCount, "Fast path: ${fastPath.reason}", effectiveStep.action, observation, "Success: ${fastPath.reason}", "SUCCESS")
+                        completedCount++
+                        consecutiveFailures = 0
+                        stuckDetector.reset()
+                        taskDao.updateTask(task.copy(currentStep = completedCount))
+                        continue
+                    }
+
+                    val usedModel = decision is com.example.planning.StepDecision.Act
+                    if (fastPath is FastPathDecision.ModelReason) {
+                        if (usedModel) _modelCalls.value += 1
                     } else {
-                        effectiveStep.action
+                        _fastPathSteps.value += 1
+                    }
+
+                    var action = when {
+                        usedModel -> (decision as com.example.planning.StepDecision.Act).action
+                        fastPath is FastPathDecision.Execute -> fastPath.action
+                        else -> effectiveStep.action
+                    }
+                    // Record a bounded "wait for results to render" nudge so it is not repeated.
+                    if (action is AgentAction.Wait && effectiveStep.action is AgentAction.OpenItem) {
+                        nudgedStepId = effectiveStep.id
                     }
 
                     // Safety net: a text entry needs a real editable field in this fresh
@@ -481,6 +535,7 @@ class TaskOrchestrator(
         val method = when {
             action is AgentAction.OpenApp -> VerificationMethod.FOREGROUND_PACKAGE
             action is AgentAction.Home -> VerificationMethod.HOME_FOREGROUND
+            action is AgentAction.OpenItem -> VerificationMethod.SCREEN_CHANGED
             else -> step.verification
         }
         val screenChanged = pre.fingerprint != post.fingerprint

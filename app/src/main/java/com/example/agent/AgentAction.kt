@@ -12,6 +12,12 @@ sealed class AgentAction {
      */
     data class OpenSearch(val query: String? = null) : AgentAction()
     data class Scroll(val direction: String) : AgentAction() // "up", "down", "left", "right"
+    /**
+     * Opens an observed result item (e.g. a search result) by its visible label.
+     * The executor reacquires the node from a fresh observation rather than reusing
+     * a stale accessibility node.
+     */
+    data class OpenItem(val targetText: String) : AgentAction()
     object Back : AgentAction()
     object Home : AgentAction()
     data class Wait(val durationMs: Long) : AgentAction()
@@ -28,6 +34,7 @@ sealed class AgentAction {
             is TypeText -> "Type: \"$text\""
             is OpenSearch -> "Open Search"
             is Scroll -> "Scroll $direction"
+            is OpenItem -> "Open Item: '$targetText'"
             is Back -> "Press Back"
             is Home -> "Press Home"
             is Wait -> "Wait ${durationMs}ms"
