@@ -4,6 +4,13 @@ sealed class AgentAction {
     data class OpenApp(val appQuery: String, val packageName: String?) : AgentAction()
     data class Tap(val targetText: String?, val x: Int?, val y: Int?) : AgentAction()
     data class TypeText(val text: String, val targetNodeId: String?) : AgentAction()
+    /**
+     * Opens the active app's search interface using a fresh accessibility
+     * observation. Used when a search/entry field is not already on screen, so a
+     * subsequent [TypeText] has a real editable node to target. [query] is an
+     * optional hint used only by the bounded native-search-intent fallback.
+     */
+    data class OpenSearch(val query: String? = null) : AgentAction()
     data class Scroll(val direction: String) : AgentAction() // "up", "down", "left", "right"
     object Back : AgentAction()
     object Home : AgentAction()
@@ -19,6 +26,7 @@ sealed class AgentAction {
             is OpenApp -> "Open App: $appQuery"
             is Tap -> if (targetText != null) "Tap: '$targetText'" else "Tap at ($x, $y)"
             is TypeText -> "Type: \"$text\""
+            is OpenSearch -> "Open Search"
             is Scroll -> "Scroll $direction"
             is Back -> "Press Back"
             is Home -> "Press Home"

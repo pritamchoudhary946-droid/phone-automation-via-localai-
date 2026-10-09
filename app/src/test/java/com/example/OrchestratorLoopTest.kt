@@ -225,19 +225,29 @@ class OrchestratorLoopTest {
                         defaultObservation = observation("com.google.android.youtube", "YouTube Home with search bar", 2)
                         ActionResult(true, "LAUNCH_VERIFIED", "verified")
                     }
+                    is AgentAction.OpenSearch -> {
+                        // The search field appears only after the interface is opened.
+                        defaultObservation = observation(
+                            "com.google.android.youtube",
+                            "YouTube Search  edittext editable: true",
+                            3,
+                            editable = true
+                        )
+                        ActionResult(true, "ACTION_CLICK_SEARCH", "opened search")
+                    }
+                    is AgentAction.TypeText -> {
+                        defaultObservation = observation("com.google.android.youtube", "Results for lo-fi beats  12 views videos", 4)
+                        ActionResult(true, "ACTION_SET_TEXT", "typed")
+                    }
                     is AgentAction.Tap -> {
                         val target = action.targetText?.lowercase() ?: ""
                         if (target.contains("lo-fi") || target.contains("lofi")) {
                             defaultObservation = observation("com.google.android.youtube", "YouTube watch Now playing lo-fi beats", 5)
                             ActionResult(true, "TAP_ACCESSIBILITY", "opened result")
                         } else {
-                            defaultObservation = observation("com.google.android.youtube", "YouTube Search  edittext editable: true", 3)
-                            ActionResult(true, "TAP_ACCESSIBILITY", "tapped search")
+                            defaultObservation = observation("com.google.android.youtube", "YouTube results list", 7)
+                            ActionResult(true, "TAP_ACCESSIBILITY", "tapped result")
                         }
-                    }
-                    is AgentAction.TypeText -> {
-                        defaultObservation = observation("com.google.android.youtube", "Results for lo-fi beats  12 views videos", 4)
-                        ActionResult(true, "ACTION_SET_TEXT", "typed")
                     }
                     is AgentAction.Home -> {
                         defaultObservation = observation("com.android.launcher", "Home", 6)
@@ -250,7 +260,7 @@ class OrchestratorLoopTest {
         val engine = modelEngine(
             """{"steps":[
               {"id":1,"seq":1,"desc":"Launch YouTube","action":"launch_app","params":{"appQuery":"youtube"},"expect":"YouTube foreground","verify":"FOREGROUND_PACKAGE"},
-              {"id":2,"seq":2,"desc":"Activate search","action":"tap_element","params":{"targetText":"Search"},"expect":"search field","verify":"SCREEN_CHANGED"},
+              {"id":2,"seq":2,"desc":"Activate search","action":"open_search","params":{"query":"lo-fi beats"},"expect":"search field","verify":"SCREEN_CHANGED"},
               {"id":3,"seq":3,"desc":"Submit query","action":"enter_text","params":{"text":"lo-fi beats"},"expect":"results","verify":"RESULTS_PRESENT"},
               {"id":4,"seq":4,"desc":"Open result","action":"tap_element","params":{"targetText":"lo-fi beats"},"expect":"Now playing","verify":"TEXT_PRESENT"},
               {"id":5,"seq":5,"desc":"Return home","action":"navigate_home","params":{},"expect":"home","verify":"HOME_FOREGROUND"}
@@ -265,7 +275,7 @@ class OrchestratorLoopTest {
         // Every required action happened, in order, through the native layer.
         val kinds = automation.executed.map { it::class.simpleName }
         assertEquals(
-            listOf("OpenApp", "Tap", "TypeText", "Tap", "Home"),
+            listOf("OpenApp", "OpenSearch", "TypeText", "Tap", "Home"),
             kinds
         )
         // The result open is a distinct tap on the observed result, not text entry alone.
