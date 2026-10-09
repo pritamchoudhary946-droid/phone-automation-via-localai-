@@ -27,6 +27,12 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Run Debug Unit Tests
+        run: bash ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Run Debug Lint
+        run: bash ./gradlew :app:lintDebug --stacktrace
+
       - name: Build Debug APK
         run: |
           chmod +x gradlew
