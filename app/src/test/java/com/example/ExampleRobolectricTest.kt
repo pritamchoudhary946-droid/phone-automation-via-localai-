@@ -10,6 +10,7 @@ import com.example.accessibility.UiNode
 import com.example.accessibility.UiTreeSnapshot
 import com.example.agent.AgentAction
 import com.example.agent.AppDirectory
+import com.example.agent.ForegroundPackageVerifier
 import com.example.agent.RecoveryStrategy
 import com.example.agent.RiskEvaluator
 import com.example.agent.StuckLoopDetector
@@ -473,4 +474,96 @@ class ExampleRobolectricTest {
         assertTrue(db.taskStepDao().getStepsForTaskList(taskId).isEmpty())
         assertEquals(null, db.checkpointDao().getCheckpoint(taskId))
     }
+
+    @Test
+    fun openYoutubeCompletesOnlyWhenForegroundPackageIsVerified() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val notForeground = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.launcher\nText \"YouTube is recommended\"",
+            historySummary = "",
+            lastActionVerification = "Success: launch intent dispatched"
+        )
+        assertTrue(notForeground.action is AgentAction.OpenApp)
+
+        val verifiedForeground = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.google.android.youtube\nText \"Home\"",
+            historySummary = "Step 0: Action OpenApp -> Success",
+            lastActionVerification = "Success: Verified target foreground package"
+        )
+        assertTrue(verifiedForeground.action is AgentAction.FinishTask)
+    }
+
+    @Test
+    fun screenTextMentioningYoutubeCannotSatisfyLaunchGoal() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val decision = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.chrome\nText \"Open YouTube in this browser\"",
+            historySummary = "",
+            lastActionVerification = "Success: Screen hierarchy refreshed"
+        )
+        assertTrue(decision.action is AgentAction.OpenApp)
+    }
+
+    @Test
+    fun foregroundVerifierRetriesDelayedPackageChangesWithinBound() = runBlocking {
+        var observations = 0
+        val observed = ForegroundPackageVerifier.awaitForegroundPackage(
+            targetPackage = "com.google.android.youtube",
+            attempts = 4,
+            delayMillis = 0L
+        ) {
+            observations++
+            if (observations < 3) "com.android.launcher" else "com.google.android.youtube"
+        }
+        assertEquals("com.google.android.youtube", observed)
+        assertEquals(3, observations)
+    }
+
+    @Test
+    fun readScreenSuccessDoesNotCompleteUnfulfilledLaunchGoal() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val decision = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.launcher\nHome screen",
+            historySummary = "Step 0: Action ReadScreen -> Success: Screen hierarchy refreshed",
+            lastActionVerification = "Success: Screen hierarchy refreshed"
+        )
+        assertTrue(decision.action is AgentAction.OpenApp)
+    }
+
+    @Test
+    fun intentDispatchWithoutTargetForegroundVerificationIsNotLaunchSuccess() = runBlocking {
+        var observations = 0
+        val verifiedPackage = ForegroundPackageVerifier.awaitForegroundPackage(
+            targetPackage = "com.google.android.youtube",
+            attempts = 3,
+            delayMillis = 0L
+        ) {
+            observations++
+            "com.android.launcher"
+        }
+        assertEquals(null, verifiedPackage)
+        assertEquals(3, observations)
+    }
+
+    @Test
+    fun missingModelDoesNotDisableNativeAppLaunchPlanning() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val decision = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.launcher\nHome screen",
+            historySummary = "",
+            lastActionVerification = null
+        )
+        assertTrue(decision.action is AgentAction.OpenApp)
+        assertEquals("youtube", (decision.action as AgentAction.OpenApp).appQuery)
+    }
+
 }
