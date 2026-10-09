@@ -157,6 +157,11 @@ fun SetupScreen(
                     fontFamily = FontFamily.Monospace,
                     color = CyanPrimary
                 )
+                Text(
+                    text = "First-time setup needs internet access and ~3.2 GB free storage. The file is SHA-256 verified before use.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -323,13 +328,13 @@ fun SetupScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "Model Ready (${state.sizeFormatted})",
+                                    text = "Model Verified (${state.sizeFormatted})",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MintSuccess
                                 )
                                 Text(
-                                    text = "LiteRT-LM Gemma 4 E2B loaded on device.",
+                                    text = "Checksum verified. Loading the LiteRT-LM engine and running a smoke test on device…",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

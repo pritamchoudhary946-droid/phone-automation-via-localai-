@@ -42,6 +42,12 @@ class MainActivity : ComponentActivity() {
                 val modelState by app.modelManager.downloadState.collectAsState()
                 val isModelReady = modelState is ModelDownloadState.Ready
 
+                // Initialize (and smoke-test) the real engine once the model is verified,
+                // and whenever the app starts with a verified model on disk.
+                LaunchedEffect(isModelReady) {
+                    if (isModelReady) app.initializeEngineIfModelReady()
+                }
+
                 var selectedTab by remember {
                     mutableStateOf(if (isModelReady) AgentTab.AGENT else AgentTab.SETUP)
                 }

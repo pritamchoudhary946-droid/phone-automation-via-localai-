@@ -18,7 +18,7 @@ sealed class ToolValidationResult {
     data class Invalid(val reason: String) : ToolValidationResult()
 }
 
-class ToolRegistry {
+open class ToolRegistry {
 
     companion object {
         const val TOOL_LAUNCH_APP = "launch_app"
@@ -104,7 +104,7 @@ class ToolRegistry {
      * Validates an AgentAction and its parameters prior to execution.
      * Prevents invalid or malformed actions from reaching the Accessibility layer.
      */
-    fun validateAction(action: AgentAction): ToolValidationResult {
+    open fun validateAction(action: AgentAction): ToolValidationResult {
         return when (action) {
             is AgentAction.OpenApp -> {
                 if (action.appQuery.isBlank() && action.packageName.isNullOrBlank()) {
