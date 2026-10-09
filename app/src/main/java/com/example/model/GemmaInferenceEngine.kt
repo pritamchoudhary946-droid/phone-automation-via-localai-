@@ -106,11 +106,18 @@ class GemmaInferenceEngine(
     /** Small real inference used to prove the runtime works before declaring it ready. */
     suspend fun smokeTest(modelFile: File): Boolean {
         val active = runtime ?: run {
-            if (!initialize(modelFile)) return false
+            if (!initialize(modelFile)) {
+                Log.w(TAG, "Smoke test failed: could not initialize engine")
+                return false
+            }
             runtime
         } ?: return false
         return try {
-            active.smokeTest()
+            val result = active.smokeTest()
+            if (!result) {
+                Log.w(TAG, "Smoke test failed: underlying runtime smoke test failed")
+            }
+            result
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
