@@ -181,7 +181,7 @@ class LiteRtEngine(
             val isComplete = when (sg.kind) {
                 SubGoalKind.LAUNCH_APP -> {
                     val appPkgOrName = sg.target ?: ""
-                    lastActionVerification?.startsWith("Success: Switched package to ", ignoreCase = true) == true && lowerScreen.contains("active package:") && lowerScreen.contains(appPkgOrName.lowercase()) && !lowerScreen.contains("com.android.launcher")
+                    lowerScreen.contains("active package:") && lowerScreen.contains(appPkgOrName.lowercase()) && !lowerScreen.contains("com.android.launcher")
                 }
                 SubGoalKind.SEARCH_QUERY -> {
                     val q = sg.target?.lowercase() ?: ""
@@ -256,9 +256,14 @@ class LiteRtEngine(
             val query = activeSubGoal.target ?: "search query"
             val cleanQueryLower = query.lowercase()
             val queryAlreadyTyped = lowerHistory.contains("action typetext") && lastActionVerification?.startsWith("Success:", ignoreCase = true) == true
+            val editableFieldVisible = lowerScreen.contains("edittext") ||
+                Regex("editable:\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(screenSummary)
+            // A successful TypeText history entry is not enough on its own: the current
+            // accessibility snapshot must also show the requested query in the field.
+            val queryVerifiedInField = editableFieldVisible && lowerScreen.contains(cleanQueryLower)
 
-            if (lowerScreen.contains("edittext") || Regex("editable:\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(screenSummary)) {
-                if (!queryAlreadyTyped) {
+            if (editableFieldVisible) {
+                if (!queryAlreadyTyped || !queryVerifiedInField) {
                     return AgentDecision(
                         thought = "Search bar active. Entering query \"$query\" via ACTION_SET_TEXT.",
                         action = AgentAction.TypeText(query, null),
