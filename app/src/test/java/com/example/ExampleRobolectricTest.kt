@@ -1,6 +1,10 @@
 package com.example
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import androidx.test.core.app.ApplicationProvider
 import com.example.accessibility.UiNode
 import com.example.accessibility.UiTreeSnapshot
@@ -26,11 +30,37 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ExampleRobolectricTest {
+
+    private fun installLauncherPackage(context: Context, packageName: String, label: String) {
+        val appInfo = ApplicationInfo().apply {
+            this.packageName = packageName
+            nonLocalizedLabel = label
+        }
+        val packageInfo = PackageInfo().apply {
+            this.packageName = packageName
+            applicationInfo = appInfo
+        }
+        val packageManager = context.packageManager
+        shadowOf(packageManager).installPackage(packageInfo)
+
+        val activityInfo = ActivityInfo().apply {
+            this.packageName = packageName
+            name = "$packageName.MainActivity"
+            applicationInfo = appInfo
+            exported = true
+        }
+        val resolveInfo = android.content.pm.ResolveInfo().apply {
+            this.activityInfo = activityInfo
+        }
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        shadowOf(packageManager).addResolveInfoForIntent(launcherIntent, resolveInfo)
+    }
 
     @Test
     fun `read string from context matches app name`() {
@@ -154,6 +184,18 @@ class ExampleRobolectricTest {
     @Test
     fun `app directory resolves package aliases accurately`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        // Robolectric starts with no third-party apps installed. Model installed apps and
+        // launcher activities explicitly rather than weakening production package checks.
+        listOf(
+            "com.google.android.youtube" to "YouTube",
+            "com.android.chrome" to "Chrome",
+            "com.android.settings" to "Settings",
+            "com.whatsapp" to "WhatsApp",
+            "com.google.android.apps.maps" to "Maps",
+            "com.android.camera" to "Camera",
+            "com.google.android.GoogleCamera" to "Google Camera"
+        ).forEach { (packageName, label) -> installLauncherPackage(context, packageName, label) }
+
         val appDirectory = AppDirectory(context)
 
         val yt = appDirectory.resolvePackage("youtube")
