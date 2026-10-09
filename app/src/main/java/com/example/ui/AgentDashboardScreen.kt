@@ -23,9 +23,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Bundle
 import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.widget.Toast
+import androidx.core.content.ContextCompat
 import com.example.overlay.FloatingAgentDotService
 import com.example.agent.AgentAction
 import com.example.agent.OrchestratorState
@@ -33,6 +41,7 @@ import com.example.agent.TaskOrchestrator
 import com.example.data.local.TaskStepEntity
 import com.example.model.LiteRtEngine
 import com.example.ui.theme.*
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +59,74 @@ fun AgentDashboardScreen(
     var resourceStats by remember { mutableStateOf(liteRtEngine.getResourceStats()) }
     val context = LocalContext.current
     var isDotEnabled by remember { mutableStateOf(FloatingAgentDotService.isRunning) }
+    var isListeningVoice by remember { mutableStateOf(false) }
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                speechRecognizer?.destroy()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun startListening() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(context, "Microphone permission required for voice commands", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            Toast.makeText(context, "Speech recognition not available on device", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            speechRecognizer?.destroy()
+            val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+            speechRecognizer = recognizer
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak goal for OmniAgent...")
+            }
+
+            recognizer.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    isListeningVoice = true
+                    Toast.makeText(context, "Listening... Speak your goal now", Toast.LENGTH_SHORT).show()
+                }
+                override fun onResults(results: Bundle?) {
+                    isListeningVoice = false
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (!matches.isNullOrEmpty()) {
+                        goalInput = matches[0]
+                        Toast.makeText(context, "Heard: \"${matches[0]}\"", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                override fun onError(error: Int) {
+                    isListeningVoice = false
+                    val msg = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized"
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timed out"
+                        else -> "Speech recognition error: $error"
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() { isListeningVoice = false }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+
+            recognizer.startListening(intent)
+        } catch (e: Exception) {
+            isListeningVoice = false
+            Toast.makeText(context, "Failed to start microphone: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -319,7 +396,26 @@ fun AgentDashboardScreen(
                         OutlinedTextField(
                             value = goalInput,
                             onValueChange = { goalInput = it },
-                            placeholder = { Text("e.g. Open YouTube and search for lo-fi chill music") },
+                            placeholder = { Text("e.g. Open YouTube, search for educational video, and return home") },
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        if (isListeningVoice) {
+                                            try { speechRecognizer?.stopListening() } catch (_: Exception) {}
+                                            isListeningVoice = false
+                                        } else {
+                                            startListening()
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("voice_input_button")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isListeningVoice) Icons.Default.MicOff else Icons.Default.Mic,
+                                        contentDescription = "Voice Input",
+                                        tint = if (isListeningVoice) CrimsonDanger else CyanPrimary
+                                    )
+                                }
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("goal_input_field"),
@@ -341,8 +437,8 @@ fun AgentDashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             SuggestionChip(
-                                onClick = { goalInput = "Open YouTube and search for lo-fi beats" },
-                                label = { Text("YouTube Lo-Fi", fontSize = 12.sp) },
+                                onClick = { goalInput = "Open YouTube, search for lo-fi beats, open it, and return to home screen" },
+                                label = { Text("YouTube & Return", fontSize = 12.sp) },
                                 modifier = Modifier.testTag("chip_youtube")
                             )
                             SuggestionChip(
@@ -351,35 +447,57 @@ fun AgentDashboardScreen(
                                 modifier = Modifier.testTag("chip_settings")
                             )
                             SuggestionChip(
-                                onClick = { goalInput = "Open Maps and search for cafes" },
-                                label = { Text("Maps Cafes", fontSize = 12.sp) },
+                                onClick = { goalInput = "Open Chrome and search for Android News" },
+                                label = { Text("Chrome Search", fontSize = 12.sp) },
                                 modifier = Modifier.testTag("chip_maps")
                             )
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        Button(
-                            onClick = {
-                                if (goalInput.isNotBlank()) {
-                                    orchestrator.startTask(goalInput)
-                                }
-                            },
-                            enabled = goalInput.isNotBlank() && orchestratorState !is OrchestratorState.Executing && orchestratorState !is OrchestratorState.Planning,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .testTag("execute_agent_button"),
-                            colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Run Phone Agent (Gemma 4 E2B)",
-                                color = Color.Black,
-                                fontWeight = FontWeight.Bold
-                            )
+                        val isRunning = orchestratorState is OrchestratorState.Executing || orchestratorState is OrchestratorState.Planning
+
+                        if (isRunning) {
+                            Button(
+                                onClick = { orchestrator.cancelCurrentTask() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("stop_agent_button"),
+                                colors = ButtonDefaults.buttonColors(containerColor = CrimsonDanger),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Stop Agent Execution",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    if (goalInput.isNotBlank()) {
+                                        orchestrator.startTask(goalInput)
+                                    }
+                                },
+                                enabled = goalInput.isNotBlank(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("execute_agent_button"),
+                                colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Run Phone Agent (Gemma 4 E2B)",
+                                    color = Color.Black,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }

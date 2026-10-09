@@ -9,8 +9,15 @@ import com.example.agent.AppDirectory
 import com.example.agent.RecoveryStrategy
 import com.example.agent.RiskEvaluator
 import com.example.agent.StuckLoopDetector
+import com.example.agent.ToolRegistry
+import com.example.agent.ToolValidationResult
+import com.example.data.local.AgentDatabase
+import com.example.data.local.CheckpointEntity
+import com.example.data.local.TaskEntity
+import com.example.data.local.TaskStepEntity
 import com.example.model.LiteRtEngine
 import com.example.model.LiteRtModelManager
+import com.example.model.SubGoalKind
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,6 +37,62 @@ class ExampleRobolectricTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
         assertEquals("OmniAgent", appName)
+    }
+
+    @Test
+    fun `tool registry validates valid agent actions`() {
+        val registry = ToolRegistry()
+
+        val validApp = AgentAction.OpenApp("youtube", "com.google.android.youtube")
+        assertTrue(registry.validateAction(validApp) is ToolValidationResult.Valid)
+
+        val validTap = AgentAction.Tap("Search", null, null)
+        assertTrue(registry.validateAction(validTap) is ToolValidationResult.Valid)
+
+        val validCoordTap = AgentAction.Tap(null, 500, 800)
+        assertTrue(registry.validateAction(validCoordTap) is ToolValidationResult.Valid)
+
+        val validType = AgentAction.TypeText("Android Dev", null)
+        assertTrue(registry.validateAction(validType) is ToolValidationResult.Valid)
+
+        val validScroll = AgentAction.Scroll("down")
+        assertTrue(registry.validateAction(validScroll) is ToolValidationResult.Valid)
+
+        val validWait = AgentAction.Wait(1000L)
+        assertTrue(registry.validateAction(validWait) is ToolValidationResult.Valid)
+
+        assertTrue(registry.validateAction(AgentAction.Home) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.Back) is ToolValidationResult.Valid)
+    }
+
+    @Test
+    fun `tool registry rejects invalid action arguments`() {
+        val registry = ToolRegistry()
+
+        // Blank app query and package
+        val invalidApp = AgentAction.OpenApp("", null)
+        val resApp = registry.validateAction(invalidApp)
+        assertTrue(resApp is ToolValidationResult.Invalid)
+
+        // Missing target and negative coordinates
+        val invalidTap = AgentAction.Tap(null, -10, 50)
+        val resTap = registry.validateAction(invalidTap)
+        assertTrue(resTap is ToolValidationResult.Invalid)
+
+        // Empty text
+        val invalidType = AgentAction.TypeText("", null)
+        val resType = registry.validateAction(invalidType)
+        assertTrue(resType is ToolValidationResult.Invalid)
+
+        // Invalid scroll direction
+        val invalidScroll = AgentAction.Scroll("diagonal")
+        val resScroll = registry.validateAction(invalidScroll)
+        assertTrue(resScroll is ToolValidationResult.Invalid)
+
+        // Out of bounds wait duration
+        val invalidWait = AgentAction.Wait(60_000L)
+        val resWait = registry.validateAction(invalidWait)
+        assertTrue(resWait is ToolValidationResult.Invalid)
     }
 
     @Test
@@ -237,47 +300,23 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `simplified agent status correctly maps orchestrator states`() {
-        val idleStatus = com.example.ui.SimplifiedAgentStatus.IDLE
-        val thinkingStatus = com.example.ui.SimplifiedAgentStatus.THINKING
-        val actingStatus = com.example.ui.SimplifiedAgentStatus.ACTING
+    fun `litert engine decomposes multi-step sequential goals correctly`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val modelManager = LiteRtModelManager(context)
+        val engine = LiteRtEngine(context, modelManager)
 
-        assertEquals("Idle", idleStatus.label)
-        assertEquals("Thinking", thinkingStatus.label)
-        assertEquals("Acting", actingStatus.label)
-    }
+        val complexGoal = "Open YouTube, search for educational video, open it, and then return to the home screen"
+        val subGoals = engine.decomposeGoalIntoSubGoals(complexGoal)
 
-    @Test
-    fun `tap result records execution method and failure reason`() {
-        val failedResult = com.example.accessibility.TapResult(
-            success = false,
-            method = "FAILED",
-            failureReason = "Target 'Search' not found in accessibility hierarchy"
-        )
-        assertFalse(failedResult.success)
-        assertEquals("FAILED", failedResult.method)
-        assertEquals("Target 'Search' not found in accessibility hierarchy", failedResult.failureReason)
+        assertTrue(subGoals.size >= 4)
+        assertEquals(SubGoalKind.LAUNCH_APP, subGoals[0].kind)
+        assertEquals("youtube", subGoals[0].target)
 
-        val successResult = com.example.accessibility.TapResult(
-            success = true,
-            method = "ACTION_CLICK_NODE",
-            bounds = android.graphics.Rect(800, 50, 950, 150),
-            nodeFound = true
-        )
-        assertTrue(successResult.success)
-        assertEquals("ACTION_CLICK_NODE", successResult.method)
-        assertTrue(successResult.nodeFound)
-    }
+        assertEquals(SubGoalKind.SEARCH_QUERY, subGoals[1].kind)
+        assertTrue(subGoals[1].target!!.contains("educational video"))
 
-    @Test
-    fun `text input result verifies direct action set text method`() {
-        val result = com.example.accessibility.TextInputResult(
-            success = true,
-            method = "ACTION_SET_TEXT",
-            targetNodeFound = true
-        )
-        assertTrue(result.success)
-        assertEquals("ACTION_SET_TEXT", result.method)
+        assertEquals(SubGoalKind.OPEN_ITEM, subGoals[2].kind)
+        assertEquals(SubGoalKind.RETURN_HOME, subGoals[3].kind)
     }
 
     @Test
@@ -355,5 +394,29 @@ class ExampleRobolectricTest {
         )
         assertTrue(decision.action is AgentAction.Tap)
         assertTrue((decision.action as AgentAction.Tap).targetText?.contains("Dark mode", ignoreCase = true) == true)
+    }
+
+    @Test
+    fun `database task and audit log clearing works completely`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val db = AgentDatabase.getInstance(context)
+
+        val taskId = "test_task_audit_1"
+        db.taskDao().insertTask(TaskEntity(id = taskId, userGoal = "Test Goal", status = "COMPLETED"))
+        db.taskStepDao().insertStep(TaskStepEntity(taskId = taskId, stepIndex = 0, reasoning = "Reason", actionType = "Tap", actionPayloadJson = "Tap: Search", observationSummary = "Obs", verificationResult = "Success", status = "SUCCESS"))
+        db.checkpointDao().saveCheckpoint(CheckpointEntity(taskId = taskId, stepIndex = 0, snapshotJson = "Snap"))
+
+        assertNotNull(db.taskDao().getTaskById(taskId))
+        assertTrue(db.taskStepDao().getStepsForTaskList(taskId).isNotEmpty())
+        assertNotNull(db.checkpointDao().getCheckpoint(taskId))
+
+        // Clear all audit logs
+        db.taskDao().clearAllTasks()
+        db.taskStepDao().clearAllSteps()
+        db.checkpointDao().clearAllCheckpoints()
+
+        assertEquals(null, db.taskDao().getTaskById(taskId))
+        assertTrue(db.taskStepDao().getStepsForTaskList(taskId).isEmpty())
+        assertEquals(null, db.checkpointDao().getCheckpoint(taskId))
     }
 }

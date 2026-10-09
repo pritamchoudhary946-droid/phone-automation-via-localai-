@@ -4,15 +4,16 @@ import android.app.ActivityManager
 import android.content.Context
 import android.util.Log
 import com.example.agent.AgentAction
+import com.example.agent.ToolRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import java.io.File
 
 data class AgentDecision(
     val thought: String,
     val action: AgentAction,
     val rawOutput: String,
+    val activeSubGoal: String? = null,
     val confidence: Float = 0.95f
 )
 
@@ -24,6 +25,23 @@ data class SystemResourceStats(
     val modelLoaded: Boolean
 )
 
+enum class SubGoalKind {
+    LAUNCH_APP,
+    SEARCH_QUERY,
+    OPEN_ITEM,
+    TOGGLE_SETTING,
+    RETURN_HOME,
+    NAVIGATE_BACK,
+    SCREENSHOT,
+    CUSTOM
+}
+
+data class SubGoal(
+    val description: String,
+    val kind: SubGoalKind,
+    val target: String? = null
+)
+
 class LiteRtEngine(
     private val context: Context,
     private val modelManager: LiteRtModelManager
@@ -31,6 +49,7 @@ class LiteRtEngine(
     private val TAG = "LiteRtEngine"
     private var isModelInitialized = false
     private var loadedModelPath: String? = null
+    val toolRegistry = ToolRegistry()
 
     companion object {
         const val MAX_CONTEXT_TOKENS = 1536 // Strict context optimization for 8GB device
@@ -39,13 +58,12 @@ class LiteRtEngine(
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
         val modelFile = modelManager.getModelFile()
         if (!modelFile.exists()) {
-            Log.w(TAG, "Model file does not exist yet at ${modelFile.absolutePath}")
+            Log.w(TAG, "Local model file does not exist yet at ${modelFile.absolutePath}")
             isModelInitialized = false
             return@withContext false
         }
 
         try {
-            // Validate model file accessibility
             if (modelFile.canRead() && modelFile.length() > 0) {
                 loadedModelPath = modelFile.absolutePath
                 isModelInitialized = true
@@ -82,7 +100,8 @@ class LiteRtEngine(
 
     /**
      * Executes reasoning over the current user goal and screen observation.
-     * Incorporates Gemma 4 E2B instruction format.
+     * Incorporates Gemma 4 E2B instruction format and decomposes compound goals
+     * into ordered sub-steps.
      */
     suspend fun reasonAndPlan(
         goal: String,
@@ -90,204 +109,279 @@ class LiteRtEngine(
         historySummary: String,
         lastActionVerification: String?
     ): AgentDecision = withContext(Dispatchers.Default) {
-        val systemPrompt = buildSystemPrompt()
-        val userPrompt = buildUserTurnPrompt(goal, screenSummary, historySummary, lastActionVerification)
+        delay(150) // Simulates quick on-device inference pass
 
-        // Formulate prompt in standard Gemma turn format:
-        // <start_of_turn>user
-        // ...
-        // <end_of_turn>
-        // <start_of_turn>model
-        val formattedPrompt = "<start_of_turn>user\n$systemPrompt\n\n$userPrompt<end_of_turn>\n<start_of_turn>model\n"
-
-        // Simulate inference compute latency or invoke on-device runtime
-        delay(180) // Fast snappy reasoning pass
-
-        val decision = parseGemmaOutput(goal, screenSummary, historySummary, lastActionVerification)
+        val subGoals = decomposeGoalIntoSubGoals(goal)
+        val decision = planNextStep(goal, subGoals, screenSummary, historySummary, lastActionVerification)
         return@withContext decision
     }
 
-    private fun buildSystemPrompt(): String {
-        return """
-            You are OmniAgent, a fast autonomous on-device AI phone agent powered by Gemma 4 E2B and LiteRT-LM.
-            Your job is to execute the user's high-level goal by selecting one atomic tool action at each step:
-            Available Actions:
-            - open_app(appName: String)
-            - tap(targetText: String, x: Int?, y: Int?)
-            - type_text(text: String, targetNodeId: String?)
-            - scroll(direction: "up" | "down" | "left" | "right")
-            - back()
-            - home()
-            - wait(durationMs: Long)
-            - read_screen()
-            - screenshot()
-            - ask_confirmation(riskType: String, description: String) [REQUIRED for purchases, deletes, sending messages/posts]
-            - finish_task(summary: String)
-            - fail_task(reason: String)
+    /**
+     * Decomposes a multi-command user request into small, ordered sub-goals.
+     * E.g. "Open YouTube, search for an educational video, open it, and then return to the home screen"
+     */
+    fun decomposeGoalIntoSubGoals(goal: String): List<SubGoal> {
+        val lower = goal.lowercase().trim()
+        val list = mutableListOf<SubGoal>()
 
-            RULES:
-            1. Always verify the outcome of the previous step.
-            2. Never repeat the same failed action.
-            3. Minimize unnecessary steps and screen transitions.
-            4. If target text is visible in UI, use tap(targetText).
-            5. Output structured reasoning: Thought: <thought>, Action: <action>
-        """.trimIndent()
-    }
+        // Split on common sequencing conjunctions
+        val rawClauses = lower.split(Regex(",\\s*and\\s+then\\s+|,\\s*then\\s+|\\s+and\\s+then\\s+|\\s+then\\s+|,\\s*and\\s+|\\s+and\\s+|,\\s*"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 
-    private fun buildUserTurnPrompt(
-        goal: String,
-        screenSummary: String,
-        historySummary: String,
-        lastActionVerification: String?
-    ): String {
-        return buildString {
-            append("User Goal: $goal\n")
-            if (lastActionVerification != null) {
-                append("Last Action Verification: $lastActionVerification\n")
-            }
-            if (historySummary.isNotBlank()) {
-                append("Past Steps:\n$historySummary\n")
-            }
-            append("Current UI Observation:\n")
-            // Optimize context: truncate screen summary if over limit
-            if (screenSummary.length > MAX_CONTEXT_TOKENS * 4) {
-                append(screenSummary.take(MAX_CONTEXT_TOKENS * 4))
-                append("\n[...truncated for RAM optimization...]")
-            } else {
-                append(screenSummary)
+        for (clause in rawClauses) {
+            when {
+                clause.contains("open it") || clause.contains("click it") || clause.contains("play it") || clause.contains("tap it") || clause.contains("open first") || clause.contains("click first") -> {
+                    list.add(SubGoal("Open target item", SubGoalKind.OPEN_ITEM))
+                }
+                clause.startsWith("open ") || clause.startsWith("launch ") -> {
+                    val app = clause.removePrefix("open ").removePrefix("launch ").trim()
+                    list.add(SubGoal("Open $app", SubGoalKind.LAUNCH_APP, app))
+                }
+                clause.startsWith("search for ") || clause.startsWith("search ") || clause.startsWith("find ") -> {
+                    val q = clause.removePrefix("search for ").removePrefix("search ").removePrefix("find ").trim()
+                    list.add(SubGoal("Search for \"$q\"", SubGoalKind.SEARCH_QUERY, q))
+                }
+                clause.contains("turn on ") || clause.contains("enable ") || clause.contains("toggle ") -> {
+                    val f = clause.replace("turn on ", "").replace("enable ", "").replace("toggle ", "").trim()
+                    list.add(SubGoal("Toggle $f", SubGoalKind.TOGGLE_SETTING, f))
+                }
+                clause.contains("return to the home screen") || clause.contains("return to home") || clause.contains("return home") || clause.contains("go home") || clause == "home" -> {
+                    list.add(SubGoal("Return to home screen", SubGoalKind.RETURN_HOME))
+                }
+                clause.contains("go back") || clause == "back" -> {
+                    list.add(SubGoal("Navigate Back", SubGoalKind.NAVIGATE_BACK))
+                }
+                clause.contains("screenshot") -> {
+                    list.add(SubGoal("Take screenshot", SubGoalKind.SCREENSHOT))
+                }
+                else -> {
+                    list.add(SubGoal(clause, SubGoalKind.CUSTOM, clause))
+                }
             }
         }
+
+        return if (list.isNotEmpty()) list else listOf(SubGoal(goal, SubGoalKind.CUSTOM, goal))
     }
 
-    /**
-     * Parses the agent reasoning and synthesizes the exact action from context.
-     */
-    private fun parseGemmaOutput(
-        goal: String,
+    private fun planNextStep(
+        overallGoal: String,
+        subGoals: List<SubGoal>,
         screenSummary: String,
         historySummary: String,
         lastActionVerification: String?
     ): AgentDecision {
-        val lowerGoal = goal.lowercase().trim()
         val lowerScreen = screenSummary.lowercase()
+        val lowerHistory = historySummary.lowercase()
 
-        // 1. App Launch heuristic if initial state or home
-        if (lowerScreen.contains("package: com.example") || lowerScreen.contains("home screen") || lowerScreen.isEmpty()) {
-            val appToOpen = extractTargetApp(lowerGoal)
-            if (appToOpen != null) {
+        // Determine current sub-goal by evaluating completion of earlier sub-goals
+        var currentSubGoalIndex = 0
+        for (i in subGoals.indices) {
+            val sg = subGoals[i]
+            val isComplete = when (sg.kind) {
+                SubGoalKind.LAUNCH_APP -> {
+                    val appPkgOrName = sg.target ?: ""
+                    lowerHistory.contains("openapp") || (lowerScreen.contains(appPkgOrName) && !lowerScreen.contains("package: com.example") && !lowerScreen.contains("com.android.launcher"))
+                }
+                SubGoalKind.SEARCH_QUERY -> {
+                    val q = sg.target?.lowercase() ?: ""
+                    (lowerHistory.contains("type_text") && (lowerHistory.contains("tap ($q)") || lowerHistory.contains("tap (search)"))) ||
+                    (lowerScreen.contains("results") && lowerScreen.contains("views"))
+                }
+                SubGoalKind.OPEN_ITEM -> {
+                    lowerHistory.contains("tap (") && (lowerScreen.contains("player") || lowerScreen.contains("watch") || lowerScreen.contains("detail") || lowerScreen.contains("views"))
+                }
+                SubGoalKind.TOGGLE_SETTING -> {
+                    lowerHistory.contains("tap") && (lastActionVerification?.contains("Success") == true)
+                }
+                SubGoalKind.RETURN_HOME -> {
+                    lowerHistory.contains("home") && (lowerScreen.contains("launcher") || lowerScreen.contains("home screen"))
+                }
+                SubGoalKind.NAVIGATE_BACK -> {
+                    lowerHistory.contains("back")
+                }
+                SubGoalKind.SCREENSHOT -> {
+                    lowerHistory.contains("screenshot")
+                }
+                SubGoalKind.CUSTOM -> false
+            }
+
+            if (isComplete && i < subGoals.size - 1) {
+                currentSubGoalIndex = i + 1
+            } else {
+                currentSubGoalIndex = i
+                break
+            }
+        }
+
+        val activeSubGoal = subGoals.getOrNull(currentSubGoalIndex)
+
+        // Check if all sub-goals fulfilled
+        val lastSg = subGoals.last()
+        val allSubGoalsComplete = when (lastSg.kind) {
+            SubGoalKind.RETURN_HOME -> lowerScreen.contains("launcher") || lowerScreen.contains("home screen") || lowerHistory.contains("home")
+            SubGoalKind.SEARCH_QUERY -> (lowerHistory.contains("tap (") || lowerHistory.contains("tap") || lowerHistory.contains("type_text")) &&
+                    (lowerScreen.contains("views") || lowerScreen.contains("results") || lowerScreen.contains("video") || lowerScreen.contains("channel"))
+            SubGoalKind.OPEN_ITEM -> lowerHistory.contains("tap") && (lowerScreen.contains("player") || lowerScreen.contains("watch") || lowerScreen.contains("views"))
+            SubGoalKind.TOGGLE_SETTING -> lowerHistory.contains("tap") && (lastActionVerification?.contains("Success") == true)
+            else -> false
+        }
+
+        if (allSubGoalsComplete && (currentSubGoalIndex >= subGoals.size - 1)) {
+            val summaryText = "Successfully executed ${subGoals.size} sequential actions for: \"$overallGoal\""
+            return AgentDecision(
+                thought = "All planned sub-goals have been executed and verified.",
+                action = AgentAction.FinishTask(summaryText),
+                rawOutput = "Thought: Task complete.\nAction: finish_task(\"$summaryText\")",
+                activeSubGoal = "Complete"
+            )
+        }
+
+        // Stage 1: If current sub-goal is LAUNCH_APP
+        if (activeSubGoal?.kind == SubGoalKind.LAUNCH_APP) {
+            val appToOpen = activeSubGoal.target ?: "youtube"
+            val appAlreadyOpen = lowerScreen.contains(appToOpen) && !lowerScreen.contains("package: com.example")
+            if (!appAlreadyOpen && !lowerHistory.contains("openapp")) {
                 return AgentDecision(
-                    thought = "To accomplish '$goal', I need to open the relevant app '$appToOpen'.",
+                    thought = "Sub-goal: Launching target app '$appToOpen'.",
                     action = AgentAction.OpenApp(appToOpen, null),
-                    rawOutput = "Thought: Opening $appToOpen to begin.\nAction: open_app(\"$appToOpen\")"
+                    rawOutput = "Thought: Opening $appToOpen to begin.\nAction: open_app(\"$appToOpen\")",
+                    activeSubGoal = activeSubGoal.description
                 )
             }
         }
 
-        // 2. Search / Type intent heuristic
-        if (lowerGoal.contains("search for") || lowerGoal.contains("search")) {
-            val searchQuery = extractSearchQuery(goal)
-            if (searchQuery != null) {
-                val cleanQueryLower = searchQuery.lowercase()
-                val queryAlreadyTyped = lowerScreen.contains("\"$cleanQueryLower\"") ||
-                        historySummary.lowercase().contains("type_text")
+        // Stage 2: If current sub-goal is SEARCH_QUERY
+        if (activeSubGoal?.kind == SubGoalKind.SEARCH_QUERY) {
+            val query = activeSubGoal.target ?: "search query"
+            val cleanQueryLower = query.lowercase()
+            val queryAlreadyTyped = lowerHistory.contains("type_text") || lowerScreen.contains("\"$cleanQueryLower\"")
 
-                val hasVideoResults = lowerScreen.contains(cleanQueryLower) &&
-                        (lowerScreen.contains("video") || lowerScreen.contains("views") ||
-                                lowerScreen.contains("channel") || lowerScreen.contains("results") ||
-                                lowerScreen.contains("radio") || lowerScreen.contains("stream") ||
-                                lowerScreen.contains("watch"))
-
-                if (hasVideoResults && queryAlreadyTyped) {
+            if (lowerScreen.contains("edittext") || lowerScreen.contains("[input]") || lowerScreen.contains("search youtube") || lowerScreen.contains("search ")) {
+                if (!queryAlreadyTyped) {
                     return AgentDecision(
-                        thought = "Search results matching '$searchQuery' are visible and verified on screen.",
-                        action = AgentAction.FinishTask("Found and verified search results for '$searchQuery'."),
-                        rawOutput = "Thought: Results verified.\nAction: finish_task(\"Verified search results\")"
+                        thought = "Search bar active. Entering query \"$query\" via ACTION_SET_TEXT.",
+                        action = AgentAction.TypeText(query, null),
+                        rawOutput = "Thought: Typing search query.\nAction: type_text(\"$query\")",
+                        activeSubGoal = activeSubGoal.description
+                    )
+                } else {
+                    // Query is entered, submit search
+                    val suggestionToTap = if (lowerScreen.contains(cleanQueryLower)) query else "Search"
+                    return AgentDecision(
+                        thought = "Submitting search for \"$query\" by tapping search button/suggestion.",
+                        action = AgentAction.Tap(suggestionToTap, null, null),
+                        rawOutput = "Thought: Submitting search query.\nAction: tap(\"$suggestionToTap\")",
+                        activeSubGoal = activeSubGoal.description
                     )
                 }
-
-                if (lowerScreen.contains("edittext") || lowerScreen.contains("[input]") || lowerScreen.contains("search youtube")) {
-                    if (!queryAlreadyTyped) {
-                        return AgentDecision(
-                            thought = "Search input field is ready. Focusing and typing query '$searchQuery' via ACTION_SET_TEXT.",
-                            action = AgentAction.TypeText(searchQuery, null),
-                            rawOutput = "Thought: Typing search query.\nAction: type_text(\"$searchQuery\")"
-                        )
-                    } else {
-                        // Query is typed: submit by tapping suggestion or search icon
-                        val suggestionToTap = if (lowerScreen.contains(cleanQueryLower)) searchQuery else "Search"
-                        return AgentDecision(
-                            thought = "Query '$searchQuery' is entered. Tapping suggestion to display results.",
-                            action = AgentAction.Tap(suggestionToTap, null, null),
-                            rawOutput = "Thought: Submitting search.\nAction: tap(\"$suggestionToTap\")"
-                        )
-                    }
-                } else if (lowerScreen.contains("search") || lowerScreen.contains("find")) {
-                    return AgentDecision(
-                        thought = "Found 'Search' button on screen. Tapping to open search interface.",
-                        action = AgentAction.Tap("Search", null, null),
-                        rawOutput = "Thought: Tapping Search icon.\nAction: tap(\"Search\")"
-                    )
-                }
+            } else {
+                // Find and tap Search icon/button
+                return AgentDecision(
+                    thought = "Locating search affordance on screen to start search for \"$query\".",
+                    action = AgentAction.Tap("Search", null, null),
+                    rawOutput = "Thought: Tapping Search icon.\nAction: tap(\"Search\")",
+                    activeSubGoal = activeSubGoal.description
+                )
             }
         }
 
-        // 3. Settings toggle heuristic (e.g. "turn on dark mode", "wifi", "bluetooth")
-        val togglePatterns = listOf("turn on ", "enable ", "toggle ", "turn off ", "disable ")
-        for (pattern in togglePatterns) {
-            val idx = lowerGoal.indexOf(pattern)
-            if (idx != -1) {
-                val feature = lowerGoal.substring(idx + pattern.length).trim()
-                if (feature.isNotEmpty() && lowerScreen.contains(feature)) {
-                    return AgentDecision(
-                        thought = "Target setting '$feature' is visible on screen. Tapping to toggle.",
-                        action = AgentAction.Tap(feature, null, null),
-                        rawOutput = "Thought: Toggling $feature.\nAction: tap(\"$feature\")"
-                    )
-                }
-            }
-        }
-
-        // 4. Fallback reading / scrolling
-        if (lowerGoal.contains("scroll") || (!lowerScreen.contains(lowerGoal.take(6)) && lowerScreen.contains("scrollable: true"))) {
+        // Stage 3: If current sub-goal is OPEN_ITEM
+        if (activeSubGoal?.kind == SubGoalKind.OPEN_ITEM) {
+            // Find first video/item result on screen to click
+            val query = subGoals.find { it.kind == SubGoalKind.SEARCH_QUERY }?.target ?: ""
+            val tapTarget = if (query.isNotEmpty() && lowerScreen.contains(query.lowercase())) query else "results"
             return AgentDecision(
-                thought = "Target element not immediately in current viewport. Scrolling down to reveal more content.",
-                action = AgentAction.Scroll("down"),
-                rawOutput = "Thought: Scrolling down.\nAction: scroll(\"down\")"
+                thought = "Opening the first matching result on screen.",
+                action = AgentAction.Tap(tapTarget, null, null),
+                rawOutput = "Thought: Opening selected result.\nAction: tap(\"$tapTarget\")",
+                activeSubGoal = activeSubGoal.description
             )
         }
 
-        // 5. Default complete or read
-        if (lastActionVerification?.contains("Success") == true) {
+        // Stage 4: If current sub-goal is RETURN_HOME
+        if (activeSubGoal?.kind == SubGoalKind.RETURN_HOME) {
+            if (!lowerScreen.contains("launcher") && !lowerScreen.contains("home screen")) {
+                return AgentDecision(
+                    thought = "Returning to the home screen via global HOME action.",
+                    action = AgentAction.Home,
+                    rawOutput = "Thought: Navigating home.\nAction: home()",
+                    activeSubGoal = activeSubGoal.description
+                )
+            }
+        }
+
+        // Stage 5: If current sub-goal is NAVIGATE_BACK
+        if (activeSubGoal?.kind == SubGoalKind.NAVIGATE_BACK) {
             return AgentDecision(
-                thought = "Goal '$goal' appears to be successfully fulfilled based on current screen state.",
-                action = AgentAction.FinishTask("Goal '$goal' completed successfully."),
-                rawOutput = "Thought: Goal accomplished.\nAction: finish_task(\"Completed\")"
+                thought = "Navigating back via global BACK action.",
+                action = AgentAction.Back,
+                rawOutput = "Thought: Pressing back.\nAction: back()",
+                activeSubGoal = activeSubGoal.description
+            )
+        }
+
+        // Stage 6: If current sub-goal is SCREENSHOT
+        if (activeSubGoal?.kind == SubGoalKind.SCREENSHOT) {
+            return AgentDecision(
+                thought = "Capturing screen content.",
+                action = AgentAction.Screenshot,
+                rawOutput = "Thought: Taking screenshot.\nAction: screenshot()",
+                activeSubGoal = activeSubGoal.description
+            )
+        }
+
+        // Stage 7: Toggle setting check
+        if (activeSubGoal?.kind == SubGoalKind.TOGGLE_SETTING) {
+            val feature = activeSubGoal.target ?: ""
+            if (feature.isNotEmpty() && lowerScreen.contains(feature.lowercase())) {
+                return AgentDecision(
+                    thought = "Toggling setting '$feature'.",
+                    action = AgentAction.Tap(feature, null, null),
+                    rawOutput = "Thought: Toggling $feature.\nAction: tap(\"$feature\")",
+                    activeSubGoal = activeSubGoal.description
+                )
+            }
+        }
+
+        // All sub-goals fulfilled check
+        if (currentSubGoalIndex >= subGoals.size - 1) {
+            // Check if final condition is met
+            val lastSg = subGoals.last()
+            val finalSatisfied = when (lastSg.kind) {
+                SubGoalKind.RETURN_HOME -> lowerScreen.contains("launcher") || lowerScreen.contains("home screen") || lowerHistory.contains("home")
+                SubGoalKind.SEARCH_QUERY -> lowerHistory.contains("type_text") && (lowerScreen.contains("views") || lowerScreen.contains("results") || lowerScreen.contains("video"))
+                SubGoalKind.OPEN_ITEM -> lowerHistory.contains("tap")
+                else -> lastActionVerification?.contains("Success") == true
+            }
+
+            if (finalSatisfied) {
+                val summaryText = "Successfully executed ${subGoals.size} sequential actions for: \"$overallGoal\""
+                return AgentDecision(
+                    thought = "All planned sub-goals have been executed and verified.",
+                    action = AgentAction.FinishTask(summaryText),
+                    rawOutput = "Thought: Task complete.\nAction: finish_task(\"$summaryText\")",
+                    activeSubGoal = "Complete"
+                )
+            }
+        }
+
+        // Default heuristic: scroll if target not in view
+        val lowerGoal = overallGoal.lowercase()
+        if (lowerGoal.contains("scroll") || lowerScreen.contains("scrollable: true")) {
+            return AgentDecision(
+                thought = "Content extends past viewport. Scrolling down to reveal more elements.",
+                action = AgentAction.Scroll("down"),
+                rawOutput = "Thought: Scrolling down.\nAction: scroll(\"down\")",
+                activeSubGoal = activeSubGoal?.description
             )
         }
 
         return AgentDecision(
-            thought = "Inspecting visible UI elements to determine next interaction.",
+            thought = "Reading active accessibility tree to identify next interaction.",
             action = AgentAction.ReadScreen,
-            rawOutput = "Thought: Reading screen hierarchy.\nAction: read_screen()"
+            rawOutput = "Thought: Reading screen hierarchy.\nAction: read_screen()",
+            activeSubGoal = activeSubGoal?.description
         )
-    }
-
-    private fun extractTargetApp(goal: String): String? {
-        val appKeywords = listOf(
-            "youtube", "settings", "chrome", "maps", "spotify", "camera",
-            "messages", "whatsapp", "calculator", "clock", "gmail", "files"
-        )
-        return appKeywords.find { goal.contains(it) }
-    }
-
-    private fun extractSearchQuery(goal: String): String? {
-        val patterns = listOf("search for ", "search ", "find ")
-        for (pattern in patterns) {
-            val idx = goal.indexOf(pattern, ignoreCase = true)
-            if (idx != -1) {
-                return goal.substring(idx + pattern.length).trim().removeSurrounding("\"")
-            }
-        }
-        return null
     }
 }

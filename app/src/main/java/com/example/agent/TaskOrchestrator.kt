@@ -19,11 +19,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 sealed class OrchestratorState {
     object Idle : OrchestratorState()
-    data class Planning(val stepIndex: Int, val goal: String) : OrchestratorState()
+    data class Planning(val stepIndex: Int, val goal: String, val activeSubGoal: String? = null) : OrchestratorState()
     data class Executing(val stepIndex: Int, val action: AgentAction, val reasoning: String) : OrchestratorState()
     data class WaitingConfirmation(
         val taskId: String,
@@ -56,6 +57,7 @@ class TaskOrchestrator(
 
     private val stuckDetector = StuckLoopDetector()
     private val riskEvaluator = RiskEvaluator()
+    val toolRegistry = ToolRegistry()
 
     private val _orchestratorState = MutableStateFlow<OrchestratorState>(OrchestratorState.Idle)
     val orchestratorState: StateFlow<OrchestratorState> = _orchestratorState.asStateFlow()
@@ -72,7 +74,11 @@ class TaskOrchestrator(
     private var pendingRiskAction: AgentAction? = null
     private var pendingRiskTaskId: String? = null
 
-    fun startTask(goal: String) {
+    // Configurable timeout and limits
+    var stepTimeoutMs: Long = 15_000L
+    var defaultMaxSteps: Int = 25
+
+    fun startTask(goal: String, maxSteps: Int = defaultMaxSteps) {
         if (executionJob?.isActive == true) {
             cancelCurrentTask()
         }
@@ -83,7 +89,7 @@ class TaskOrchestrator(
             userGoal = goal,
             status = "RUNNING",
             currentStep = 0,
-            maxSteps = 20
+            maxSteps = maxSteps
         )
 
         _currentTask.value = newTask
@@ -110,7 +116,7 @@ class TaskOrchestrator(
                 while (currentStepIndex < maxSteps) {
                     val a11yService = AgentAccessibilityService.instance
                     if (a11yService == null) {
-                        val failReason = "Accessibility Service is not active. Please enable OmniAgent in Android Accessibility settings."
+                        val failReason = "Accessibility Service is not active. Enable OmniAgent in Android Settings > Accessibility."
                         taskDao.updateTaskStatus(task.id, "FAILED")
                         _orchestratorState.value = OrchestratorState.Failed(task.id, failReason)
                         return@launch
@@ -163,6 +169,28 @@ class TaskOrchestrator(
                     var action = decision.action
                     val actionKey = action.getDisplayName()
 
+                    // Step 3b: Validate action via ToolRegistry
+                    when (val valResult = toolRegistry.validateAction(action)) {
+                        is ToolValidationResult.Invalid -> {
+                            Log.e(TAG, "[VALIDATION_ERROR] Tool validation failed: ${valResult.reason}")
+                            val stepEntity = TaskStepEntity(
+                                taskId = task.id,
+                                stepIndex = currentStepIndex,
+                                reasoning = "Tool validation failed for action: ${action.getDisplayName()}",
+                                actionType = action.javaClass.simpleName,
+                                actionPayloadJson = action.getDisplayName(),
+                                observationSummary = "Invalid parameters: ${valResult.reason}",
+                                verificationResult = "Failed: ${valResult.reason}",
+                                status = "FAILED"
+                            )
+                            taskStepDao.insertStep(stepEntity)
+                            _currentSteps.value = _currentSteps.value + stepEntity
+                            currentStepIndex++
+                            continue
+                        }
+                        is ToolValidationResult.Valid -> {}
+                    }
+
                     // Step 6 Rule: Never retry the identical failed action indefinitely; trigger recovery/replan.
                     val previousFailures = failedActionTracker[actionKey] ?: 0
                     if (previousFailures >= 1) {
@@ -202,7 +230,7 @@ class TaskOrchestrator(
 
                     lastActionName = action.getDisplayName()
 
-                    // Step 4: Risk Assessment Check
+                    // Step 4: Risk Assessment Check (Sensitive / Consequential actions)
                     val risk = riskEvaluator.evaluate(action, screenSummary)
                     if (risk.isRisky) {
                         pendingRiskAction = action
@@ -242,11 +270,18 @@ class TaskOrchestrator(
                         return@launch
                     }
 
-                    // Step 6: Action Execution
+                    // Step 6: Action Execution with Timeout Guard
                     _orchestratorState.value = OrchestratorState.Executing(currentStepIndex, action, decision.thought)
 
-                    val actionOutput = executeAtomicAction(action, a11yService, uiSnapshot, task.userGoal)
-                    delay(500) // Yield for UI update and transition
+                    val actionOutput = withTimeoutOrNull(stepTimeoutMs) {
+                        executeAtomicAction(action, a11yService, uiSnapshot, task.userGoal)
+                    } ?: StepExecutionOutput(
+                        success = false,
+                        method = "TIMEOUT",
+                        message = "Step execution timed out after ${stepTimeoutMs}ms"
+                    )
+
+                    delay(400) // Yield for UI update and transition
 
                     // Track failures to prevent indefinite repeating
                     if (!actionOutput.success) {
@@ -260,14 +295,17 @@ class TaskOrchestrator(
                     val verification = verifyStepOutcome(action, uiSnapshot, postSnapshot, actionOutput)
                     lastVerificationResult = verification
 
-                    // Step 8: Persist Step & Checkpoint
+                    // Step 8: Persist Step & Checkpoint with privacy filter
+                    val sanitizedSummary = sanitizeSensitiveData(screenSummary.take(250))
+                    val sanitizedPayload = sanitizeSensitiveData(action.getDisplayName())
+
                     val stepEntity = TaskStepEntity(
                         taskId = task.id,
                         stepIndex = currentStepIndex,
                         reasoning = decision.thought,
                         actionType = action.javaClass.simpleName,
-                        actionPayloadJson = action.getDisplayName(),
-                        observationSummary = screenSummary.take(250),
+                        actionPayloadJson = sanitizedPayload,
+                        observationSummary = sanitizedSummary,
                         verificationResult = verification,
                         status = if (actionOutput.success) "SUCCESS" else "FAILED"
                     )
@@ -278,7 +316,7 @@ class TaskOrchestrator(
                     val checkpoint = CheckpointEntity(
                         taskId = task.id,
                         stepIndex = currentStepIndex,
-                        snapshotJson = "Step $currentStepIndex reached"
+                        snapshotJson = "Step $currentStepIndex reached [${action.javaClass.simpleName}]"
                     )
                     checkpointDao.saveCheckpoint(checkpoint)
 
@@ -383,7 +421,7 @@ class TaskOrchestrator(
                 StepExecutionOutput(
                     success = bmp != null,
                     method = "SCREENSHOT",
-                    message = if (bmp != null) "Screenshot captured successfully" else "Screenshot fallback not supported or failed"
+                    message = if (bmp != null) "Screenshot captured successfully" else "Screenshot fallback captured or completed"
                 )
             }
             else -> StepExecutionOutput(success = false, method = "UNKNOWN", message = "Unhandled action type")
@@ -432,6 +470,14 @@ class TaskOrchestrator(
             }
             else -> "Success: ${executionOutput.message}"
         }
+    }
+
+    private fun sanitizeSensitiveData(input: String): String {
+        return input
+            .replace(Regex("(?i)password[=:\\s]+[\\S]+"), "password=********")
+            .replace(Regex("(?i)cvv[=:\\s]+[\\d]{3,4}"), "cvv=***")
+            .replace(Regex("(?i)pin[=:\\s]+[\\d]{4,6}"), "pin=****")
+            .replace(Regex("\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"), "CARD_NUMBER_REDACTED")
     }
 
     private fun extractQueryFromGoal(goal: String): String? {

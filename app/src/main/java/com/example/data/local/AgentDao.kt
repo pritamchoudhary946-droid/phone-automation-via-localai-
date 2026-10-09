@@ -44,6 +44,9 @@ interface TaskStepDao {
 
     @Query("DELETE FROM task_steps WHERE taskId = :taskId")
     suspend fun deleteStepsForTask(taskId: String)
+
+    @Query("DELETE FROM task_steps")
+    suspend fun clearAllSteps()
 }
 
 @Dao
@@ -56,4 +59,7 @@ interface CheckpointDao {
 
     @Query("DELETE FROM task_checkpoints WHERE taskId = :taskId")
     suspend fun deleteCheckpoint(taskId: String)
+
+    @Query("DELETE FROM task_checkpoints")
+    suspend fun clearAllCheckpoints()
 }
