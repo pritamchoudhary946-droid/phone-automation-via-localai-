@@ -43,8 +43,8 @@ class AppDirectory(private val context: Context) {
                 for (pkg in packages) {
                     if (isPackageInstalled(pkg)) return pkg
                 }
-                // Fallback to canonical package name if package query is restricted
-                return packages.firstOrNull()
+                // Never return an unverified package name.
+                return null
             }
         }
 
@@ -81,8 +81,12 @@ class AppDirectory(private val context: Context) {
 
     fun launchApp(packageName: String): Boolean {
         return try {
+            if (!isPackageInstalled(packageName)) {
+                Log.w("AppDirectory", "Package is not installed: $packageName")
+                return false
+            }
             val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
-            if (launchIntent != null) {
+            if (launchIntent != null && launchIntent.resolveActivity(context.packageManager) != null) {
                 launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(launchIntent)
                 true
@@ -90,6 +94,7 @@ class AppDirectory(private val context: Context) {
                 false
             }
         } catch (e: Exception) {
+            Log.e("AppDirectory", "Failed to launch app $packageName: ${e.message}", e)
             false
         }
     }
@@ -101,9 +106,14 @@ class AppDirectory(private val context: Context) {
                 putExtra(android.app.SearchManager.QUERY, query)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+            if (intent.resolveActivity(context.packageManager) == null) {
+                Log.w("AppDirectory", "Search intent did not resolve for package=$packageName")
+                return false
+            }
             context.startActivity(intent)
             true
         } catch (e: Exception) {
+            Log.e("AppDirectory", "Search intent failed for package=$packageName: ${e.message}", e)
             false
         }
     }
