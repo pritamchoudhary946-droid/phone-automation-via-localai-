@@ -633,7 +633,9 @@ class AgentAccessibilityService : AccessibilityService() {
             ?: return SearchOpenResult(false, "FAILED", "Accessibility root window is null.")
 
         try {
-            if (findTargetEditableNode(root, null) != null) {
+            val alreadyEditable = findTargetEditableNode(root, null)
+            if (alreadyEditable != null) {
+                alreadyEditable.recycle()
                 Log.i(TAG, "[SEARCH_OPEN] Editable field already present; search UI is open.")
                 return SearchOpenResult(true, "EDITABLE_ALREADY_PRESENT", "Search field is already on screen")
             }
@@ -641,42 +643,64 @@ class AgentAccessibilityService : AccessibilityService() {
             val affordance = findSearchAffordance(root)
                 ?: return SearchOpenResult(false, "FAILED", "No search affordance or editable field exposed on the current screen.")
 
-            val label = affordance.label
-            // Prefer an accessibility click on the node itself / a clickable parent.
-            val clicked = affordance.node.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
-                (findFirstClickableParent(affordance.node)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false)
-
-            if (clicked) {
-                delay(500)
-                val refreshedRoot = rootInActiveWindow
-                val fieldNowPresent = refreshedRoot?.let { findTargetEditableNode(it, null) } != null
-                if (fieldNowPresent) {
-                    Log.i(TAG, "[SEARCH_OPEN_SUCCESS] ACTION_CLICK opened search; editable field now present.")
-                    return SearchOpenResult(true, "ACTION_CLICK_SEARCH", "Opened search via '$label'")
+            try {
+                val label = affordance.label
+                // Prefer an accessibility click on the node itself / a clickable parent.
+                val clickableParent = findFirstClickableParent(affordance.node)
+                val clicked = try {
+                    affordance.node.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
+                        (clickableParent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false)
+                } finally {
+                    clickableParent?.recycle()
                 }
-                Log.w(TAG, "[SEARCH_OPEN_WARNING] Clicked '$label' but no editable field appeared; trying gesture.")
-            }
 
-            val bounds = Rect()
-            affordance.node.getBoundsInScreen(bounds)
-            if (bounds.width() > 0 && bounds.height() > 0) {
-                val (ok, reason) = dispatchGestureWithResult(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-                if (ok) {
+                if (clicked) {
                     delay(500)
                     val refreshedRoot = rootInActiveWindow
-                    val fieldNowPresent = refreshedRoot?.let { findTargetEditableNode(it, null) } != null
+                    val fieldNowPresent = refreshedRoot?.let {
+                        val n = findTargetEditableNode(it, null)
+                        val present = n != null
+                        n?.recycle()
+                        it.recycle()
+                        present
+                    } == true
                     if (fieldNowPresent) {
-                        Log.i(TAG, "[SEARCH_OPEN_SUCCESS] Bounds gesture opened search; editable field now present.")
-                        return SearchOpenResult(true, "TAP_SEARCH_BOUNDS", "Opened search via '$label'")
+                        Log.i(TAG, "[SEARCH_OPEN_SUCCESS] ACTION_CLICK opened search; editable field now present.")
+                        return SearchOpenResult(true, "ACTION_CLICK_SEARCH", "Opened search via '$label'")
                     }
-                    // The search surface advanced (e.g. suggestion page) even without an
-                    // editable node yet; report success so the next fresh observation decides.
-                    return SearchOpenResult(true, "TAP_SEARCH_BOUNDS", "Activated search affordance '$label'")
+                    Log.w(TAG, "[SEARCH_OPEN_WARNING] Clicked '$label' but no editable field appeared; trying gesture.")
                 }
-                Log.w(TAG, "[SEARCH_OPEN_WARNING] Search affordance gesture failed: ${reason ?: "unknown"}")
-            }
 
-            return SearchOpenResult(false, "FAILED", "Found search affordance '$label' but could not activate it.")
+                val bounds = Rect()
+                affordance.node.getBoundsInScreen(bounds)
+                if (bounds.width() > 0 && bounds.height() > 0) {
+                    val (ok, reason) = dispatchGestureWithResult(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+                    if (ok) {
+                        delay(500)
+                        val refreshedRoot = rootInActiveWindow
+                        val fieldNowPresent = refreshedRoot?.let {
+                            val n = findTargetEditableNode(it, null)
+                            val present = n != null
+                            n?.recycle()
+                            it.recycle()
+                            present
+                        } == true
+                        if (fieldNowPresent) {
+                            Log.i(TAG, "[SEARCH_OPEN_SUCCESS] Bounds gesture opened search; editable field now present.")
+                            return SearchOpenResult(true, "TAP_SEARCH_BOUNDS", "Opened search via '$label'")
+                        }
+                        // The search surface advanced (e.g. suggestion page) even without an
+                        // editable node yet; report success so the next fresh observation decides.
+                        return SearchOpenResult(true, "TAP_SEARCH_BOUNDS", "Activated search affordance '$label'")
+                    }
+                    Log.w(TAG, "[SEARCH_OPEN_WARNING] Search affordance gesture failed: ${reason ?: "unknown"}")
+                }
+
+                return SearchOpenResult(false, "FAILED", "Found search affordance '$label' but could not activate it.")
+            } finally {
+                // findSearchAffordance hands back an obtained node; release it here.
+                affordance.node.recycle()
+            }
         } finally {
             root.recycle()
         }

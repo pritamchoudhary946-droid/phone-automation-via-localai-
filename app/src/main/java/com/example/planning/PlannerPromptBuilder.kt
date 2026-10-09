@@ -34,6 +34,19 @@ object PlannerPromptBuilder {
         - end a plan with report_status only when the goal is fully achieved.
     """.trimIndent()
 
+    /** Compact parameter guide so the model emits valid params instead of guessing. */
+    private val ACTION_CATALOG = """
+        Action parameters:
+        - launch_app:  {"appQuery":"<app name>","packageName":"<optional>"}
+        - open_search: {"query":"<optional hint>"}   (opens the app's search UI)
+        - enter_text:  {"text":"<query>","targetNodeId":"<optional>"}
+        - tap_element: {"targetText":"<visible label>"}  or  {"x":<int>,"y":<int>}
+        - scroll:      {"direction":"up|down|left|right"}
+        - navigate_back: {}   navigate_home: {}   wait: {"durationMs":<int>}
+        - read_screen: {}     screenshot: {}
+        - report_status: {"status":"success|failure","summary":"<short text>"}
+    """.trimIndent()
+
     fun buildPlanningPrompt(request: PlanningRequest): String = buildString {
         appendLine("Task: produce the ordered subgoals needed to satisfy the user command.")
         appendLine("User command: \"${request.userCommand}\"")
@@ -52,6 +65,7 @@ object PlannerPromptBuilder {
         appendLine(request.screenSummary.take(MAX_SCREEN_CHARS))
         appendLine()
         appendLine(SCHEMA_HINT)
+        appendLine(ACTION_CATALOG)
     }
 
     fun buildStepDecisionPrompt(request: StepDecisionRequest): String = buildString {
@@ -74,6 +88,23 @@ object PlannerPromptBuilder {
         appendLine(
             "Reply with ONLY this JSON: {\"thought\":\"...\",\"action\":\"<allowed action>\",\"params\":{...}}"
         )
+    }
+
+    /**
+     * Appends an explicit correction block after a malformed first response. The
+     * repair attempt must actually tell the model what was wrong and how to fix it,
+     * otherwise it just repeats the same invalid output.
+     */
+    fun buildRepairNote(previousOutput: String, reason: String): String = buildString {
+        appendLine()
+        appendLine("--- CORRECTION REQUIRED ---")
+        appendLine("Your previous answer was rejected: $reason")
+        appendLine("Fix it now. Reply with ONLY a single valid JSON object matching the schema above.")
+        appendLine("Do not include prose, markdown or code fences. Use only the allowed action names.")
+        if (previousOutput.isNotBlank()) {
+            appendLine("Rejected answer (for reference, do not copy it):")
+            appendLine(previousOutput.take(600))
+        }
     }
 
     /** Short catalogue handed to the model. Never exposes free-form Android APIs. */

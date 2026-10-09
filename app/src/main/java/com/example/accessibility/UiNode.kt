@@ -53,7 +53,10 @@ data class UiNode(
         }
         val boundsStr = "(${bounds.centerX()}, ${bounds.centerY()})"
         val idStr = if (id.isNotBlank() && !id.startsWith("node_")) " id=\"${id.substringAfterLast('/')}\"" else ""
-        return "[$index] $type $label$idStr at $boundsStr"
+        // Tell the model when an interactive control is disabled so it does not waste a
+        // step trying to activate a greyed-out element.
+        val disabledStr = if (!isEnabled && (isClickable || isEditable || isCheckable)) " [disabled]" else ""
+        return "[$index] $type $label$idStr at $boundsStr$disabledStr"
     }
 }
 

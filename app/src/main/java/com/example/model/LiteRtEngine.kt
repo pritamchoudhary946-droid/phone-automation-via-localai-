@@ -135,9 +135,9 @@ class LiteRtEngine(
     fun fallbackPlan(goal: String): TaskPlan = planner.fallbackPlan(goal)
 
     /**
-     * Backward-compatible decision path. When the local model is ready it drives
-     * the decision; otherwise the deterministic basic fallback is used and the
-     * thought text explicitly says so.
+     * Backward-compatible decision path used by the legacy diagnostic tests. When the
+     * local model is ready it drives the decision; otherwise the deterministic basic
+     * fallback is used and the thought text explicitly says so.
      */
     suspend fun reasonAndPlan(
         goal: String,

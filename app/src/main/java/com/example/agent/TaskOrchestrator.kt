@@ -104,6 +104,9 @@ class TaskOrchestrator(
     private var pendingRiskAction: AgentAction? = null
     private var pendingRiskTaskId: String? = null
 
+    /** An action the user just approved: skip re-prompting when the loop reconsiders it. */
+    private var userConfirmedAction: AgentAction? = null
+
     var stepTimeoutMs: Long = 15_000L
     var defaultMaxSteps: Int = 25
 
@@ -283,6 +286,20 @@ class TaskOrchestrator(
                         nudgedStepId = effectiveStep.id
                     }
 
+                    // If the user just approved THIS action, do not ask again. Only
+                    // substitute it when the resumed step is the same action; if the
+                    // re-planned step differs, drop the approval rather than forcing an
+                    // unrelated action into the wrong step.
+                    val confirmed = userConfirmedAction
+                    var actionApproved = false
+                    if (confirmed != null) {
+                        userConfirmedAction = null
+                        if (effectiveStep.action == confirmed) {
+                            action = confirmed
+                            actionApproved = true
+                        }
+                    }
+
                     // Safety net: a text entry needs a real editable field in this fresh
                     // observation. Several apps (YouTube among them) do not show the
                     // search field until the search interface is opened, so open it first
@@ -323,7 +340,7 @@ class TaskOrchestrator(
                     }
 
                     val risk = riskEvaluator.evaluate(action, observation.summary)
-                    if (risk.isRisky) {
+                    if (risk.isRisky && !actionApproved) {
                         pendingRiskAction = action
                         pendingRiskTaskId = task.id
                         taskDao.updateTask(
@@ -606,14 +623,14 @@ class TaskOrchestrator(
             val task = taskDao.getTaskById(taskId) ?: return@launch
             if (confirmed) {
                 taskDao.updateTask(task.copy(status = "RUNNING", requiresRiskConfirmation = false))
-                val result = deviceAutomation.execute(action)
+                // Tell the loop this action was approved so it is not re-prompted, and
+                // resume from the SAME step index (the approved action has not run yet).
+                userConfirmedAction = action
                 _orchestratorState.value = OrchestratorState.Executing(task.currentStep, action, "User-confirmed action")
-                delay(300)
-                val post = deviceAutomation.observe()
-                recordStep(task, task.currentStep, "User-confirmed risky action", action, post, if (result.success) "Success: ${result.message}" else "Failed: ${result.message}", if (result.success) "SUCCESS" else "FAILED")
-                runAgentLoop(task.copy(currentStep = task.currentStep + 1))
+                runAgentLoop(task.copy(currentStep = task.currentStep))
             } else {
                 taskDao.updateTask(task.copy(status = "CANCELLED", resultSummary = "User rejected risky action"))
+                userConfirmedAction = null
                 _orchestratorState.value = OrchestratorState.Failed(taskId, "User rejected action: ${action.getDisplayName()}")
             }
         }

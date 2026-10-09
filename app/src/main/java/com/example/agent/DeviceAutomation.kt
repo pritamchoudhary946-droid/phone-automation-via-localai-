@@ -156,10 +156,12 @@ class AndroidDeviceAutomation(
         if (!appDirectory.launchApp(targetPkg)) {
             return ActionResult(false, "LAUNCH_INTENT", "Launch intent dispatch failed for $targetPkg")
         }
+        // Cold starts on a mid-range device regularly take longer than one second, so
+        // allow a wider bounded window before declaring the launch unverified.
         val observed = ForegroundPackageVerifier.awaitForegroundPackage(
             targetPackage = targetPkg,
-            attempts = 4,
-            delayMillis = 250L
+            attempts = 8,
+            delayMillis = 300L
         ) { service.dumpHierarchy().packageName }
         return if (observed != null) {
             ActionResult(true, "LAUNCH_VERIFIED", "Verified foreground package $observed after launch")
