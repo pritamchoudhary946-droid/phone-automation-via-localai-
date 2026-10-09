@@ -512,7 +512,7 @@ class AgentAccessibilityService : AccessibilityService() {
                 val searchField = listOfNotNull(editableNode.viewIdResourceName, editableNode.contentDescription?.toString())
                     .any { it.contains("search", ignoreCase = true) }
                 val imeSubmitted = searchField && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                    editableNode.performAction(AccessibilityNodeInfo.ACTION_IME_ENTER)
+                    editableNode.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
                 Log.i(TAG, "[TEXT_INPUT_SUCCESS] Field value verified; imeSubmitted=$imeSubmitted")
                 editableNode.recycle()
                 return TextInputResult(success = true, method = if (imeSubmitted) "ACTION_SET_TEXT+IME_SEARCH" else "ACTION_SET_TEXT", targetNodeFound = true)
