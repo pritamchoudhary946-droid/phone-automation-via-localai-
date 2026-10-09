@@ -377,7 +377,7 @@ class ExampleRobolectricTest {
             historySummary = "",
             lastActionVerification = null
         )
-        assertTrue(step1.action is AgentAction.OpenApp)
+        assertTrue("Phase 1 should launch YouTube, got ${step1.action}", step1.action is AgentAction.OpenApp)
         assertEquals("youtube", (step1.action as AgentAction.OpenApp).appQuery)
 
         // Phase 2: Inside YouTube with Search icon visible -> decides to tap Search
@@ -387,7 +387,7 @@ class ExampleRobolectricTest {
             historySummary = "Step 0: Action OpenApp (youtube) -> Success",
             lastActionVerification = "Success: Launched youtube"
         )
-        assertTrue(step2.action is AgentAction.Tap)
+        assertTrue("Phase 2 should tap Search, got ${step2.action}", step2.action is AgentAction.Tap)
         assertEquals("Search", (step2.action as AgentAction.Tap).targetText)
 
         // Phase 3: In Search edit text -> types query via ACTION_SET_TEXT
@@ -397,7 +397,7 @@ class ExampleRobolectricTest {
             historySummary = "Step 1: Action Tap (Search) -> Success",
             lastActionVerification = "Success: Tap completed"
         )
-        assertTrue(step3.action is AgentAction.TypeText)
+        assertTrue("Phase 3 should type the query, got ${step3.action}", step3.action is AgentAction.TypeText)
         assertEquals("lo-fi beats", (step3.action as AgentAction.TypeText).text)
 
         // Phase 4: Query is typed in EditText -> submits search
@@ -407,7 +407,7 @@ class ExampleRobolectricTest {
             historySummary = "Step 2: Action TypeText (\"lo-fi beats\") -> Success",
             lastActionVerification = "Success: Injected query"
         )
-        assertTrue(step4.action is AgentAction.Tap)
+        assertTrue("Phase 4 should submit Search, got ${step4.action}", step4.action is AgentAction.Tap)
         assertFalse((step4.action as AgentAction.Tap).targetText == "lo-fi beats")
         assertEquals("Search", (step4.action as AgentAction.Tap).targetText)
 
@@ -418,7 +418,7 @@ class ExampleRobolectricTest {
             historySummary = "",
             lastActionVerification = null
         )
-        assertTrue(searchLabelScreen.action is AgentAction.Tap)
+        assertTrue("Search label should lead to a Search tap, got ${searchLabelScreen.action}", searchLabelScreen.action is AgentAction.Tap)
         assertEquals("Search", (searchLabelScreen.action as AgentAction.Tap).targetText)
 
         // Phase 5: Search results visible -> verifies and completes task
@@ -428,7 +428,7 @@ class ExampleRobolectricTest {
             historySummary = "Step 2: Action TypeText (\"lo-fi beats\") -> Success\nStep 3: Action Tap (lo-fi beats) -> Success",
             lastActionVerification = "Success: Results loaded"
         )
-        assertTrue(step5.action is AgentAction.FinishTask)
+        assertTrue("Phase 5 should finish after result evidence, got ${step5.action}", step5.action is AgentAction.FinishTask)
         assertTrue((step5.action as AgentAction.FinishTask).summary.contains("lo-fi beats"))
     }
 
