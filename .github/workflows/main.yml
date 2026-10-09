@@ -12,8 +12,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Force any JavaScript action still shipping a Node 20 runtime to run on Node 24,
-# which removes the "Node.js 20 is deprecated / forced to Node 24" warning.
+# Belt-and-suspenders: all actions below already ship a Node 24 runtime, but this
+# keeps any future Node 20 action from re-introducing the deprecation warning.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -36,10 +36,10 @@ jobs:
           java-version: '21'
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@v4
+        uses: gradle/actions/wrapper-validation@v5
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       # --no-daemon keeps the run clean: the Gradle daemon's KSP/IntelliJ helper
       # thread can emit a harmless "ApplicationManager.getApplication() is null"
@@ -65,7 +65,7 @@ jobs:
           ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: OmniAgent-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
