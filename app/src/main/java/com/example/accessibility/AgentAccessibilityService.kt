@@ -290,9 +290,9 @@ class AgentAccessibilityService : AccessibilityService() {
                 Log.i(TAG, "[TAP_SUCCESS] dispatchGesture completed at ($clickX, $clickY) and UI change verified.")
                 return TapResult(success = true, method = "DISPATCH_GESTURE", bounds = targetBounds, nodeFound = true)
             } else {
-                val warningMsg = "dispatchGesture executed at ($clickX, $clickY) but screen content remained identical."
+                val warningMsg = "dispatchGesture executed at ($clickX, $clickY) but screen content remained identical; action is unverified."
                 Log.w(TAG, "[TAP_WARNING] $warningMsg")
-                return TapResult(success = true, method = "DISPATCH_GESTURE", failureReason = warningMsg, bounds = targetBounds, nodeFound = true)
+                return TapResult(success = false, method = "DISPATCH_GESTURE", failureReason = warningMsg, bounds = targetBounds, nodeFound = true)
             }
 
         } finally {
