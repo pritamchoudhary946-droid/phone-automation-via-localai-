@@ -167,14 +167,22 @@ class TaskOrchestrator(
                         _usesModelPlanning.value = planOutcome.source == PlanSource.GEMMA_MODEL
                         planOutcome.plan
                     }
-                    else -> {
+                    is PlanOutcome.Unavailable -> {
                         _usesModelPlanning.value = false
                         val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
-                        val reason = when (planOutcome) {
-                            is PlanOutcome.Unavailable -> planOutcome.reason
-                            is PlanOutcome.Rejected -> planOutcome.reason
-                        }
-                        Log.w(TAG, "Using fallback planner due to: $reason")
+                        Log.w(TAG, "Using fallback planner due to: ${planOutcome.reason}")
+                        fallbackPlan
+                    }
+                    is PlanOutcome.Rejected -> {
+                        _usesModelPlanning.value = false
+                        val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
+                        Log.w(TAG, "Using fallback planner due to: ${planOutcome.reason}")
+                        fallbackPlan
+                    }
+                    null -> {
+                        _usesModelPlanning.value = false
+                        val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
+                        Log.w(TAG, "Using fallback planner due to: plan timeout or null result")
                         fallbackPlan
                     }
                 }
