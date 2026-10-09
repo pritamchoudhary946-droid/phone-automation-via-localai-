@@ -290,9 +290,9 @@ class AgentAccessibilityService : AccessibilityService() {
                 Log.i(TAG, "[TAP_SUCCESS] dispatchGesture completed at ($clickX, $clickY) and UI change verified.")
                 return TapResult(success = true, method = "DISPATCH_GESTURE", bounds = targetBounds, nodeFound = true)
             } else {
-                val warningMsg = "dispatchGesture executed at ($clickX, $clickY) but screen content remained identical."
+                val warningMsg = "dispatchGesture executed at ($clickX, $clickY) but screen content remained identical; action is unverified."
                 Log.w(TAG, "[TAP_WARNING] $warningMsg")
-                return TapResult(success = true, method = "DISPATCH_GESTURE", failureReason = warningMsg, bounds = targetBounds, nodeFound = true)
+                return TapResult(success = false, method = "DISPATCH_GESTURE", failureReason = warningMsg, bounds = targetBounds, nodeFound = true)
             }
 
         } finally {
@@ -499,9 +499,23 @@ class AgentAccessibilityService : AccessibilityService() {
             val setSuccess = editableNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
 
             if (setSuccess) {
-                Log.i(TAG, "[TEXT_INPUT_SUCCESS] ACTION_SET_TEXT succeeded without coordinate gestures.")
+                val currentRoot = rootInActiveWindow
+                val currentEditable = currentRoot?.let { findTargetEditableNode(it, targetIdentifier) }
+                val fieldValue = currentEditable?.text?.toString()
+                val valueVerified = fieldValue == text
+                currentEditable?.recycle()
+                currentRoot?.recycle()
+                if (!valueVerified) {
+                    editableNode.recycle()
+                    return TextInputResult(success = false, method = "ACTION_SET_TEXT", failureReason = "Requested text was not verified in the current field.", targetNodeFound = true)
+                }
+                val searchField = listOfNotNull(editableNode.viewIdResourceName, editableNode.contentDescription?.toString())
+                    .any { it.contains("search", ignoreCase = true) }
+                val imeSubmitted = searchField && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                    editableNode.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                Log.i(TAG, "[TEXT_INPUT_SUCCESS] Field value verified; imeSubmitted=$imeSubmitted")
                 editableNode.recycle()
-                return TextInputResult(success = true, method = "ACTION_SET_TEXT", targetNodeFound = true)
+                return TextInputResult(success = true, method = if (imeSubmitted) "ACTION_SET_TEXT+IME_SEARCH" else "ACTION_SET_TEXT", targetNodeFound = true)
             } else {
                 Log.w(TAG, "[TEXT_INPUT_WARNING] ACTION_SET_TEXT returned false. Attempting tap bounds to summon IME then retry.")
             }

@@ -1,11 +1,16 @@
 package com.example
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import androidx.test.core.app.ApplicationProvider
 import com.example.accessibility.UiNode
 import com.example.accessibility.UiTreeSnapshot
 import com.example.agent.AgentAction
 import com.example.agent.AppDirectory
+import com.example.agent.ForegroundPackageVerifier
 import com.example.agent.RecoveryStrategy
 import com.example.agent.RiskEvaluator
 import com.example.agent.StuckLoopDetector
@@ -26,11 +31,37 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ExampleRobolectricTest {
+
+    private fun installLauncherPackage(context: Context, packageName: String, label: String) {
+        val appInfo = ApplicationInfo().apply {
+            this.packageName = packageName
+            nonLocalizedLabel = label
+        }
+        val packageInfo = PackageInfo().apply {
+            this.packageName = packageName
+            applicationInfo = appInfo
+        }
+        val packageManager = context.packageManager
+        shadowOf(packageManager).installPackage(packageInfo)
+
+        val activityInfo = ActivityInfo().apply {
+            this.packageName = packageName
+            name = "$packageName.MainActivity"
+            applicationInfo = appInfo
+            exported = true
+        }
+        val resolveInfo = android.content.pm.ResolveInfo().apply {
+            this.activityInfo = activityInfo
+        }
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        shadowOf(packageManager).addResolveInfoForIntent(launcherIntent, resolveInfo)
+    }
 
     @Test
     fun `read string from context matches app name`() {
@@ -154,6 +185,18 @@ class ExampleRobolectricTest {
     @Test
     fun `app directory resolves package aliases accurately`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        // Robolectric starts with no third-party apps installed. Model installed apps and
+        // launcher activities explicitly rather than weakening production package checks.
+        listOf(
+            "com.google.android.youtube" to "YouTube",
+            "com.android.chrome" to "Chrome",
+            "com.android.settings" to "Settings",
+            "com.whatsapp" to "WhatsApp",
+            "com.google.android.apps.maps" to "Maps",
+            "com.android.camera" to "Camera",
+            "com.google.android.GoogleCamera" to "Google Camera"
+        ).forEach { (packageName, label) -> installLauncherPackage(context, packageName, label) }
+
         val appDirectory = AppDirectory(context)
 
         val yt = appDirectory.resolvePackage("youtube")
@@ -334,7 +377,7 @@ class ExampleRobolectricTest {
             historySummary = "",
             lastActionVerification = null
         )
-        assertTrue(step1.action is AgentAction.OpenApp)
+        assertTrue("Phase 1 should launch YouTube, got ${step1.action}", step1.action is AgentAction.OpenApp)
         assertEquals("youtube", (step1.action as AgentAction.OpenApp).appQuery)
 
         // Phase 2: Inside YouTube with Search icon visible -> decides to tap Search
@@ -344,7 +387,7 @@ class ExampleRobolectricTest {
             historySummary = "Step 0: Action OpenApp (youtube) -> Success",
             lastActionVerification = "Success: Launched youtube"
         )
-        assertTrue(step2.action is AgentAction.Tap)
+        assertTrue("Phase 2 should tap Search, got ${step2.action}", step2.action is AgentAction.Tap)
         assertEquals("Search", (step2.action as AgentAction.Tap).targetText)
 
         // Phase 3: In Search edit text -> types query via ACTION_SET_TEXT
@@ -354,7 +397,7 @@ class ExampleRobolectricTest {
             historySummary = "Step 1: Action Tap (Search) -> Success",
             lastActionVerification = "Success: Tap completed"
         )
-        assertTrue(step3.action is AgentAction.TypeText)
+        assertTrue("Phase 3 should type the query, got ${step3.action}", step3.action is AgentAction.TypeText)
         assertEquals("lo-fi beats", (step3.action as AgentAction.TypeText).text)
 
         // Phase 4: Query is typed in EditText -> submits search
@@ -364,7 +407,19 @@ class ExampleRobolectricTest {
             historySummary = "Step 2: Action TypeText (\"lo-fi beats\") -> Success",
             lastActionVerification = "Success: Injected query"
         )
-        assertTrue(step4.action is AgentAction.Tap)
+        assertTrue("Phase 4 should submit Search, got ${step4.action}", step4.action is AgentAction.Tap)
+        assertFalse((step4.action as AgentAction.Tap).targetText == "lo-fi beats")
+        assertEquals("Search", (step4.action as AgentAction.Tap).targetText)
+
+        // Regression: Search YouTube label alone must not be treated as an editable field.
+        val searchLabelScreen = engine.reasonAndPlan(
+            goal = goal,
+            screenSummary = "Active Package: com.google.android.youtube\\n- Button [Search YouTube] (clickable: true)",
+            historySummary = "",
+            lastActionVerification = null
+        )
+        assertTrue("Search label should lead to a Search tap, got ${searchLabelScreen.action}", searchLabelScreen.action is AgentAction.Tap)
+        assertEquals("Search", (searchLabelScreen.action as AgentAction.Tap).targetText)
 
         // Phase 5: Search results visible -> verifies and completes task
         val step5 = engine.reasonAndPlan(
@@ -373,7 +428,7 @@ class ExampleRobolectricTest {
             historySummary = "Step 2: Action TypeText (\"lo-fi beats\") -> Success\nStep 3: Action Tap (lo-fi beats) -> Success",
             lastActionVerification = "Success: Results loaded"
         )
-        assertTrue(step5.action is AgentAction.FinishTask)
+        assertTrue("Phase 5 should finish after result evidence, got ${step5.action}", step5.action is AgentAction.FinishTask)
         assertTrue((step5.action as AgentAction.FinishTask).summary.contains("lo-fi beats"))
     }
 
@@ -419,4 +474,96 @@ class ExampleRobolectricTest {
         assertTrue(db.taskStepDao().getStepsForTaskList(taskId).isEmpty())
         assertEquals(null, db.checkpointDao().getCheckpoint(taskId))
     }
+
+    @Test
+    fun openYoutubeCompletesOnlyWhenForegroundPackageIsVerified() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val notForeground = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.launcher\nText \"YouTube is recommended\"",
+            historySummary = "",
+            lastActionVerification = "Success: launch intent dispatched"
+        )
+        assertTrue(notForeground.action is AgentAction.OpenApp)
+
+        val verifiedForeground = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.google.android.youtube\nText \"Home\"",
+            historySummary = "Step 0: Action OpenApp -> Success",
+            lastActionVerification = "Success: Verified target foreground package"
+        )
+        assertTrue(verifiedForeground.action is AgentAction.FinishTask)
+    }
+
+    @Test
+    fun screenTextMentioningYoutubeCannotSatisfyLaunchGoal() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val decision = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.chrome\nText \"Open YouTube in this browser\"",
+            historySummary = "",
+            lastActionVerification = "Success: Screen hierarchy refreshed"
+        )
+        assertTrue(decision.action is AgentAction.OpenApp)
+    }
+
+    @Test
+    fun foregroundVerifierRetriesDelayedPackageChangesWithinBound() = runBlocking {
+        var observations = 0
+        val observed = ForegroundPackageVerifier.awaitForegroundPackage(
+            targetPackage = "com.google.android.youtube",
+            attempts = 4,
+            delayMillis = 0L
+        ) {
+            observations++
+            if (observations < 3) "com.android.launcher" else "com.google.android.youtube"
+        }
+        assertEquals("com.google.android.youtube", observed)
+        assertEquals(3, observations)
+    }
+
+    @Test
+    fun readScreenSuccessDoesNotCompleteUnfulfilledLaunchGoal() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val decision = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.launcher\nHome screen",
+            historySummary = "Step 0: Action ReadScreen -> Success: Screen hierarchy refreshed",
+            lastActionVerification = "Success: Screen hierarchy refreshed"
+        )
+        assertTrue(decision.action is AgentAction.OpenApp)
+    }
+
+    @Test
+    fun intentDispatchWithoutTargetForegroundVerificationIsNotLaunchSuccess() = runBlocking {
+        var observations = 0
+        val verifiedPackage = ForegroundPackageVerifier.awaitForegroundPackage(
+            targetPackage = "com.google.android.youtube",
+            attempts = 3,
+            delayMillis = 0L
+        ) {
+            observations++
+            "com.android.launcher"
+        }
+        assertEquals(null, verifiedPackage)
+        assertEquals(3, observations)
+    }
+
+    @Test
+    fun missingModelDoesNotDisableNativeAppLaunchPlanning() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val decision = engine.reasonAndPlan(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.launcher\nHome screen",
+            historySummary = "",
+            lastActionVerification = null
+        )
+        assertTrue(decision.action is AgentAction.OpenApp)
+        assertEquals("youtube", (decision.action as AgentAction.OpenApp).appQuery)
+    }
+
 }

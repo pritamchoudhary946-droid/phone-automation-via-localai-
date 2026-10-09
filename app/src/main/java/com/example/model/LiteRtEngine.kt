@@ -173,30 +173,21 @@ class LiteRtEngine(
     ): AgentDecision {
         val lowerScreen = screenSummary.lowercase()
         val lowerHistory = historySummary.lowercase()
+        val foregroundPackage = extractForegroundPackage(screenSummary)
 
         // Determine current sub-goal by evaluating completion of earlier sub-goals
         var currentSubGoalIndex = 0
         for (i in subGoals.indices) {
             val sg = subGoals[i]
             val isComplete = when (sg.kind) {
-                SubGoalKind.LAUNCH_APP -> {
-                    val appPkgOrName = sg.target ?: ""
-                    lowerHistory.contains("openapp") || (lowerScreen.contains(appPkgOrName) && !lowerScreen.contains("package: com.example") && !lowerScreen.contains("com.android.launcher"))
-                }
-                SubGoalKind.SEARCH_QUERY -> {
-                    val q = sg.target?.lowercase() ?: ""
-                    (lowerHistory.contains("type_text") && (lowerHistory.contains("tap ($q)") || lowerHistory.contains("tap (search)"))) ||
-                    (lowerScreen.contains("results") && lowerScreen.contains("views"))
-                }
+                SubGoalKind.LAUNCH_APP -> isTargetAppForeground(sg.target, foregroundPackage)
+                SubGoalKind.SEARCH_QUERY -> lowerScreen.contains("results") ||
+                    (lowerScreen.contains("views") && (lowerScreen.contains("video") || lowerScreen.contains("channel")))
                 SubGoalKind.OPEN_ITEM -> {
-                    lowerHistory.contains("tap (") && (lowerScreen.contains("player") || lowerScreen.contains("watch") || lowerScreen.contains("detail") || lowerScreen.contains("views"))
+                    lowerHistory.contains("tap (") && (lowerScreen.contains("player") || lowerScreen.contains("watch") || lowerScreen.contains("detail"))
                 }
-                SubGoalKind.TOGGLE_SETTING -> {
-                    lowerHistory.contains("tap") && (lastActionVerification?.contains("Success") == true)
-                }
-                SubGoalKind.RETURN_HOME -> {
-                    lowerHistory.contains("home") && (lowerScreen.contains("launcher") || lowerScreen.contains("home screen"))
-                }
+                SubGoalKind.TOGGLE_SETTING -> settingIsEnabled(sg.target, lowerScreen)
+                SubGoalKind.RETURN_HOME -> isHomeForeground(foregroundPackage)
                 SubGoalKind.NAVIGATE_BACK -> {
                     lowerHistory.contains("back")
                 }
@@ -219,11 +210,13 @@ class LiteRtEngine(
         // Check if all sub-goals fulfilled
         val lastSg = subGoals.last()
         val allSubGoalsComplete = when (lastSg.kind) {
-            SubGoalKind.RETURN_HOME -> lowerScreen.contains("launcher") || lowerScreen.contains("home screen") || lowerHistory.contains("home")
-            SubGoalKind.SEARCH_QUERY -> (lowerHistory.contains("tap (") || lowerHistory.contains("tap") || lowerHistory.contains("type_text")) &&
-                    (lowerScreen.contains("views") || lowerScreen.contains("results") || lowerScreen.contains("video") || lowerScreen.contains("channel"))
-            SubGoalKind.OPEN_ITEM -> lowerHistory.contains("tap") && (lowerScreen.contains("player") || lowerScreen.contains("watch") || lowerScreen.contains("views"))
-            SubGoalKind.TOGGLE_SETTING -> lowerHistory.contains("tap") && (lastActionVerification?.contains("Success") == true)
+            SubGoalKind.LAUNCH_APP -> isTargetAppForeground(lastSg.target, foregroundPackage)
+            SubGoalKind.RETURN_HOME -> isHomeForeground(foregroundPackage)
+            SubGoalKind.SEARCH_QUERY -> (lowerHistory.contains("type_text") || lowerHistory.contains("tap")) &&
+                (lowerScreen.contains("results") || (lowerScreen.contains("views") && (lowerScreen.contains("video") || lowerScreen.contains("channel"))))
+            SubGoalKind.OPEN_ITEM -> lowerHistory.contains("tap") &&
+                (lowerScreen.contains("player") || lowerScreen.contains("watch") || lowerScreen.contains("detail"))
+            SubGoalKind.TOGGLE_SETTING -> settingIsEnabled(lastSg.target, lowerScreen)
             else -> false
         }
 
@@ -240,8 +233,8 @@ class LiteRtEngine(
         // Stage 1: If current sub-goal is LAUNCH_APP
         if (activeSubGoal?.kind == SubGoalKind.LAUNCH_APP) {
             val appToOpen = activeSubGoal.target ?: "youtube"
-            val appAlreadyOpen = lowerScreen.contains(appToOpen) && !lowerScreen.contains("package: com.example")
-            if (!appAlreadyOpen && !lowerHistory.contains("openapp")) {
+            val appAlreadyOpen = isTargetAppForeground(appToOpen, foregroundPackage)
+            if (!appAlreadyOpen) {
                 return AgentDecision(
                     thought = "Sub-goal: Launching target app '$appToOpen'.",
                     action = AgentAction.OpenApp(appToOpen, null),
@@ -255,10 +248,15 @@ class LiteRtEngine(
         if (activeSubGoal?.kind == SubGoalKind.SEARCH_QUERY) {
             val query = activeSubGoal.target ?: "search query"
             val cleanQueryLower = query.lowercase()
-            val queryAlreadyTyped = lowerHistory.contains("type_text") || lowerScreen.contains("\"$cleanQueryLower\"")
+            val queryAlreadyTyped = lowerHistory.contains("action typetext") && lastActionVerification?.startsWith("Success:", ignoreCase = true) == true
+            val editableFieldVisible = lowerScreen.contains("edittext") ||
+                Regex("editable:\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(screenSummary)
+            // A successful TypeText history entry is not enough on its own: the current
+            // accessibility snapshot must also show the requested query in the field.
+            val queryVerifiedInField = editableFieldVisible && lowerScreen.contains(cleanQueryLower)
 
-            if (lowerScreen.contains("edittext") || lowerScreen.contains("[input]") || lowerScreen.contains("search youtube") || lowerScreen.contains("search ")) {
-                if (!queryAlreadyTyped) {
+            if (editableFieldVisible) {
+                if (!queryAlreadyTyped || !queryVerifiedInField) {
                     return AgentDecision(
                         thought = "Search bar active. Entering query \"$query\" via ACTION_SET_TEXT.",
                         action = AgentAction.TypeText(query, null),
@@ -267,7 +265,7 @@ class LiteRtEngine(
                     )
                 } else {
                     // Query is entered, submit search
-                    val suggestionToTap = if (lowerScreen.contains(cleanQueryLower)) query else "Search"
+                    val suggestionToTap = "Search"
                     return AgentDecision(
                         thought = "Submitting search for \"$query\" by tapping search button/suggestion.",
                         action = AgentAction.Tap(suggestionToTap, null, null),
@@ -301,7 +299,7 @@ class LiteRtEngine(
 
         // Stage 4: If current sub-goal is RETURN_HOME
         if (activeSubGoal?.kind == SubGoalKind.RETURN_HOME) {
-            if (!lowerScreen.contains("launcher") && !lowerScreen.contains("home screen")) {
+            if (!isHomeForeground(foregroundPackage)) {
                 return AgentDecision(
                     thought = "Returning to the home screen via global HOME action.",
                     action = AgentAction.Home,
@@ -349,10 +347,14 @@ class LiteRtEngine(
             // Check if final condition is met
             val lastSg = subGoals.last()
             val finalSatisfied = when (lastSg.kind) {
-                SubGoalKind.RETURN_HOME -> lowerScreen.contains("launcher") || lowerScreen.contains("home screen") || lowerHistory.contains("home")
-                SubGoalKind.SEARCH_QUERY -> lowerHistory.contains("type_text") && (lowerScreen.contains("views") || lowerScreen.contains("results") || lowerScreen.contains("video"))
-                SubGoalKind.OPEN_ITEM -> lowerHistory.contains("tap")
-                else -> lastActionVerification?.contains("Success") == true
+                SubGoalKind.LAUNCH_APP -> isTargetAppForeground(lastSg.target, foregroundPackage)
+                SubGoalKind.SEARCH_QUERY -> lowerHistory.contains("type_text") &&
+                    (lowerScreen.contains("results") || (lowerScreen.contains("views") && (lowerScreen.contains("video") || lowerScreen.contains("channel"))))
+                SubGoalKind.OPEN_ITEM -> lowerHistory.contains("tap") &&
+                    (lowerScreen.contains("player") || lowerScreen.contains("watch") || lowerScreen.contains("detail"))
+                SubGoalKind.RETURN_HOME -> isHomeForeground(foregroundPackage)
+                SubGoalKind.TOGGLE_SETTING -> settingIsEnabled(lastSg.target, lowerScreen)
+                else -> false
             }
 
             if (finalSatisfied) {
@@ -384,4 +386,46 @@ class LiteRtEngine(
             activeSubGoal = activeSubGoal?.description
         )
     }
+
+    private fun extractForegroundPackage(screenSummary: String): String? {
+        return Regex("(?im)^\\s*Active Package:\\s*([A-Za-z0-9._]+)")
+            .find(screenSummary)?.groupValues?.get(1)?.takeIf { it.isNotBlank() && it != "unknown" }
+    }
+
+    private fun isTargetAppForeground(target: String?, foregroundPackage: String?): Boolean {
+        if (target.isNullOrBlank() || foregroundPackage.isNullOrBlank()) return false
+        val targetKey = target.lowercase().replace(Regex("[^a-z0-9]"), "")
+        val observed = foregroundPackage.lowercase()
+        val aliases = mapOf(
+            "youtube" to setOf("com.google.android.youtube"),
+            "chrome" to setOf("com.android.chrome"),
+            "browser" to setOf("com.android.chrome"),
+            "settings" to setOf("com.android.settings"),
+            "whatsapp" to setOf("com.whatsapp"),
+            "maps" to setOf("com.google.android.apps.maps"),
+            "spotify" to setOf("com.spotify.music"),
+            "gmail" to setOf("com.google.android.gm"),
+            "playstore" to setOf("com.android.vending")
+        )
+        val knownPackages = aliases[targetKey]
+        return if (knownPackages != null) observed in knownPackages else {
+            observed.contains(targetKey) && !observed.startsWith("com.example.")
+        }
+    }
+
+    private fun isHomeForeground(foregroundPackage: String?): Boolean {
+        val pkg = foregroundPackage?.lowercase() ?: return false
+        return pkg.contains("launcher") || pkg == "com.android.systemui"
+    }
+
+    private fun settingIsEnabled(target: String?, lowerScreen: String): Boolean {
+        if (target.isNullOrBlank()) return false
+        return lowerScreen.lineSequence().any { line ->
+            line.contains(target.lowercase()) &&
+                (line.contains("[checked]") ||
+                    Regex("checked\\s*[:=]\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(line))
+        }
+    }
+
+
 }

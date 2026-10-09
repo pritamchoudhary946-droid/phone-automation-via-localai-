@@ -114,9 +114,15 @@ class TaskOrchestrator(
 
             try {
                 while (currentStepIndex < maxSteps) {
-                    val a11yService = AgentAccessibilityService.instance
+                    var a11yService = AgentAccessibilityService.instance
+                    var readinessAttempts = 0
+                    while (a11yService == null && readinessAttempts < 10) {
+                        delay(300)
+                        a11yService = AgentAccessibilityService.instance
+                        readinessAttempts++
+                    }
                     if (a11yService == null) {
-                        val failReason = "Accessibility Service is not active. Enable OmniAgent in Android Settings > Accessibility."
+                        val failReason = "Accessibility Service did not become ready within 3 seconds. Enable OmniAgent in Android Settings > Accessibility."
                         taskDao.updateTaskStatus(task.id, "FAILED")
                         _orchestratorState.value = OrchestratorState.Failed(task.id, failReason)
                         return@launch
@@ -128,6 +134,7 @@ class TaskOrchestrator(
                     val uiSnapshot = a11yService.dumpHierarchy()
                     val screenSummary = uiSnapshot.toPromptSummary()
                     val screenFingerprint = uiSnapshot.getFingerprint()
+                    Log.i(TAG, "[STEP] index=${currentStepIndex}/${maxSteps} foregroundPackage=${uiSnapshot.packageName ?: "unknown"}")
 
                     // Step 2: Stuck loop detection
                     val stuckStatus = stuckDetector.recordStep(screenFingerprint, lastActionName)
@@ -168,6 +175,7 @@ class TaskOrchestrator(
 
                     var action = decision.action
                     val actionKey = action.getDisplayName()
+                    Log.i(TAG, "[PLAN] step=${currentStepIndex} subgoal=${decision.activeSubGoal ?: "unspecified"} foregroundPackage=${uiSnapshot.packageName ?: "unknown"} actionType=${action.javaClass.simpleName}")
 
                     // Step 3b: Validate action via ToolRegistry
                     when (val valResult = toolRegistry.validateAction(action)) {
@@ -249,8 +257,19 @@ class TaskOrchestrator(
                         return@launch
                     }
 
+                    // The loop already captured this screen. A successful ReadScreen no-op is not
+                    // progress and must not be used as evidence that a goal is complete.
+                    if (action is AgentAction.ReadScreen) {
+                        val reason = "No actionable progress could be planned from the current screen observation (step $currentStepIndex)."
+                        Log.e(TAG, "[STOP] step=$currentStepIndex reason=$reason")
+                        taskDao.updateTask(task.copy(status = "FAILED", currentStep = currentStepIndex, resultSummary = reason))
+                        _orchestratorState.value = OrchestratorState.Failed(task.id, reason)
+                        return@launch
+                    }
+
                     // Step 5: Check completion or termination
                     if (action is AgentAction.FinishTask) {
+                        Log.i(TAG, "[COMPLETE] step=$currentStepIndex reason=${action.summary}")
                         taskDao.updateTask(task.copy(
                             status = "COMPLETED",
                             currentStep = currentStepIndex,
@@ -261,6 +280,7 @@ class TaskOrchestrator(
                     }
 
                     if (action is AgentAction.FailTask) {
+                        Log.e(TAG, "[FAIL] step=$currentStepIndex reason=${action.reason}")
                         taskDao.updateTask(task.copy(
                             status = "FAILED",
                             currentStep = currentStepIndex,
@@ -294,6 +314,7 @@ class TaskOrchestrator(
                     val postSnapshot = a11yService.dumpHierarchy()
                     val verification = verifyStepOutcome(action, uiSnapshot, postSnapshot, actionOutput)
                     lastVerificationResult = verification
+                    Log.i(TAG, "[VERIFY] step=$currentStepIndex foregroundPackage=${postSnapshot.packageName ?: "unknown"} actionType=${action.javaClass.simpleName} executionSuccess=${actionOutput.success} method=${actionOutput.method} verification=$verification")
 
                     // Step 8: Persist Step & Checkpoint with privacy filter
                     val sanitizedSummary = sanitizeSensitiveData(screenSummary.take(250))
@@ -325,14 +346,17 @@ class TaskOrchestrator(
                 }
 
                 // Reached max steps
-                taskDao.updateTask(task.copy(status = "COMPLETED", resultSummary = "Reached maximum step limit ($maxSteps)"))
-                _orchestratorState.value = OrchestratorState.Completed(task.id, "Completed maximum execution steps.")
+                val failure = "Task did not satisfy its goal within the $maxSteps step limit."
+                Log.e(TAG, "[STOP] step=$currentStepIndex reason=$failure")
+                taskDao.updateTask(task.copy(status = "FAILED", resultSummary = failure))
+                _orchestratorState.value = OrchestratorState.Failed(task.id, failure)
 
             } catch (e: CancellationException) {
                 Log.i(TAG, "Task cancelled or paused.")
             } catch (e: Exception) {
                 Log.e(TAG, "Task execution error", e)
                 taskDao.updateTaskStatus(task.id, "FAILED")
+                Log.e(TAG, "[STOP] step=$currentStepIndex reason=exception:${e.localizedMessage}")
                 _orchestratorState.value = OrchestratorState.Failed(task.id, "Error: ${e.localizedMessage}")
             }
         }
@@ -359,12 +383,25 @@ class TaskOrchestrator(
             is AgentAction.OpenApp -> {
                 val targetPkg = action.packageName ?: appDirectory.resolvePackage(action.appQuery)
                 if (targetPkg != null) {
-                    val launched = appDirectory.launchApp(targetPkg)
-                    StepExecutionOutput(
-                        success = launched,
-                        method = "LAUNCH_INTENT",
-                        message = if (launched) "Launched $targetPkg" else "Failed to launch $targetPkg"
-                    )
+                    if (ForegroundPackageVerifier.matches(targetPkg, currentSnapshot.packageName)) {
+                        StepExecutionOutput(true, "FOREGROUND_ALREADY_ACTIVE", "Verified $targetPkg is already foregrounded; launch skipped")
+                    } else {
+                        val dispatched = appDirectory.launchApp(targetPkg)
+                        if (!dispatched) {
+                            StepExecutionOutput(false, "LAUNCH_INTENT", "Launch intent dispatch failed for $targetPkg")
+                        } else {
+                            val observed = ForegroundPackageVerifier.awaitForegroundPackage(
+                                targetPackage = targetPkg,
+                                attempts = 4,
+                                delayMillis = 250L
+                            ) { a11y.dumpHierarchy().packageName }
+                            if (observed != null) {
+                                StepExecutionOutput(true, "LAUNCH_VERIFIED", "Verified foreground package $observed after launch")
+                            } else {
+                                StepExecutionOutput(false, "LAUNCH_UNVERIFIED", "Launch intent was dispatched for $targetPkg, but foreground package was not verified after 4 observations")
+                            }
+                        }
+                    }
                 } else {
                     StepExecutionOutput(
                         success = false,
@@ -443,19 +480,18 @@ class TaskOrchestrator(
 
         return when (action) {
             is AgentAction.OpenApp -> {
-                if (packageChanged && post.packageName != null) {
-                    "Success: Switched package to ${post.packageName}"
-                } else if (executionOutput.success) {
-                    "Success: Launched ${action.appQuery} (transitioning)"
+                val targetPkg = action.packageName ?: appDirectory.resolvePackage(action.appQuery)
+                if (targetPkg != null && ForegroundPackageVerifier.matches(targetPkg, post.packageName)) {
+                    "Success: Verified target foreground package $targetPkg"
                 } else {
-                    "Failed: App could not be launched"
+                    "Failed: Target foreground package was not verified; expected ${targetPkg ?: action.appQuery}, observed ${post.packageName ?: "unknown"}"
                 }
             }
             is AgentAction.Tap -> {
                 if (screenChanged) {
                     "Success: ${executionOutput.method} altered screen state"
                 } else {
-                    "Success: ${executionOutput.method} completed (${executionOutput.message})"
+                    "Failed: ${executionOutput.method} did not produce an observable UI change"
                 }
             }
             is AgentAction.TypeText -> {
