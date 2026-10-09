@@ -114,9 +114,15 @@ class TaskOrchestrator(
 
             try {
                 while (currentStepIndex < maxSteps) {
-                    val a11yService = AgentAccessibilityService.instance
+                    var a11yService = AgentAccessibilityService.instance
+                    var readinessAttempts = 0
+                    while (a11yService == null && readinessAttempts < 10) {
+                        delay(300)
+                        a11yService = AgentAccessibilityService.instance
+                        readinessAttempts++
+                    }
                     if (a11yService == null) {
-                        val failReason = "Accessibility Service is not active. Enable OmniAgent in Android Settings > Accessibility."
+                        val failReason = "Accessibility Service did not become ready within 3 seconds. Enable OmniAgent in Android Settings > Accessibility."
                         taskDao.updateTaskStatus(task.id, "FAILED")
                         _orchestratorState.value = OrchestratorState.Failed(task.id, failReason)
                         return@launch
@@ -325,8 +331,9 @@ class TaskOrchestrator(
                 }
 
                 // Reached max steps
-                taskDao.updateTask(task.copy(status = "COMPLETED", resultSummary = "Reached maximum step limit ($maxSteps)"))
-                _orchestratorState.value = OrchestratorState.Completed(task.id, "Completed maximum execution steps.")
+                val failure = "Task did not satisfy its goal within the $maxSteps step limit."
+                taskDao.updateTask(task.copy(status = "FAILED", resultSummary = failure))
+                _orchestratorState.value = OrchestratorState.Failed(task.id, failure)
 
             } catch (e: CancellationException) {
                 Log.i(TAG, "Task cancelled or paused.")
@@ -445,17 +452,15 @@ class TaskOrchestrator(
             is AgentAction.OpenApp -> {
                 if (packageChanged && post.packageName != null) {
                     "Success: Switched package to ${post.packageName}"
-                } else if (executionOutput.success) {
-                    "Success: Launched ${action.appQuery} (transitioning)"
                 } else {
-                    "Failed: App could not be launched"
+                    "Failed: Expected foreground package was not verified for ${action.appQuery}; observed ${post.packageName ?: "unknown"}"
                 }
             }
             is AgentAction.Tap -> {
                 if (screenChanged) {
                     "Success: ${executionOutput.method} altered screen state"
                 } else {
-                    "Success: ${executionOutput.method} completed (${executionOutput.message})"
+                    "Failed: ${executionOutput.method} did not produce an observable UI change"
                 }
             }
             is AgentAction.TypeText -> {
