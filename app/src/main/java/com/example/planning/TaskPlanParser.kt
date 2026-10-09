@@ -164,10 +164,17 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_SCREENSHOT -> AgentAction.Screenshot
             ToolRegistry.TOOL_REPORT_STATUS -> {
                 val summary = params.optString("summary", "Goal achieved")
-                if (params.optString("status", "success").equals("failure", ignoreCase = true)) {
-                    AgentAction.FailTask(params.optString("reason", summary))
-                } else {
+                // Only an explicit success (or a bare report, whose completion is still
+                // independently verified by the orchestrator) may finish the task. Any
+                // other explicit status — "failure", "error", "partial" — must not be
+                // silently upgraded to success.
+                val status = params.optString("status", "").trim()
+                if (status.isBlank() || status.equals("success", ignoreCase = true)) {
                     AgentAction.FinishTask(summary)
+                } else {
+                    AgentAction.FailTask(
+                        params.optString("reason", "").ifBlank { "report_status reported '$status'" }
+                    )
                 }
             }
             else -> throw IllegalArgumentException("Unsupported action '$rawAction'")

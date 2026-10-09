@@ -14,6 +14,7 @@ import com.example.planning.PlanStepStatus
 import com.example.planning.PostconditionVerifier
 import com.example.planning.TaskPlan
 import com.example.planning.VerificationMethod
+import com.example.service.AgentExecutionService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -120,13 +121,20 @@ class TaskOrchestrator(
         _modelCalls.value = 0
         _fastPathSteps.value = 0
         stuckDetector.reset()
+        // Promote to a foreground service so a long automation survives the user
+        // leaving the app; the notification is removed when the task ends.
+        try {
+            AgentExecutionService.startService(context, goal)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not start foreground execution service: ${e.message}")
+        }
         scope.launch {
             taskDao.insertTask(newTask)
             runAgentLoop(newTask)
         }
     }
 
-    private suspend fun runAgentLoop(task: TaskEntity) {
+    private suspend fun runAgentLoop(task: TaskEntity, resumePlan: TaskPlan? = null) {
         executionJob = scope.launch {
             val maxSteps = task.maxSteps
             var lastActionResult: String? = null
@@ -151,42 +159,62 @@ class TaskOrchestrator(
                 _orchestratorState.value = OrchestratorState.Planning(0, task.userGoal)
                 val initialObservation = deviceAutomation.observe()
 
-                val planOutcome = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
-                    liteRtEngine.planTask(
-                        goal = task.userGoal,
-                        screenSummary = initialObservation.summary,
-                        foregroundPackage = initialObservation.packageName,
-                        historySummary = "",
-                        lastActionVerification = null,
-                        remainingStepBudget = maxSteps
-                    )
-                }
+                // Resuming a paused/confirmed task must continue the existing plan, not
+                // re-plan and replay it from step 0 (which would repeat already-executed
+                // — and possibly already-approved — actions).
+                val resumed = resumePlan?.takeIf { it.goal == task.userGoal }
 
-                var plan: TaskPlan = when (planOutcome) {
-                    is PlanOutcome.Planned -> {
-                        _usesModelPlanning.value = planOutcome.source == PlanSource.GEMMA_MODEL
-                        planOutcome.plan
+                var plan: TaskPlan
+                if (resumed != null) {
+                    // A step paused mid-execution is left in EXECUTING; reset it to PENDING
+                    // so it is actually retried rather than silently skipped.
+                    plan = resumed.copy(
+                        steps = resumed.steps.map {
+                            if (it.status == PlanStepStatus.EXECUTING) it.withStatus(PlanStepStatus.PENDING) else it
+                        }
+                    )
+                    _usesModelPlanning.value = plan.fromModel
+                    stuckDetector.reset()
+                    Log.i(TAG, "[RESUME] Continuing existing plan at step ${plan.completedCount()} of ${plan.size}")
+                } else {
+                    val planOutcome = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
+                        liteRtEngine.planTask(
+                            goal = task.userGoal,
+                            screenSummary = initialObservation.summary,
+                            foregroundPackage = initialObservation.packageName,
+                            historySummary = "",
+                            lastActionVerification = null,
+                            remainingStepBudget = maxSteps
+                        )
                     }
-                    is PlanOutcome.Unavailable -> {
-                        _usesModelPlanning.value = false
-                        val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
-                        Log.w(TAG, "Using fallback planner due to: ${planOutcome.reason}")
-                        fallbackPlan
-                    }
-                    is PlanOutcome.Rejected -> {
-                        _usesModelPlanning.value = false
-                        val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
-                        Log.w(TAG, "Using fallback planner due to: ${planOutcome.reason}")
-                        fallbackPlan
-                    }
-                    null -> {
-                        _usesModelPlanning.value = false
-                        val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
-                        Log.w(TAG, "Using fallback planner due to: plan timeout or null result")
-                        fallbackPlan
+
+                    plan = when (planOutcome) {
+                        is PlanOutcome.Planned -> {
+                            _usesModelPlanning.value = planOutcome.source == PlanSource.GEMMA_MODEL
+                            planOutcome.plan
+                        }
+                        is PlanOutcome.Unavailable -> {
+                            _usesModelPlanning.value = false
+                            val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
+                            Log.w(TAG, "Using fallback planner due to: ${planOutcome.reason}")
+                            fallbackPlan
+                        }
+                        is PlanOutcome.Rejected -> {
+                            _usesModelPlanning.value = false
+                            val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
+                            Log.w(TAG, "Using fallback planner due to: ${planOutcome.reason}")
+                            fallbackPlan
+                        }
+                        null -> {
+                            _usesModelPlanning.value = false
+                            val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
+                            Log.w(TAG, "Using fallback planner due to: plan timeout or null result")
+                            fallbackPlan
+                        }
                     }
                 }
                 _activePlan.value = plan
+                completedCount = plan.completedCount()
                 Log.i(TAG, "[PLAN] goal=\"${task.userGoal}\" steps=${plan.size} source=${if (_usesModelPlanning.value) "GEMMA" else "BASIC"}")
 
                 var observation = initialObservation
@@ -219,7 +247,7 @@ class TaskOrchestrator(
                     _orchestratorState.value = OrchestratorState.Planning(completedCount, task.userGoal, step.description, _usesModelPlanning.value)
 
                     val stuck = stuckDetector.recordStep(observation.fingerprint, step.rawActionName)
-                    val effectiveStep = if (stuck.isStuck) {
+                    if (stuck.isStuck) {
                         Log.w(TAG, "[STUCK] ${stuck.reason}")
                         _orchestratorState.value = OrchestratorState.Replanning(stuck.reason, stuck.suggestedRecovery)
                         when (stuck.suggestedRecovery) {
@@ -235,10 +263,12 @@ class TaskOrchestrator(
                             }
                             else -> delay(400)
                         }
-                        step
-                    } else {
-                        step
+                        // The recovery action changed the screen; re-observe so the
+                        // re-decided action (fast path or model) is chosen against the
+                        // recovered screen instead of the stale pre-recovery one.
+                        observation = deviceAutomation.observe()
                     }
+                    val effectiveStep = step
 
                     // Hybrid fast path: when the step's intent can be satisfied
                     // deterministically from the current accessibility tree (launch an
@@ -366,7 +396,11 @@ class TaskOrchestrator(
                         pendingRiskAction = action
                         pendingRiskTaskId = task.id
                         taskDao.updateTask(
-                            task.copy(status = "WAITING_CONFIRMATION", requiresRiskConfirmation = true, pendingRiskActionJson = action.getDisplayName())
+                            task.copy(
+                                status = "WAITING_CONFIRMATION",
+                                requiresRiskConfirmation = true,
+                                pendingRiskActionJson = sanitizeSensitiveData(action.getDisplayName())
+                            )
                         )
                         _orchestratorState.value = OrchestratorState.WaitingConfirmation(task.id, risk.riskType, risk.warningMessage, action)
                         return@launch
@@ -626,12 +660,22 @@ class TaskOrchestrator(
         Log.i(TAG, "[COMPLETE] $summary")
         taskDao.updateTask(task.copy(status = "COMPLETED", currentStep = completedCount, resultSummary = summary))
         _orchestratorState.value = OrchestratorState.Completed(task.id, summary)
+        stopExecutionService()
     }
 
     private suspend fun fail(task: TaskEntity, reason: String, step: Int) {
         Log.e(TAG, "[FAIL] $reason")
         taskDao.updateTask(task.copy(status = "FAILED", currentStep = step, resultSummary = reason))
         _orchestratorState.value = OrchestratorState.Failed(task.id, reason)
+        stopExecutionService()
+    }
+
+    private fun stopExecutionService() {
+        try {
+            AgentExecutionService.stopService(context)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not stop foreground execution service: ${e.message}")
+        }
     }
 
     fun confirmRiskAction(confirmed: Boolean) {
@@ -649,7 +693,10 @@ class TaskOrchestrator(
                 // resume from the SAME step index (the approved action has not run yet).
                 userConfirmedAction = action
                 _orchestratorState.value = OrchestratorState.Executing(task.currentStep, action, "User-confirmed action")
-                runAgentLoop(task.copy(currentStep = task.currentStep))
+                // Continue the existing plan rather than re-planning: re-running from
+                // step 0 would replay every already-completed action (and re-prompt for
+                // any earlier risky one) before reaching the approved step.
+                runAgentLoop(task.copy(currentStep = task.currentStep), resumePlan = _activePlan.value)
             } else {
                 taskDao.updateTask(task.copy(status = "CANCELLED", resultSummary = "User rejected risky action"))
                 userConfirmedAction = null
@@ -674,13 +721,16 @@ class TaskOrchestrator(
             taskDao.updateTaskStatus(taskId, "RUNNING")
             _currentTask.value = task
             _currentSteps.value = taskStepDao.getStepsForTaskList(taskId)
-            runAgentLoop(task)
+            // Continue the existing plan (if it is still in memory for this goal)
+            // instead of re-planning and replaying already-executed actions.
+            runAgentLoop(task, resumePlan = _activePlan.value)
         }
     }
 
     fun cancelCurrentTask() {
         executionJob?.cancel()
         executionJob = null
+        stopExecutionService()
         val task = _currentTask.value
         if (task != null) {
             scope.launch {

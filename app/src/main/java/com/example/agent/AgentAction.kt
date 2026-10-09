@@ -59,17 +59,35 @@ class RiskEvaluator {
     private val deleteKeywords = listOf("delete", "remove account", "wipe", "format", "clear data", "uninstall", "erase")
     private val externalSendKeywords = listOf("send message", "send email", "post", "tweet", "publish", "share to")
 
+    /** Generic confirm-style labels whose risk depends on the surrounding screen. */
+    private val genericConfirmKeywords = listOf("confirm", "continue", "submit", "proceed", "ok")
+
     fun evaluate(action: AgentAction, currentScreenContext: String): RiskAssessment {
         val screenLower = currentScreenContext.lowercase()
 
         when (action) {
             is AgentAction.Tap -> {
                 val target = (action.targetText ?: "").lowercase()
-                if (paymentKeywords.any { target.contains(it) || screenLower.contains(it) }) {
+                // Risk is judged from the element being tapped. Matching payment words
+                // against the whole screen made unrelated taps risky whenever the screen
+                // merely contained a word like "order" or "post" (e.g. a video feed or a
+                // sorted list), which blocked ordinary navigation.
+                if (paymentKeywords.any { target.contains(it) }) {
                     return RiskAssessment(
                         isRisky = true,
                         riskType = "Financial / Payment",
                         warningMessage = "Tapping '$target' appears to initiate a financial payment or checkout."
+                    )
+                }
+                // A generic "Confirm"/"Continue" is only financial when the screen is a
+                // checkout/payment surface.
+                if (genericConfirmKeywords.any { target.contains(it) } &&
+                    paymentKeywords.any { screenLower.contains(it) }
+                ) {
+                    return RiskAssessment(
+                        isRisky = true,
+                        riskType = "Financial / Payment",
+                        warningMessage = "Tapping '$target' on a payment screen may complete a financial transaction."
                     )
                 }
                 if (deleteKeywords.any { target.contains(it) }) {

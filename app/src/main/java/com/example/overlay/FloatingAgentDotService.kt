@@ -44,9 +44,14 @@ class FloatingAgentDotService : Service() {
             private set
 
         fun start(context: Context) {
-            if (Settings.canDrawOverlays(context)) {
+            if (!Settings.canDrawOverlays(context)) return
+            try {
                 val intent = Intent(context, FloatingAgentDotService::class.java)
                 context.startService(intent)
+            } catch (e: IllegalStateException) {
+                // Android 8+ blocks background startService; the caller is expected to be
+                // in the foreground. Swallow instead of crashing the host app.
+                Log.w(TAG, "Could not start floating dot service: ${e.message}")
             }
         }
 

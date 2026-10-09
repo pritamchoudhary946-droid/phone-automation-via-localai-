@@ -1,6 +1,7 @@
 package com.example.model
 
 import com.example.agent.AgentAction
+import com.example.agent.ForegroundPackageVerifier
 import com.example.planning.PlanStep
 import com.example.planning.PlanStepStatus
 import com.example.planning.TaskPlan
@@ -394,8 +395,7 @@ class HeuristicPlanner {
     }
 
     fun isHomeForeground(foregroundPackage: String?): Boolean {
-        val pkg = foregroundPackage?.lowercase() ?: return false
-        return pkg.contains("launcher") || pkg == "com.android.systemui"
+        return ForegroundPackageVerifier.isHomePackage(foregroundPackage)
     }
 
     fun settingIsEnabled(target: String?, lowerScreen: String): Boolean {

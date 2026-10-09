@@ -23,6 +23,31 @@ data class UiObservation(
             fingerprint = snapshot.getFingerprint()
         )
     }
+
+    /**
+     * True when [target] is (or sits inside) a tappable control on this screen.
+     *
+     * Android list rows usually expose a clickable container with a separate,
+     * non-clickable text label, so a bare `isClickable` check on the labelled node
+     * rejects real, tappable results. This treats a node as activatable when it is
+     * clickable, or when its bounds contain a clickable node. Editable fields are
+     * excluded for "open this item" decisions unless [allowEditable] is set, so a
+     * search box is not mistaken for a result.
+     */
+    fun hasActivatableLabel(target: String, allowEditable: Boolean = false): Boolean {
+        if (target.isBlank()) return false
+        val labelled = nodes.filter { it.packageName == null || it.packageName == packageName }
+            .filter { it.containsText(target) }
+            .filter { allowEditable || !it.isEditable }
+        return labelled.any { node ->
+            if (node.isClickable) return@any true
+            nodes.any { candidate ->
+                candidate.isClickable &&
+                    (candidate.packageName == null || candidate.packageName == packageName) &&
+                    candidate.bounds.contains(node.bounds)
+            }
+        }
+    }
 }
 
 /** Outcome of dispatching a single native action. */

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 data class ScreenEventState(
@@ -76,6 +77,13 @@ class AgentAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "AgentA11yService"
+
+        /** Bound on how long to wait for a gesture callback before declaring it unverified. */
+        private const val GESTURE_CALLBACK_TIMEOUT_MS = 5_000L
+
+        /** Bound on how long to wait for a screenshot callback before giving up. */
+        private const val SCREENSHOT_CALLBACK_TIMEOUT_MS = 5_000L
+
         var instance: AgentAccessibilityService? = null
             private set
 
@@ -445,39 +453,56 @@ class AgentAccessibilityService : AccessibilityService() {
 
     /**
      * Dispatches a gesture and captures the exact failure reason from callback.
+     *
+     * The continuation is resumed on a bounded timeout as well as from the callback:
+     * if the system never delivers onCompleted/onCancelled (seen during display
+     * transitions), the agent loop must not hang forever waiting on a gesture.
      */
-    suspend fun dispatchGestureWithResult(x: Float, y: Float): Pair<Boolean, String?> = suspendCancellableCoroutine { cont ->
+    suspend fun dispatchGestureWithResult(x: Float, y: Float): Pair<Boolean, String?> {
         val path = Path().apply {
             moveTo(x, y)
         }
         val stroke = GestureDescription.StrokeDescription(path, 0, 80)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        return dispatchGestureBounded(gesture, x, y, timeoutMs = GESTURE_CALLBACK_TIMEOUT_MS)
+    }
 
-        try {
-            val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    Log.d(TAG, "[GESTURE_CALLBACK] Gesture completed successfully at ($x, $y)")
-                    if (cont.isActive) cont.resume(Pair(true, null))
-                }
+    private suspend fun dispatchGestureBounded(
+        gesture: GestureDescription,
+        x: Float,
+        y: Float,
+        timeoutMs: Long
+    ): Pair<Boolean, String?> = withTimeoutOrNull(timeoutMs) {
+        suspendCancellableCoroutine { cont ->
+            try {
+                val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        Log.d(TAG, "[GESTURE_CALLBACK] Gesture completed successfully at ($x, $y)")
+                        if (cont.isActive) cont.resume(Pair(true, null))
+                    }
 
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    val reason = "dispatchGesture cancelled by system window manager (touch conflict or display transition at ($x, $y))"
-                    Log.e(TAG, "[GESTURE_CALLBACK] $reason")
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        val reason = "dispatchGesture cancelled by system window manager (touch conflict or display transition at ($x, $y))"
+                        Log.e(TAG, "[GESTURE_CALLBACK] $reason")
+                        if (cont.isActive) cont.resume(Pair(false, reason))
+                    }
+                }, null)
+
+                if (!dispatched) {
+                    val reason = "AccessibilityService.dispatchGesture returned false (service not ready, display off, or gesture rejected by system)"
+                    Log.e(TAG, "[GESTURE] $reason")
                     if (cont.isActive) cont.resume(Pair(false, reason))
                 }
-            }, null)
-
-            if (!dispatched) {
-                val reason = "AccessibilityService.dispatchGesture returned false (service not ready, display off, or gesture rejected by system)"
-                Log.e(TAG, "[GESTURE] $reason")
+            } catch (e: Exception) {
+                val reason = "Exception dispatching gesture at ($x, $y): ${e.localizedMessage}"
+                Log.e(TAG, "[GESTURE] $reason", e)
                 if (cont.isActive) cont.resume(Pair(false, reason))
             }
-        } catch (e: Exception) {
-            val reason = "Exception dispatching gesture at ($x, $y): ${e.localizedMessage}"
-            Log.e(TAG, "[GESTURE] $reason", e)
-            if (cont.isActive) cont.resume(Pair(false, reason))
         }
-    }
+    } ?: Pair(
+        false,
+        "dispatchGesture produced no callback within ${timeoutMs}ms (system did not confirm or cancel the gesture)"
+    )
 
     // ==========================================
     // 3. Text Input Handling (Focus then SetText)
@@ -752,7 +777,7 @@ class AgentAccessibilityService : AccessibilityService() {
     // 4. Directional Scrolling & Navigation
     // ==========================================
 
-    suspend fun scroll(direction: String): Boolean = suspendCancellableCoroutine { cont ->
+    suspend fun scroll(direction: String): Boolean {
         val displayMetrics = resources.displayMetrics
         val width = displayMetrics.widthPixels.toFloat()
         val height = displayMetrics.heightPixels.toFloat()
@@ -783,20 +808,10 @@ class AgentAccessibilityService : AccessibilityService() {
 
         val stroke = GestureDescription.StrokeDescription(path, 0, 300)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
-
-        val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                if (cont.isActive) cont.resume(true)
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                if (cont.isActive) cont.resume(false)
-            }
-        }, null)
-
-        if (!dispatched && cont.isActive) {
-            cont.resume(false)
-        }
+        val (completed, _) = dispatchGestureBounded(
+            gesture, width / 2, height / 2, timeoutMs = GESTURE_CALLBACK_TIMEOUT_MS
+        )
+        return completed
     }
 
     fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
@@ -827,34 +842,35 @@ class AgentAccessibilityService : AccessibilityService() {
         return res.success
     }
 
-    suspend fun takeScreenshotFallback(): Bitmap? = suspendCancellableCoroutine { cont ->
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            takeScreenshot(
-                android.view.Display.DEFAULT_DISPLAY,
-                mainExecutor,
-                object : TakeScreenshotCallback {
-                    override fun onSuccess(screenshot: ScreenshotResult) {
-                        try {
-                            val bitmap = Bitmap.wrapHardwareBuffer(
-                                screenshot.hardwareBuffer,
-                                screenshot.colorSpace
-                            )
-                            val copy = bitmap?.copy(Bitmap.Config.ARGB_8888, false)
-                            screenshot.hardwareBuffer.close()
-                            if (cont.isActive) cont.resume(copy)
-                        } catch (e: Exception) {
+    suspend fun takeScreenshotFallback(): Bitmap? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return withTimeoutOrNull(SCREENSHOT_CALLBACK_TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                takeScreenshot(
+                    android.view.Display.DEFAULT_DISPLAY,
+                    mainExecutor,
+                    object : TakeScreenshotCallback {
+                        override fun onSuccess(screenshot: ScreenshotResult) {
+                            try {
+                                val bitmap = Bitmap.wrapHardwareBuffer(
+                                    screenshot.hardwareBuffer,
+                                    screenshot.colorSpace
+                                )
+                                val copy = bitmap?.copy(Bitmap.Config.ARGB_8888, false)
+                                screenshot.hardwareBuffer.close()
+                                if (cont.isActive) cont.resume(copy)
+                            } catch (e: Exception) {
+                                if (cont.isActive) cont.resume(null)
+                            }
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            Log.e(TAG, "Screenshot failed with error code $errorCode")
                             if (cont.isActive) cont.resume(null)
                         }
                     }
-
-                    override fun onFailure(errorCode: Int) {
-                        Log.e(TAG, "Screenshot failed with error code $errorCode")
-                        if (cont.isActive) cont.resume(null)
-                    }
-                }
-            )
-        } else {
-            if (cont.isActive) cont.resume(null)
+                )
+            }
         }
     }
 }
