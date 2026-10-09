@@ -89,6 +89,15 @@ class AndroidDeviceAutomation(
                     message = if (r.success) "Tap succeeded via ${r.method}" else (r.failureReason ?: "Tap failed")
                 )
             }
+            is AgentAction.OpenItem -> {
+                // Reacquire the node from the live tree by its label; never reuse a stale node.
+                val r = service.performTap(action.targetText, null, null, uiChanged)
+                ActionResult(
+                    success = r.success,
+                    method = r.method,
+                    message = if (r.success) "Opened item '${action.targetText}' via ${r.method}" else (r.failureReason ?: "Open item failed")
+                )
+            }
             is AgentAction.TypeText -> {
                 val r = service.performTextInput(action.text, action.targetNodeId)
                 ActionResult(

@@ -26,6 +26,7 @@ open class ToolRegistry {
         const val TOOL_TAP_ELEMENT = "tap_element"
         const val TOOL_ENTER_TEXT = "enter_text"
         const val TOOL_OPEN_SEARCH = "open_search"
+        const val TOOL_OPEN_ITEM = "open_item"
         const val TOOL_SCROLL = "scroll"
         const val TOOL_NAVIGATE_BACK = "navigate_back"
         const val TOOL_NAVIGATE_HOME = "navigate_home"
@@ -64,6 +65,12 @@ open class ToolRegistry {
             description = "Opens the active app's search interface from a fresh accessibility observation (search icon/field), so text can be entered",
             requiredParameters = emptyList(),
             optionalParameters = listOf("query")
+        ),
+        TOOL_OPEN_ITEM to ToolDefinition(
+            name = TOOL_OPEN_ITEM,
+            description = "Opens an observed result item (e.g. a search result) by its visible label, reacquired from a fresh observation",
+            requiredParameters = listOf("targetText"),
+            optionalParameters = emptyList()
         ),
         TOOL_SCROLL to ToolDefinition(
             name = TOOL_SCROLL,
@@ -137,6 +144,13 @@ open class ToolRegistry {
                 }
             }
             is AgentAction.OpenSearch -> ToolValidationResult.Valid
+            is AgentAction.OpenItem -> {
+                if (action.targetText.isBlank()) {
+                    ToolValidationResult.Invalid("open_item requires a non-blank target label")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
             is AgentAction.Scroll -> {
                 val validDirs = setOf("up", "down", "left", "right")
                 if (!validDirs.contains(action.direction.lowercase())) {
