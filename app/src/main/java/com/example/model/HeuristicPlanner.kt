@@ -85,24 +85,59 @@ class HeuristicPlanner {
     /** Builds a nominal fallback plan. Actions are re-decided each iteration from fresh screen state. */
     fun toFallbackPlan(goal: String): TaskPlan {
         val subGoals = decomposeGoalIntoSubGoals(goal)
-        val steps = subGoals.mapIndexed { index, sg ->
-            PlanStep(
-                id = index + 1,
-                sequence = index + 1,
-                description = sg.description,
-                action = nominalActionFor(sg),
-                rawActionName = "basic_fallback",
-                expectedPostcondition = sg.description,
-                verification = verificationFor(sg.kind),
-                status = PlanStepStatus.PENDING
-            )
+        val steps = mutableListOf<PlanStep>()
+        var id = 1
+        for (sg in subGoals) {
+            when (sg.kind) {
+                SubGoalKind.SEARCH_QUERY -> {
+                    val query = sg.target ?: ""
+                    // A search needs the search UI opened before text can be entered:
+                    // the entry field is often not visible right after launch.
+                    steps.add(
+                        PlanStep(
+                            id = id++,
+                            sequence = steps.size + 1,
+                            description = "Open search interface",
+                            action = AgentAction.OpenSearch(query),
+                            rawActionName = "basic_fallback",
+                            expectedPostcondition = "Search interface open",
+                            verification = VerificationMethod.SCREEN_CHANGED,
+                            status = PlanStepStatus.PENDING
+                        )
+                    )
+                    steps.add(
+                        PlanStep(
+                            id = id++,
+                            sequence = steps.size + 1,
+                            description = "Search for \"$query\"",
+                            action = AgentAction.TypeText(query, null),
+                            rawActionName = "basic_fallback",
+                            expectedPostcondition = query,
+                            verification = VerificationMethod.RESULTS_PRESENT,
+                            status = PlanStepStatus.PENDING
+                        )
+                    )
+                }
+                else -> steps.add(
+                    PlanStep(
+                        id = id++,
+                        sequence = steps.size + 1,
+                        description = sg.description,
+                        action = nominalActionFor(sg),
+                        rawActionName = "basic_fallback",
+                        expectedPostcondition = sg.description,
+                        verification = verificationFor(sg.kind),
+                        status = PlanStepStatus.PENDING
+                    )
+                )
+            }
         }
         return TaskPlan(goal = goal, steps = steps, fromModel = false)
     }
 
     private fun nominalActionFor(subGoal: SubGoal): AgentAction = when (subGoal.kind) {
         SubGoalKind.LAUNCH_APP -> AgentAction.OpenApp(subGoal.target ?: "", null)
-        SubGoalKind.SEARCH_QUERY -> AgentAction.TypeText(subGoal.target ?: "", null)
+        SubGoalKind.SEARCH_QUERY -> AgentAction.OpenSearch(subGoal.target)
         SubGoalKind.OPEN_ITEM -> AgentAction.Tap(subGoal.target ?: "results", null, null)
         SubGoalKind.TOGGLE_SETTING -> AgentAction.Tap(subGoal.target ?: "", null, null)
         SubGoalKind.RETURN_HOME -> AgentAction.Home
@@ -206,9 +241,9 @@ class HeuristicPlanner {
             val query = activeSubGoal.target ?: "search query"
             val cleanQueryLower = query.lowercase()
             val queryAlreadyTyped = lowerHistory.contains("action typetext") && lastActionVerification?.startsWith("Success:", ignoreCase = true) == true
-            val editableFieldVisible = lowerScreen.contains("edittext") ||
-                Regex("editable:\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(screenSummary)
-            val queryVerifiedInField = editableFieldVisible && lowerScreen.contains(cleanQueryLower)
+            val editableFieldVisible = isEditableFieldVisible(screenSummary)
+            val queryVerifiedInField = editableFieldVisible &&
+                screenSummary.lineSequence().any { it.contains(cleanQueryLower, ignoreCase = true) }
 
             if (editableFieldVisible) {
                 if (!queryAlreadyTyped || !queryVerifiedInField) {
@@ -227,10 +262,12 @@ class HeuristicPlanner {
                     )
                 }
             } else {
+                // The entry field is not on screen yet: open the search interface
+                // first (fresh node lookup) instead of typing into nothing.
                 return AgentDecision(
-                    thought = "Locating search affordance on screen to start search for \"$query\".",
-                    action = AgentAction.Tap("Search", null, null),
-                    rawOutput = "Thought: Tapping Search icon.\nAction: tap(\"Search\")",
+                    thought = "Search field not visible. Opening the search interface via open_search.",
+                    action = AgentAction.OpenSearch(query),
+                    rawOutput = "Thought: Opening search interface.\nAction: open_search(\"$query\")",
                     activeSubGoal = activeSubGoal.description
                 )
             }
@@ -368,5 +405,17 @@ class HeuristicPlanner {
                 (line.contains("[checked]") ||
                     Regex("checked\\s*[:=]\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(line))
         }
+    }
+
+    /**
+     * True when the screen summary exposes an editable/input control. Recognises
+     * both the structured hints ([Input], "editable: true", EditText class) and the
+     * plain edittext marker, so it works against real accessibility summaries.
+     */
+    fun isEditableFieldVisible(screenSummary: String): Boolean {
+        val lower = screenSummary.lowercase()
+        return lower.contains("[input]") ||
+            lower.contains("edittext") ||
+            Regex("editable\\s*[:=]\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(screenSummary)
     }
 }

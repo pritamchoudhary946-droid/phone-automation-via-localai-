@@ -223,10 +223,23 @@ class TaskOrchestrator(
                         )
                     }
 
-                    val action = if (decision is com.example.planning.StepDecision.Act) {
+                    var action = if (decision is com.example.planning.StepDecision.Act) {
                         decision.action
                     } else {
                         effectiveStep.action
+                    }
+
+                    // Safety net: a text entry needs a real editable field in this fresh
+                    // observation. Several apps (YouTube among them) do not show the
+                    // search field until the search interface is opened, so open it first
+                    // instead of dispatching text into nothing.
+                    if (action is AgentAction.TypeText && !observationHasEditableField(observation)) {
+                        Log.w(TAG, "[GUARD] No editable field in the fresh observation; opening the search interface before typing.")
+                        _orchestratorState.value = OrchestratorState.Replanning(
+                            "No editable field visible; opening search interface first.",
+                            RecoveryStrategy.REPLAN_NEW_APPROACH
+                        )
+                        action = AgentAction.OpenSearch(action.text)
                     }
 
                     when (val validation = toolRegistry.validateAction(action)) {
@@ -442,6 +455,22 @@ class TaskOrchestrator(
         if (!result.success) {
             return PostconditionVerdict(false, "Failed: ${result.message} [method: ${result.method}]")
         }
+        if (action is AgentAction.OpenSearch) {
+            // A text-entry step that was re-routed into opening the search interface
+            // is progress, not completion: the text still has to be entered.
+            if (step.action !is AgentAction.OpenSearch) {
+                return PostconditionVerdict(false, "Opened the search interface; text still has to be entered")
+            }
+            // The step's declared intent was to open search: success means the search
+            // surface advanced, or an editable field is now genuinely exposed.
+            val nowEditable = post.nodes.any { it.isEditable }
+            val screenChanged = pre.fingerprint != post.fingerprint
+            return if (nowEditable || screenChanged) {
+                PostconditionVerdict(true, if (nowEditable) "Search field now present on screen" else "Search interface changed the screen")
+            } else {
+                PostconditionVerdict(false, "Search interface did not open (no editable field and no screen change)")
+            }
+        }
         val targetPkg = if (action is AgentAction.OpenApp) {
             action.packageName ?: appDirectory.resolvePackage(action.appQuery)
         } else {
@@ -467,6 +496,10 @@ class TaskOrchestrator(
     }
 
     private data class PostconditionVerdict(val satisfied: Boolean, val detail: String)
+
+    /** True when the fresh observation exposes an editable/input control. */
+    private fun observationHasEditableField(observation: UiObservation): Boolean =
+        observation.nodes.any { it.isEditable }
 
     private fun historySummary(): String = _currentSteps.value.takeLast(4).joinToString("\n") {
         "Step ${it.stepIndex}: ${it.actionType} (${it.actionPayloadJson}) -> ${it.verificationResult}"

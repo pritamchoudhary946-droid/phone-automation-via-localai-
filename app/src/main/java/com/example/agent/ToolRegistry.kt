@@ -25,6 +25,7 @@ open class ToolRegistry {
         const val TOOL_READ_SCREEN = "read_screen"
         const val TOOL_TAP_ELEMENT = "tap_element"
         const val TOOL_ENTER_TEXT = "enter_text"
+        const val TOOL_OPEN_SEARCH = "open_search"
         const val TOOL_SCROLL = "scroll"
         const val TOOL_NAVIGATE_BACK = "navigate_back"
         const val TOOL_NAVIGATE_HOME = "navigate_home"
@@ -57,6 +58,12 @@ open class ToolRegistry {
             description = "Injects text into an editable focused input field via ACTION_SET_TEXT",
             requiredParameters = listOf("text"),
             optionalParameters = listOf("targetNodeId")
+        ),
+        TOOL_OPEN_SEARCH to ToolDefinition(
+            name = TOOL_OPEN_SEARCH,
+            description = "Opens the active app's search interface from a fresh accessibility observation (search icon/field), so text can be entered",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("query")
         ),
         TOOL_SCROLL to ToolDefinition(
             name = TOOL_SCROLL,
@@ -129,6 +136,7 @@ open class ToolRegistry {
                     ToolValidationResult.Valid
                 }
             }
+            is AgentAction.OpenSearch -> ToolValidationResult.Valid
             is AgentAction.Scroll -> {
                 val validDirs = setOf("up", "down", "left", "right")
                 if (!validDirs.contains(action.direction.lowercase())) {
