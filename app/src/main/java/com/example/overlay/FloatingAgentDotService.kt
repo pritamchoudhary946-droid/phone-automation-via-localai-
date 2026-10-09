@@ -129,40 +129,24 @@ class FloatingAgentDotService : Service() {
         val frame = FrameLayout(this)
         frame.layoutParams = FrameLayout.LayoutParams(size, size)
 
-        // Glowing circular background
-        val backgroundDrawable = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            colors = intArrayOf(Color.parseColor("#00E5FF"), Color.parseColor("#033A52"), Color.parseColor("#0A1128"))
-            gradientType = GradientDrawable.RADIAL_GRADIENT
-            gradientRadius = size * 0.7f
-            setStroke(dpToPx(2.5f), Color.parseColor("#9CF4FF"))
-        }
-        frame.background = backgroundDrawable
-
-        // Center AI Icon / Glyphs
-        val icon = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_btn_speak_now)
-            setColorFilter(Color.BLACK)
-            val padding = dpToPx(13f)
-            setPadding(padding, padding, padding, padding)
-            tag = "dot_center_icon"
-        }
-        frame.addView(icon, FrameLayout.LayoutParams(size, size))
+        // Glassy animated AI orb (OpenAI/ChatGPT-style dot).
+        val orb = AgentOrbView(this)
+        frame.addView(orb, FrameLayout.LayoutParams(size, size))
 
         // State indicator badge (top right)
         val badge = View(this).apply {
             val badgeSize = dpToPx(13f)
             val badgeDrawable = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#10B981")) // Mint success green
-                setStroke(dpToPx(1.5f), Color.BLACK)
+                setColor(Color.parseColor("#12B886")) // Mint success green
+                setStroke(dpToPx(1.5f), Color.WHITE)
             }
             background = badgeDrawable
             tag = "status_badge"
             val badgeParams = FrameLayout.LayoutParams(badgeSize, badgeSize).apply {
                 gravity = Gravity.TOP or Gravity.END
-                topMargin = dpToPx(2f)
-                rightMargin = dpToPx(2f)
+                topMargin = dpToPx(1f)
+                rightMargin = dpToPx(1f)
             }
             layoutParams = badgeParams
         }
@@ -250,9 +234,9 @@ class FloatingAgentDotService : Service() {
             val pad = dpToPx(14f)
             setPadding(pad, pad, pad, pad)
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#0F172A")) // Dark Obsidian Slate
-                cornerRadius = dpToPx(18f).toFloat()
-                setStroke(dpToPx(1.8f), Color.parseColor("#00E5FF"))
+                setColor(Color.parseColor("#FFFFFF")) // Clean light surface
+                cornerRadius = dpToPx(20f).toFloat()
+                setStroke(dpToPx(1.5f), Color.parseColor("#E1E4F0"))
             }
         }
 
@@ -273,16 +257,16 @@ class FloatingAgentDotService : Service() {
         }
 
         val titleText = TextView(this).apply {
-            text = "OmniAgent AI Phone Controller"
-            setTextColor(Color.parseColor("#00E5FF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            text = "OmniAgent"
+            setTextColor(Color.parseColor("#4A46D6"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
 
         val closeBtn = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-            setColorFilter(Color.WHITE)
+            setColorFilter(Color.parseColor("#1B1C33"))
             val p = dpToPx(4f)
             setPadding(p, p, p, p)
             setOnClickListener { hidePanel() }
@@ -295,9 +279,9 @@ class FloatingAgentDotService : Service() {
         // Status Banner Text
         val statusText = TextView(this).apply {
             text = "Ready • Gol dot se phone control karein"
-            setTextColor(Color.parseColor("#94A3B8"))
+            setTextColor(Color.parseColor("#5A5F78"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            setPadding(0, dpToPx(4f), 0, dpToPx(8f))
+            setPadding(0, dpToPx(4f), 0, dpToPx(10f))
             tag = "panel_status_text"
         }
         container.addView(statusText)
@@ -310,14 +294,15 @@ class FloatingAgentDotService : Service() {
 
         val editInput = EditText(this).apply {
             hint = "Bol ke ya type karke command dein..."
-            setHintTextColor(Color.parseColor("#64748B"))
-            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#9AA0B6"))
+            setTextColor(Color.parseColor("#1B1C33"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1E293B"))
-                cornerRadius = dpToPx(8f).toFloat()
+                setColor(Color.parseColor("#F1F3FA"))
+                cornerRadius = dpToPx(10f).toFloat()
+                setStroke(dpToPx(1f), Color.parseColor("#E1E4F0"))
             }
-            val editPad = dpToPx(8f)
+            val editPad = dpToPx(10f)
             setPadding(editPad, editPad, editPad, editPad)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             imeOptions = EditorInfo.IME_ACTION_GO
@@ -337,12 +322,12 @@ class FloatingAgentDotService : Service() {
 
         val micBtn = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_btn_speak_now)
-            setColorFilter(Color.parseColor("#00E5FF"))
+            setColorFilter(Color.parseColor("#4A46D6"))
             val micPad = dpToPx(7f)
             setPadding(micPad, micPad, micPad, micPad)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#00384D"))
+                setColor(Color.parseColor("#E3E2FF"))
             }
             tag = "panel_mic_button"
             setOnClickListener {
@@ -352,12 +337,12 @@ class FloatingAgentDotService : Service() {
 
         val sendBtn = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_media_play)
-            setColorFilter(Color.BLACK)
+            setColorFilter(Color.WHITE)
             val btnPad = dpToPx(6f)
             setPadding(btnPad, btnPad, btnPad, btnPad)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#00E5FF"))
+                setColor(Color.parseColor("#4A46D6"))
             }
             val ml = dpToPx(6f)
             layoutParams = LinearLayout.LayoutParams(dpToPx(34f), dpToPx(34f)).apply {
@@ -382,26 +367,26 @@ class FloatingAgentDotService : Service() {
 
         // Section: Direct Phone Controls Label
         val sectionLabel = TextView(this).apply {
-            text = "Phone Controlling Functions:"
-            setTextColor(Color.parseColor("#38BDF8"))
+            text = "Quick Controls"
+            setTextColor(Color.parseColor("#4A46D6"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setPadding(0, dpToPx(10f), 0, dpToPx(4f))
+            setPadding(0, dpToPx(12f), 0, dpToPx(4f))
         }
         container.addView(sectionLabel)
 
         // Function helper to create stylish control buttons
-        fun createControlBtn(label: String, bgColor: String = "#1E293B", textColor: String = "#FFFFFF", onClick: () -> Unit): Button {
+        fun createControlBtn(label: String, bgColor: String = "#F1F3FA", textColor: String = "#1B1C33", onClick: () -> Unit): Button {
             return Button(this).apply {
                 text = label
                 textSize = 10f
                 setTextColor(Color.parseColor(textColor))
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor(bgColor))
-                    cornerRadius = dpToPx(6f).toFloat()
-                    setStroke(dpToPx(1f), Color.parseColor("#334155"))
+                    cornerRadius = dpToPx(8f).toFloat()
+                    setStroke(dpToPx(1f), Color.parseColor("#E1E4F0"))
                 }
-                layoutParams = LinearLayout.LayoutParams(0, dpToPx(34f), 1f).apply {
+                layoutParams = LinearLayout.LayoutParams(0, dpToPx(36f), 1f).apply {
                     setMargins(dpToPx(2f), 0, dpToPx(2f), 0)
                 }
                 setPadding(0, 0, 0, 0)
@@ -417,16 +402,16 @@ class FloatingAgentDotService : Service() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dpToPx(2f), 0, dpToPx(4f))
         }
-        controlsRow1.addView(createControlBtn("🏠 Home") {
+        controlsRow1.addView(createControlBtn("Home") {
             executeDirectPhoneAction("Home") { AgentAccessibilityService.instance?.pressHome() }
         })
-        controlsRow1.addView(createControlBtn("◀ Back") {
+        controlsRow1.addView(createControlBtn("Back") {
             executeDirectPhoneAction("Back") { AgentAccessibilityService.instance?.pressBack() }
         })
-        controlsRow1.addView(createControlBtn("📱 Recents") {
+        controlsRow1.addView(createControlBtn("Recents") {
             executeDirectPhoneAction("Recent Apps") { AgentAccessibilityService.instance?.pressRecents() }
         })
-        controlsRow1.addView(createControlBtn("📸 Shot") {
+        controlsRow1.addView(createControlBtn("Screenshot") {
             executeDirectPhoneAction("Screenshot") { AgentAccessibilityService.instance?.takeSystemScreenshot() }
         })
         container.addView(controlsRow1)
@@ -436,20 +421,20 @@ class FloatingAgentDotService : Service() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dpToPx(2f), 0, dpToPx(4f))
         }
-        controlsRow2.addView(createControlBtn("⬇ Down") {
+        controlsRow2.addView(createControlBtn("Down") {
             scope.launch { AgentAccessibilityService.instance?.scroll("down") }
         })
-        controlsRow2.addView(createControlBtn("⬆ Up") {
+        controlsRow2.addView(createControlBtn("Up") {
             scope.launch { AgentAccessibilityService.instance?.scroll("up") }
         })
-        controlsRow2.addView(createControlBtn("👁 Read") {
+        controlsRow2.addView(createControlBtn("Read") {
             triggerReadScreen()
             hidePanel()
         })
-        controlsRow2.addView(createControlBtn("🔔 Notifs") {
+        controlsRow2.addView(createControlBtn("Notifs") {
             executeDirectPhoneAction("Notifications") { AgentAccessibilityService.instance?.openNotifications() }
         })
-        controlsRow2.addView(createControlBtn("🛑 Stop", "#7F1D1D", "#F87171") {
+        controlsRow2.addView(createControlBtn("Stop", "#FEE2E2", "#DC2626") {
             OmniAgentApplication.instance.orchestrator.cancelCurrentTask()
             Toast.makeText(this, "OmniAgent: Task Stopped", Toast.LENGTH_SHORT).show()
             hidePanel()
@@ -461,19 +446,19 @@ class FloatingAgentDotService : Service() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dpToPx(4f), 0, 0)
         }
-        appRow.addView(createControlBtn("YouTube", "#172554", "#93C5FD") {
+        appRow.addView(createControlBtn("YouTube", "#E3E2FF", "#4A46D6") {
             quickLaunchApp("youtube")
         })
-        appRow.addView(createControlBtn("Chrome", "#172554", "#93C5FD") {
+        appRow.addView(createControlBtn("Chrome", "#E3E2FF", "#4A46D6") {
             quickLaunchApp("chrome")
         })
-        appRow.addView(createControlBtn("Camera", "#172554", "#93C5FD") {
+        appRow.addView(createControlBtn("Camera", "#E3E2FF", "#4A46D6") {
             quickLaunchApp("camera")
         })
-        appRow.addView(createControlBtn("Settings", "#172554", "#93C5FD") {
+        appRow.addView(createControlBtn("Settings", "#E3E2FF", "#4A46D6") {
             quickLaunchApp("settings")
         })
-        appRow.addView(createControlBtn("WhatsApp", "#14532D", "#86EFAC") {
+        appRow.addView(createControlBtn("WhatsApp", "#DCFCE7", "#15803D") {
             quickLaunchApp("whatsapp")
         })
         container.addView(appRow)
@@ -659,13 +644,13 @@ class FloatingAgentDotService : Service() {
             micBtn.setColorFilter(Color.WHITE)
             micBtn.background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#EF4444")) // Red pulsing
+                setColor(Color.parseColor("#F43F5E")) // Red pulsing
             }
         } else {
-            micBtn.setColorFilter(Color.parseColor("#00E5FF"))
+            micBtn.setColorFilter(Color.parseColor("#4A46D6"))
             micBtn.background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#00384D"))
+                setColor(Color.parseColor("#E3E2FF"))
             }
         }
     }
@@ -802,20 +787,20 @@ class FloatingAgentDotService : Service() {
         val statusText = panelView?.findViewWithTag<TextView>("panel_status_text")
 
         val (color, text) = when (state) {
-            is OrchestratorState.Idle -> Color.parseColor("#10B981") to "Ready • Gol dot se phone control karein"
-            is OrchestratorState.Planning -> Color.parseColor("#00E5FF") to "Thinking: Gemma Planning Step ${state.stepIndex}..."
-            is OrchestratorState.Executing -> Color.parseColor("#38BDF8") to "Acting: ${state.action.getDisplayName()}"
+            is OrchestratorState.Idle -> Color.parseColor("#12B886") to "Ready • Gol dot se phone control karein"
+            is OrchestratorState.Planning -> Color.parseColor("#F59E0B") to "Thinking: Gemma Planning Step ${state.stepIndex}..."
+            is OrchestratorState.Executing -> Color.parseColor("#5B5BE8") to "Acting: ${state.action.getDisplayName()}"
             is OrchestratorState.Replanning -> Color.parseColor("#F59E0B") to "Replanning alternative path..."
-            is OrchestratorState.WaitingConfirmation -> Color.parseColor("#EF4444") to "Waiting Confirmation for ${state.riskType}!"
+            is OrchestratorState.WaitingConfirmation -> Color.parseColor("#F43F5E") to "Waiting Confirmation for ${state.riskType}!"
             is OrchestratorState.Paused -> Color.parseColor("#F59E0B") to "Agent Task Paused"
-            is OrchestratorState.Completed -> Color.parseColor("#10B981") to "Task Completed: ${state.summary}"
-            is OrchestratorState.Failed -> Color.parseColor("#EF4444") to "Task Failed: ${state.reason}"
+            is OrchestratorState.Completed -> Color.parseColor("#12B886") to "Task Completed: ${state.summary}"
+            is OrchestratorState.Failed -> Color.parseColor("#F43F5E") to "Task Failed: ${state.reason}"
         }
 
         badge?.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(color)
-            setStroke(dpToPx(1.5f), Color.BLACK)
+            setStroke(dpToPx(1.5f), Color.WHITE)
         }
 
         statusText?.text = text

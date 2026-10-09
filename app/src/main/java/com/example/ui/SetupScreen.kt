@@ -200,9 +200,9 @@ fun SetupScreen(
                                 .testTag("start_download_button"),
                             colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
                         ) {
-                            Icon(Icons.Default.Download, contentDescription = null, tint = Color.Black)
+                            Icon(Icons.Default.Download, contentDescription = null, tint = Color.White)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Download Gemma 4 E2B (~2.59 GB)", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text("Download Gemma 4 E2B (~2.59 GB)", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                     is ModelDownloadState.CheckingStorage -> {
@@ -289,9 +289,9 @@ fun SetupScreen(
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Resume Download", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text("Resume Download", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                     is ModelDownloadState.Verifying -> {
@@ -353,9 +353,9 @@ fun SetupScreen(
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black)
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Retry Download", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text("Retry Download", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -583,7 +583,7 @@ fun SetupScreen(
         ) {
             Text(
                 text = "Enter OmniAgent Dashboard",
-                color = if (downloadState is ModelDownloadState.Ready || isAccessibilityEnabled) Color.Black else Color.Gray,
+                color = if (downloadState is ModelDownloadState.Ready || isAccessibilityEnabled) Color.White else Color.Gray,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
             )
@@ -591,7 +591,7 @@ fun SetupScreen(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = null,
-                tint = if (downloadState is ModelDownloadState.Ready || isAccessibilityEnabled) Color.Black else Color.Gray
+                tint = if (downloadState is ModelDownloadState.Ready || isAccessibilityEnabled) Color.White else Color.Gray
             )
         }
 
