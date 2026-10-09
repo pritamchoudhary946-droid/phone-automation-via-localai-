@@ -9,6 +9,9 @@ import com.example.agent.AppDirectory
 import com.example.agent.RecoveryStrategy
 import com.example.agent.RiskEvaluator
 import com.example.agent.StuckLoopDetector
+import com.example.model.LiteRtEngine
+import com.example.model.LiteRtModelManager
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -48,6 +51,15 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `risk evaluator detects sending messages or posts`() {
+        val evaluator = RiskEvaluator()
+        val sendAction = AgentAction.Tap("Send Message to Group", null, null)
+        val assessment = evaluator.evaluate(sendAction, "Chat Conversation")
+        assertTrue(assessment.isRisky)
+        assertEquals("External Communication", assessment.riskType)
+    }
+
+    @Test
     fun `risk evaluator allows harmless navigation actions`() {
         val evaluator = RiskEvaluator()
         val harmlessAction = AgentAction.Tap("Explore Videos", null, null)
@@ -56,25 +68,54 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `stuck loop detector flags consecutive identical actions`() {
+    fun `stuck loop detector flags consecutive identical actions and suggests progressive recovery`() {
         val detector = StuckLoopDetector()
         val fingerprint = "com.google.android.youtube_search_button"
         val actionName = "Tap: 'Search'"
 
-        detector.recordStep(fingerprint, actionName)
-        val secondStep = detector.recordStep(fingerprint, actionName)
-        val thirdStep = detector.recordStep(fingerprint, actionName)
+        val firstStep = detector.recordStep(fingerprint, actionName)
+        assertFalse(firstStep.isStuck)
 
+        val secondStep = detector.recordStep(fingerprint, actionName)
+        assertFalse(secondStep.isStuck)
+
+        val thirdStep = detector.recordStep(fingerprint, actionName)
         assertTrue(thirdStep.isStuck)
-        assertTrue(thirdStep.suggestedRecovery != RecoveryStrategy.NONE)
+        assertEquals(RecoveryStrategy.SCROLL_TO_DISCOVER, thirdStep.suggestedRecovery)
+
+        val fourthStep = detector.recordStep(fingerprint, actionName)
+        assertTrue(fourthStep.isStuck)
+        assertEquals(RecoveryStrategy.PRESS_BACK_TO_UNBLOCK, fourthStep.suggestedRecovery)
     }
 
     @Test
-    fun `app directory resolves package aliases`() {
+    fun `app directory resolves package aliases accurately`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appDirectory = AppDirectory(context)
-        val resolved = appDirectory.resolvePackage("youtube")
-        assertTrue(resolved == null || resolved.contains("youtube"))
+
+        val yt = appDirectory.resolvePackage("youtube")
+        assertNotNull(yt)
+        assertTrue(yt!!.contains("youtube", ignoreCase = true))
+
+        val chrome = appDirectory.resolvePackage("chrome")
+        assertNotNull(chrome)
+        assertTrue(chrome!!.contains("chrome", ignoreCase = true))
+
+        val settings = appDirectory.resolvePackage("settings")
+        assertNotNull(settings)
+        assertTrue(settings!!.contains("settings", ignoreCase = true))
+
+        val whatsapp = appDirectory.resolvePackage("whatsapp")
+        assertNotNull(whatsapp)
+        assertTrue(whatsapp!!.contains("whatsapp", ignoreCase = true))
+
+        val maps = appDirectory.resolvePackage("maps")
+        assertNotNull(maps)
+        assertTrue(maps!!.contains("maps", ignoreCase = true))
+
+        val camera = appDirectory.resolvePackage("camera")
+        assertNotNull(camera)
+        assertTrue(camera!!.contains("camera", ignoreCase = true))
     }
 
     @Test
@@ -238,7 +279,81 @@ class ExampleRobolectricTest {
         assertTrue(result.success)
         assertEquals("ACTION_SET_TEXT", result.method)
     }
+
+    @Test
+    fun `litert engine plans full youtube search sequence correctly`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val modelManager = LiteRtModelManager(context)
+        val engine = LiteRtEngine(context, modelManager)
+
+        val goal = "Open YouTube and search for lo-fi beats"
+
+        // Phase 1: On Home screen -> decides to open YouTube
+        val step1 = engine.reasonAndPlan(
+            goal = goal,
+            screenSummary = "Active Package: com.android.launcher\nHome screen",
+            historySummary = "",
+            lastActionVerification = null
+        )
+        assertTrue(step1.action is AgentAction.OpenApp)
+        assertEquals("youtube", (step1.action as AgentAction.OpenApp).appQuery)
+
+        // Phase 2: Inside YouTube with Search icon visible -> decides to tap Search
+        val step2 = engine.reasonAndPlan(
+            goal = goal,
+            screenSummary = "Active Package: com.google.android.youtube\n- Button [Search] (clickable: true)",
+            historySummary = "Step 0: Action OpenApp (youtube) -> Success",
+            lastActionVerification = "Success: Launched youtube"
+        )
+        assertTrue(step2.action is AgentAction.Tap)
+        assertEquals("Search", (step2.action as AgentAction.Tap).targetText)
+
+        // Phase 3: In Search edit text -> types query via ACTION_SET_TEXT
+        val step3 = engine.reasonAndPlan(
+            goal = goal,
+            screenSummary = "Active Package: com.google.android.youtube\n- EditText [input] \"Search YouTube\" (focused: true, editable: true)",
+            historySummary = "Step 1: Action Tap (Search) -> Success",
+            lastActionVerification = "Success: Tap completed"
+        )
+        assertTrue(step3.action is AgentAction.TypeText)
+        assertEquals("lo-fi beats", (step3.action as AgentAction.TypeText).text)
+
+        // Phase 4: Query is typed in EditText -> submits search
+        val step4 = engine.reasonAndPlan(
+            goal = goal,
+            screenSummary = "Active Package: com.google.android.youtube\n- EditText [input] \"lo-fi beats\" (focused: true, editable: true)",
+            historySummary = "Step 2: Action TypeText (\"lo-fi beats\") -> Success",
+            lastActionVerification = "Success: Injected query"
+        )
+        assertTrue(step4.action is AgentAction.Tap)
+
+        // Phase 5: Search results visible -> verifies and completes task
+        val step5 = engine.reasonAndPlan(
+            goal = goal,
+            screenSummary = "Active Package: com.google.android.youtube\n- Text \"Lofi Beats 24/7 Radio Stream\"\n- Text \"1.2M views • Lofi Girl channel\"\n- RecyclerView [results]",
+            historySummary = "Step 2: Action TypeText (\"lo-fi beats\") -> Success\nStep 3: Action Tap (lo-fi beats) -> Success",
+            lastActionVerification = "Success: Results loaded"
+        )
+        assertTrue(step5.action is AgentAction.FinishTask)
+        assertTrue((step5.action as AgentAction.FinishTask).summary.contains("lo-fi beats"))
+    }
+
+    @Test
+    fun `litert engine plans settings dark mode toggle correctly`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val modelManager = LiteRtModelManager(context)
+        val engine = LiteRtEngine(context, modelManager)
+
+        val goal = "Open Settings and turn on Dark mode"
+
+        // In Settings screen with Dark mode visible -> taps Dark mode
+        val decision = engine.reasonAndPlan(
+            goal = goal,
+            screenSummary = "Active Package: com.android.settings\n- Switch [Dark mode] (checked: false, clickable: true)",
+            historySummary = "Step 0: Action OpenApp (settings) -> Success",
+            lastActionVerification = "Success: In Settings"
+        )
+        assertTrue(decision.action is AgentAction.Tap)
+        assertTrue((decision.action as AgentAction.Tap).targetText?.contains("Dark mode", ignoreCase = true) == true)
+    }
 }
-
-
-

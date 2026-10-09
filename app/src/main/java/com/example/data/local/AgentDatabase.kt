@@ -29,7 +29,7 @@ abstract class AgentDatabase : RoomDatabase() {
                     context.applicationContext,
                     AgentDatabase::class.java,
                     "omni_agent_db"
-                ).fallbackToDestructiveMigration().build()
+                ).fallbackToDestructiveMigration(true).build()
                 INSTANCE = instance
                 instance
             }

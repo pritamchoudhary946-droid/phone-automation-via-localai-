@@ -151,6 +151,11 @@ class LiteRtModelManager(private val context: Context) {
                     }
                 }
 
+                val isPartial = response.code == 206
+                if (!isPartial) {
+                    existingBytes = 0L
+                }
+
                 val body = response.body ?: throw RuntimeException("Empty response body from server")
                 val contentLength = body.contentLength()
                 val totalBytes = if (contentLength > 0) existingBytes + contentLength else ESTIMATED_MODEL_BYTES
@@ -163,7 +168,7 @@ class LiteRtModelManager(private val context: Context) {
                     etaSeconds = 0
                 )
 
-                val outputStream = FileOutputStream(partFile, existingBytes > 0)
+                val outputStream = FileOutputStream(partFile, isPartial && existingBytes > 0)
                 val buffer = ByteArray(64 * 1024) // 64 KB buffer
                 var bytesRead: Int
                 var downloadedSinceStart = 0L

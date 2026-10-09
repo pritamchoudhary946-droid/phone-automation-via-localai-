@@ -2,11 +2,13 @@ package com.example.ui
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -15,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,11 +51,15 @@ fun SetupScreen(
     var isAccessibilityEnabled by remember {
         mutableStateOf(AgentAccessibilityService.isAccessibilitySettingsEnabled(context))
     }
+    var isOverlayEnabled by remember {
+        mutableStateOf(Settings.canDrawOverlays(context))
+    }
 
-    // Refresh accessibility state periodically
+    // Refresh permissions state periodically
     LaunchedEffect(Unit) {
         while (true) {
             isAccessibilityEnabled = AgentAccessibilityService.isAccessibilitySettingsEnabled(context)
+            isOverlayEnabled = Settings.canDrawOverlays(context)
             kotlinx.coroutines.delay(1500)
         }
     }
@@ -442,11 +449,113 @@ fun SetupScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("open_accessibility_settings_button"),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = Brush.horizontalGradient(listOf(CyanPrimary, ElectricBlue)))
+                    border = BorderStroke(1.dp, Brush.horizontalGradient(listOf(CyanPrimary, ElectricBlue)))
                 ) {
                     Icon(Icons.Default.Settings, contentDescription = null, tint = CyanPrimary)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Open Accessibility Settings", color = CyanPrimary)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Step 3: Gol Dot (Display Over Other Apps Permission) Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("overlay_permission_card"),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            shape = RoundedCornerShape(16.dp),
+            border = CardDefaults.outlinedCardBorder()
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.RadioButtonChecked,
+                        contentDescription = "Gol Dot",
+                        tint = CyanPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "3. Gol Dot (Display Over Apps)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Gol dot ko kisi bhi app ke upar floating bubble ki tarah chalane ke liye Display Over Other Apps permission zaroori hai.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isOverlayEnabled) MintSuccess.copy(alpha = 0.15f)
+                            else AmberWarning.copy(alpha = 0.15f)
+                        )
+                        .border(
+                            1.dp,
+                            if (isOverlayEnabled) MintSuccess.copy(alpha = 0.4f)
+                            else AmberWarning.copy(alpha = 0.4f),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (isOverlayEnabled) Icons.Default.CheckCircle else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = if (isOverlayEnabled) MintSuccess else AmberWarning
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = if (isOverlayEnabled) "Overlay Permission Granted" else "Overlay Permission Needed",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isOverlayEnabled) MintSuccess else AmberWarning
+                        )
+                        Text(
+                            text = if (isOverlayEnabled) "Gol dot screen par floating controller ke liye ready hai" else "Settings me toggle karke allow karein",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}")
+                        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("open_overlay_settings_button"),
+                    border = BorderStroke(1.dp, Brush.horizontalGradient(listOf(CyanPrimary, ElectricBlue)))
+                ) {
+                    Icon(Icons.Default.Layers, contentDescription = null, tint = CyanPrimary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Enable Display Over Apps", color = CyanPrimary)
                 }
             }
         }
@@ -475,7 +584,7 @@ fun SetupScreen(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Icon(
-                imageVector = Icons.Default.ArrowForward,
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = null,
                 tint = if (downloadState is ModelDownloadState.Ready || isAccessibilityEnabled) Color.Black else Color.Gray
             )

@@ -11,17 +11,27 @@ class AppDirectory(private val context: Context) {
     private val staticAliases = mapOf(
         "youtube" to listOf("com.google.android.youtube"),
         "chrome" to listOf("com.android.chrome"),
+        "browser" to listOf("com.android.chrome"),
         "settings" to listOf("com.android.settings"),
-        "camera" to listOf("com.google.android.GoogleCamera", "com.android.camera"),
+        "camera" to listOf("com.android.camera", "com.google.android.GoogleCamera"),
         "messages" to listOf("com.google.android.apps.messaging", "com.android.mms"),
         "maps" to listOf("com.google.android.apps.maps"),
         "spotify" to listOf("com.spotify.music"),
+        "music" to listOf("com.spotify.music", "com.google.android.apps.youtube.music"),
         "calculator" to listOf("com.google.android.calculator", "com.android.calculator2"),
         "clock" to listOf("com.google.android.deskclock", "com.android.deskclock"),
         "gmail" to listOf("com.google.android.gm"),
+        "email" to listOf("com.google.android.gm"),
         "whatsapp" to listOf("com.whatsapp"),
         "files" to listOf("com.google.android.apps.nbu.files", "com.android.documentsui"),
-        "calendar" to listOf("com.google.android.calendar")
+        "calendar" to listOf("com.google.android.calendar"),
+        "phone" to listOf("com.google.android.dialer", "com.android.dialer"),
+        "dialer" to listOf("com.google.android.dialer", "com.android.dialer"),
+        "contacts" to listOf("com.google.android.contacts", "com.android.contacts"),
+        "photos" to listOf("com.google.android.apps.photos", "com.android.gallery3d"),
+        "gallery" to listOf("com.google.android.apps.photos", "com.android.gallery3d"),
+        "playstore" to listOf("com.android.vending"),
+        "play store" to listOf("com.android.vending")
     )
 
     fun resolvePackage(query: String): String? {
@@ -33,6 +43,8 @@ class AppDirectory(private val context: Context) {
                 for (pkg in packages) {
                     if (isPackageInstalled(pkg)) return pkg
                 }
+                // Fallback to canonical package name if package query is restricted
+                return packages.firstOrNull()
             }
         }
 
@@ -58,7 +70,7 @@ class AppDirectory(private val context: Context) {
         return null
     }
 
-    private fun isPackageInstalled(packageName: String): Boolean {
+    fun isPackageInstalled(packageName: String): Boolean {
         return try {
             context.packageManager.getPackageInfo(packageName, 0)
             true
@@ -96,4 +108,3 @@ class AppDirectory(private val context: Context) {
         }
     }
 }
-

@@ -616,6 +616,30 @@ class AgentAccessibilityService : AccessibilityService() {
     fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
     fun pressHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
     fun pressRecents(): Boolean = performGlobalAction(GLOBAL_ACTION_RECENTS)
+    fun openNotifications(): Boolean = performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+    fun openQuickSettings(): Boolean = performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
+    fun pressPowerDialog(): Boolean = performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
+
+    fun pressLockScreen(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+        } else {
+            false
+        }
+    }
+
+    fun takeSystemScreenshot(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)
+        } else {
+            false
+        }
+    }
+
+    suspend fun tapTargetDirectly(targetText: String): Boolean {
+        val res = performTap(targetText, null, null) { true }
+        return res.success
+    }
 
     suspend fun takeScreenshotFallback(): Bitmap? = suspendCancellableCoroutine { cont ->
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

@@ -22,6 +22,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import com.example.overlay.FloatingAgentDotService
 import com.example.agent.AgentAction
 import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
@@ -43,11 +48,14 @@ fun AgentDashboardScreen(
 
     var goalInput by remember { mutableStateOf("") }
     var resourceStats by remember { mutableStateOf(liteRtEngine.getResourceStats()) }
+    val context = LocalContext.current
+    var isDotEnabled by remember { mutableStateOf(FloatingAgentDotService.isRunning) }
 
     LaunchedEffect(Unit) {
         while (true) {
             resourceStats = liteRtEngine.getResourceStats()
-            kotlinx.coroutines.delay(3000)
+            isDotEnabled = FloatingAgentDotService.isRunning
+            kotlinx.coroutines.delay(2000)
         }
     }
 
@@ -207,6 +215,88 @@ fun AgentDashboardScreen(
         ) {
             item {
                 Spacer(modifier = Modifier.height(4.dp))
+                // Gol Dot (Floating Controller) Card
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("floating_dot_card"),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(16.dp),
+                    border = CardDefaults.outlinedCardBorder()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isDotEnabled) CyanPrimary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant)
+                                        .border(1.5.dp, if (isDotEnabled) CyanPrimary else Color.Gray, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.RadioButtonChecked,
+                                        contentDescription = "Gol Dot",
+                                        tint = if (isDotEnabled) CyanPrimary else Color.Gray,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Gol Dot (Floating Controller)",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (isDotEnabled) "Active on Screen • Tap to Speak" else "Tap Switch to Enable on Screen",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isDotEnabled) MintSuccess else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            Switch(
+                                checked = isDotEnabled,
+                                onCheckedChange = { enabled ->
+                                    if (enabled) {
+                                        if (Settings.canDrawOverlays(context)) {
+                                            FloatingAgentDotService.start(context)
+                                            isDotEnabled = true
+                                        } else {
+                                            val intent = Intent(
+                                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                Uri.parse("package:${context.packageName}")
+                                            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                            context.startActivity(intent)
+                                        }
+                                    } else {
+                                        FloatingAgentDotService.stop(context)
+                                        isDotEnabled = false
+                                    }
+                                },
+                                modifier = Modifier.testTag("floating_dot_switch")
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = "Gol dot screen ke upar floating bubble ban jata hai. Kisi bhi app me rehte hue is dot par tap karke voice/text command de sakte hain, double tap karke screen read kar sakte hain, aur phone control kar sakte hain.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            item {
                 // Goal Input Card
                 Card(
                     modifier = Modifier

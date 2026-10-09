@@ -42,13 +42,19 @@ class StuckLoopDetector {
         screenFingerprints.add(fingerprint)
         if (screenFingerprints.size > 10) screenFingerprints.removeAt(0)
 
-        // Stuck Condition 1: Same action repeated twice with no screen change
+        // Stuck Condition 1: Same action repeated with no screen change (Progressive Escalation)
         if (identicalActionStreak >= 2 && consecutiveIdenticalScreens >= 2) {
+            val strategy = when {
+                identicalActionStreak >= 4 -> RecoveryStrategy.ASK_USER_HELP
+                identicalActionStreak >= 3 -> RecoveryStrategy.PRESS_BACK_TO_UNBLOCK
+                actionName.contains("Tap") -> RecoveryStrategy.SCROLL_TO_DISCOVER
+                else -> RecoveryStrategy.PRESS_BACK_TO_UNBLOCK
+            }
             return StuckStatus(
                 isStuck = true,
                 consecutiveStuckCount = identicalActionStreak,
                 reason = "Action '$actionName' executed $identicalActionStreak times with zero screen change.",
-                suggestedRecovery = if (actionName.contains("Tap")) RecoveryStrategy.SCROLL_TO_DISCOVER else RecoveryStrategy.PRESS_BACK_TO_UNBLOCK
+                suggestedRecovery = strategy
             )
         }
 

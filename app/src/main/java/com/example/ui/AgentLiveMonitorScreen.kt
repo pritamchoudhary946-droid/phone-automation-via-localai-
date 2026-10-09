@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Launch
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -103,7 +105,7 @@ fun AgentLiveMonitorScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onNavigateBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
@@ -344,8 +346,8 @@ fun LiveActionItemCard(step: TaskStepEntity) {
                 step.actionPayloadJson.contains("Tap") -> Icons.Default.TouchApp to CyanPrimary
                 step.actionPayloadJson.contains("Type") -> Icons.Default.Keyboard to ElectricBlue
                 step.actionPayloadJson.contains("Scroll") -> Icons.Default.Swipe to IndigoAccent
-                step.actionPayloadJson.contains("Open") -> Icons.Default.Launch to MintSuccess
-                step.actionPayloadJson.contains("Back") -> Icons.Default.ArrowBack to AmberWarning
+                step.actionPayloadJson.contains("Open") -> Icons.AutoMirrored.Filled.Launch to MintSuccess
+                step.actionPayloadJson.contains("Back") -> Icons.AutoMirrored.Filled.ArrowBack to AmberWarning
                 else -> Icons.Default.PlayArrow to MaterialTheme.colorScheme.primary
             }
 

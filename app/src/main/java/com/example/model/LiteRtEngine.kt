@@ -232,14 +232,18 @@ class LiteRtEngine(
         }
 
         // 3. Settings toggle heuristic (e.g. "turn on dark mode", "wifi", "bluetooth")
-        if (lowerGoal.contains("turn on") || lowerGoal.contains("toggle") || lowerGoal.contains("enable")) {
-            val feature = lowerGoal.replace("turn on", "").replace("toggle", "").replace("enable", "").trim()
-            if (lowerScreen.contains(feature)) {
-                return AgentDecision(
-                    thought = "Target setting '$feature' is visible on screen. Tapping to toggle.",
-                    action = AgentAction.Tap(feature, null, null),
-                    rawOutput = "Thought: Toggling $feature.\nAction: tap(\"$feature\")"
-                )
+        val togglePatterns = listOf("turn on ", "enable ", "toggle ", "turn off ", "disable ")
+        for (pattern in togglePatterns) {
+            val idx = lowerGoal.indexOf(pattern)
+            if (idx != -1) {
+                val feature = lowerGoal.substring(idx + pattern.length).trim()
+                if (feature.isNotEmpty() && lowerScreen.contains(feature)) {
+                    return AgentDecision(
+                        thought = "Target setting '$feature' is visible on screen. Tapping to toggle.",
+                        action = AgentAction.Tap(feature, null, null),
+                        rawOutput = "Thought: Toggling $feature.\nAction: tap(\"$feature\")"
+                    )
+                }
             }
         }
 

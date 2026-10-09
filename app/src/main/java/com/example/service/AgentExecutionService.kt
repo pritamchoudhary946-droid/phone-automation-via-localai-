@@ -56,7 +56,12 @@ class AgentExecutionService : Service {
                 startForeground(NOTIFICATION_ID, buildNotification(goal))
             }
             ACTION_STOP -> {
-                stopForeground(true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
                 stopSelf()
             }
         }
