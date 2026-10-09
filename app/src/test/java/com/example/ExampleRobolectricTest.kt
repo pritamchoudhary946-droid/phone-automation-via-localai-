@@ -346,10 +346,10 @@ class ExampleRobolectricTest {
     fun `litert engine decomposes multi-step sequential goals correctly`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val modelManager = LiteRtModelManager(context)
-        val engine = LiteRtEngine(context, modelManager)
+        val engine = buildTestEngine(context, modelManager = modelManager)
 
         val complexGoal = "Open YouTube, search for educational video, open it, and then return to the home screen"
-        val subGoals = engine.decomposeGoalIntoSubGoals(complexGoal)
+        val subGoals = engine.heuristicPlanner().decomposeGoalIntoSubGoals(complexGoal)
 
         assertTrue(subGoals.size >= 4)
         assertEquals(SubGoalKind.LAUNCH_APP, subGoals[0].kind)
@@ -366,7 +366,7 @@ class ExampleRobolectricTest {
     fun `litert engine plans full youtube search sequence correctly`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val modelManager = LiteRtModelManager(context)
-        val engine = LiteRtEngine(context, modelManager)
+        val engine = buildTestEngine(context, modelManager = modelManager)
 
         val goal = "Open YouTube and search for lo-fi beats"
 
@@ -436,7 +436,7 @@ class ExampleRobolectricTest {
     fun `litert engine plans settings dark mode toggle correctly`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val modelManager = LiteRtModelManager(context)
-        val engine = LiteRtEngine(context, modelManager)
+        val engine = buildTestEngine(context, modelManager = modelManager)
 
         val goal = "Open Settings and turn on Dark mode"
 
@@ -478,7 +478,7 @@ class ExampleRobolectricTest {
     @Test
     fun openYoutubeCompletesOnlyWhenForegroundPackageIsVerified() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val engine = buildTestEngine(context)
         val notForeground = engine.reasonAndPlan(
             goal = "Open YouTube",
             screenSummary = "Active Package: com.android.launcher\nText \"YouTube is recommended\"",
@@ -499,7 +499,7 @@ class ExampleRobolectricTest {
     @Test
     fun screenTextMentioningYoutubeCannotSatisfyLaunchGoal() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val engine = buildTestEngine(context)
         val decision = engine.reasonAndPlan(
             goal = "Open YouTube",
             screenSummary = "Active Package: com.android.chrome\nText \"Open YouTube in this browser\"",
@@ -527,7 +527,7 @@ class ExampleRobolectricTest {
     @Test
     fun readScreenSuccessDoesNotCompleteUnfulfilledLaunchGoal() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val engine = buildTestEngine(context)
         val decision = engine.reasonAndPlan(
             goal = "Open YouTube",
             screenSummary = "Active Package: com.android.launcher\nHome screen",
@@ -555,7 +555,7 @@ class ExampleRobolectricTest {
     @Test
     fun missingModelDoesNotDisableNativeAppLaunchPlanning() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val engine = LiteRtEngine(context, LiteRtModelManager(context))
+        val engine = buildTestEngine(context)
         val decision = engine.reasonAndPlan(
             goal = "Open YouTube",
             screenSummary = "Active Package: com.android.launcher\nHome screen",

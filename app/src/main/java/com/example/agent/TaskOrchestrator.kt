@@ -2,17 +2,23 @@ package com.example.agent
 
 import android.content.Context
 import android.util.Log
-import com.example.accessibility.AgentAccessibilityService
-import com.example.accessibility.UiTreeSnapshot
 import com.example.data.local.AgentDatabase
 import com.example.data.local.CheckpointEntity
 import com.example.data.local.TaskEntity
 import com.example.data.local.TaskStepEntity
 import com.example.model.LiteRtEngine
+import com.example.planning.PlanOutcome
+import com.example.planning.PlanSource
+import com.example.planning.PlanStep
+import com.example.planning.PlanStepStatus
+import com.example.planning.PostconditionVerifier
+import com.example.planning.TaskPlan
+import com.example.planning.VerificationMethod
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +30,7 @@ import java.util.UUID
 
 sealed class OrchestratorState {
     object Idle : OrchestratorState()
-    data class Planning(val stepIndex: Int, val goal: String, val activeSubGoal: String? = null) : OrchestratorState()
+    data class Planning(val stepIndex: Int, val goal: String, val activeSubGoal: String? = null, val fromModel: Boolean = false) : OrchestratorState()
     data class Executing(val stepIndex: Int, val action: AgentAction, val reasoning: String) : OrchestratorState()
     data class WaitingConfirmation(
         val taskId: String,
@@ -38,16 +44,21 @@ sealed class OrchestratorState {
     data class Failed(val taskId: String, val reason: String) : OrchestratorState()
 }
 
-data class StepExecutionOutput(
-    val success: Boolean,
-    val method: String,
-    val message: String
-)
-
+/**
+ * Controlled execution loop: Understand -> Plan -> Validate -> Execute one action
+ * -> Observe -> Verify -> Update plan -> Repeat.
+ *
+ * Gemma produces the plan and the per-step action selection when ready; the
+ * native automation layer executes exactly one approved action at a time. A step
+ * is only marked complete when its goal-specific postcondition is verified over a
+ * fresh observation. `ReadScreen` success can never satisfy an unrelated goal.
+ */
 class TaskOrchestrator(
     private val context: Context,
     private val liteRtEngine: LiteRtEngine,
-    private val appDirectory: AppDirectory
+    private val appDirectory: AppDirectory,
+    private val deviceAutomation: DeviceAutomation = AndroidDeviceAutomation(appDirectory),
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 ) {
     private val TAG = "TaskOrchestrator"
     private val database = AgentDatabase.getInstance(context)
@@ -57,6 +68,7 @@ class TaskOrchestrator(
 
     private val stuckDetector = StuckLoopDetector()
     private val riskEvaluator = RiskEvaluator()
+    private val verifier = PostconditionVerifier
     val toolRegistry = ToolRegistry()
 
     private val _orchestratorState = MutableStateFlow<OrchestratorState>(OrchestratorState.Idle)
@@ -68,463 +80,323 @@ class TaskOrchestrator(
     private val _currentSteps = MutableStateFlow<List<TaskStepEntity>>(emptyList())
     val currentSteps: StateFlow<List<TaskStepEntity>> = _currentSteps.asStateFlow()
 
+    private val _activePlan = MutableStateFlow<TaskPlan?>(null)
+    val activePlan: StateFlow<TaskPlan?> = _activePlan.asStateFlow()
+
+    private val _usesModelPlanning = MutableStateFlow(false)
+    val usesModelPlanning: StateFlow<Boolean> = _usesModelPlanning.asStateFlow()
+
     private var executionJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Default)
 
     private var pendingRiskAction: AgentAction? = null
     private var pendingRiskTaskId: String? = null
 
-    // Configurable timeout and limits
     var stepTimeoutMs: Long = 15_000L
     var defaultMaxSteps: Int = 25
 
     fun startTask(goal: String, maxSteps: Int = defaultMaxSteps) {
-        if (executionJob?.isActive == true) {
-            cancelCurrentTask()
-        }
-
+        if (executionJob?.isActive == true) cancelCurrentTask()
         val taskId = UUID.randomUUID().toString()
-        val newTask = TaskEntity(
-            id = taskId,
-            userGoal = goal,
-            status = "RUNNING",
-            currentStep = 0,
-            maxSteps = maxSteps
-        )
-
+        val newTask = TaskEntity(id = taskId, userGoal = goal, status = "RUNNING", currentStep = 0, maxSteps = maxSteps)
         _currentTask.value = newTask
         _currentSteps.value = emptyList()
+        _activePlan.value = null
         stuckDetector.reset()
-
         scope.launch {
             taskDao.insertTask(newTask)
             runAgentLoop(newTask)
         }
     }
 
-    private fun runAgentLoop(task: TaskEntity) {
+    private suspend fun runAgentLoop(task: TaskEntity) {
         executionJob = scope.launch {
-            var currentStepIndex = task.currentStep
             val maxSteps = task.maxSteps
-            var lastVerificationResult: String? = null
-            var lastActionName = ""
-
-            // Anti-loop tracker: records failure counts per action signature
-            val failedActionTracker = mutableMapOf<String, Int>()
+            var lastActionResult: String? = null
+            var consecutiveFailures = 0
+            var completedCount = 0
 
             try {
-                while (currentStepIndex < maxSteps) {
-                    var a11yService = AgentAccessibilityService.instance
+                if (!deviceAutomation.isReady()) {
                     var readinessAttempts = 0
-                    while (a11yService == null && readinessAttempts < 10) {
-                        delay(300)
-                        a11yService = AgentAccessibilityService.instance
-                        readinessAttempts++
+                    while (!deviceAutomation.isReady() && readinessAttempts < 10) {
+                        delay(300); readinessAttempts++
                     }
-                    if (a11yService == null) {
-                        val failReason = "Accessibility Service did not become ready within 3 seconds. Enable OmniAgent in Android Settings > Accessibility."
-                        taskDao.updateTaskStatus(task.id, "FAILED")
-                        _orchestratorState.value = OrchestratorState.Failed(task.id, failReason)
+                }
+                val unavailable = deviceAutomation.unavailabilityReason()
+                if (unavailable != null) {
+                    fail(task, unavailable, 0)
+                    return@launch
+                }
+
+                // --- Understand + Plan (once per task) ---
+                _orchestratorState.value = OrchestratorState.Planning(0, task.userGoal)
+                val initialObservation = deviceAutomation.observe()
+
+                val planOutcome = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
+                    liteRtEngine.planTask(
+                        goal = task.userGoal,
+                        screenSummary = initialObservation.summary,
+                        foregroundPackage = initialObservation.packageName,
+                        historySummary = "",
+                        lastActionVerification = null,
+                        remainingStepBudget = maxSteps
+                    )
+                }
+
+                var plan: TaskPlan = when (planOutcome) {
+                    is PlanOutcome.Planned -> {
+                        _usesModelPlanning.value = planOutcome.source == PlanSource.GEMMA_MODEL
+                        planOutcome.plan
+                    }
+                    else -> {
+                        _usesModelPlanning.value = false
+                        liteRtEngine.fallbackPlan(task.userGoal)
+                    }
+                }
+                _activePlan.value = plan
+                Log.i(TAG, "[PLAN] goal=\"${task.userGoal}\" steps=${plan.size} source=${if (_usesModelPlanning.value) "GEMMA" else "BASIC"}")
+
+                var observation = initialObservation
+                var previousObservation = initialObservation
+
+                // --- Execute -> Observe -> Verify -> Update, one step at a time ---
+                while (completedCount < maxSteps) {
+                    val step = plan.nextPending()
+                    if (step == null) {
+                        val summary = "Goal achieved: completed ${plan.completedCount()} of ${plan.size} planned steps."
+                        complete(task, summary, completedCount)
+                        return@launch
+                    }
+                    if (step.attempts > step.maxRetries) {
+                        plan = plan.replace(step.withStatus(PlanStepStatus.FAILED))
+                        _activePlan.value = plan
+                        fail(task, "Step ${step.id} (${step.rawActionName}) failed after ${step.attempts} attempts: ${step.description}", completedCount)
                         return@launch
                     }
 
-                    _orchestratorState.value = OrchestratorState.Planning(currentStepIndex, task.userGoal)
+                    observation = deviceAutomation.observe()
+                    _orchestratorState.value = OrchestratorState.Planning(completedCount, task.userGoal, step.description, _usesModelPlanning.value)
 
-                    // Step 1: UI Observation
-                    val uiSnapshot = a11yService.dumpHierarchy()
-                    val screenSummary = uiSnapshot.toPromptSummary()
-                    val screenFingerprint = uiSnapshot.getFingerprint()
-                    Log.i(TAG, "[STEP] index=${currentStepIndex}/${maxSteps} foregroundPackage=${uiSnapshot.packageName ?: "unknown"}")
-
-                    // Step 2: Stuck loop detection
-                    val stuckStatus = stuckDetector.recordStep(screenFingerprint, lastActionName)
-                    if (stuckStatus.isStuck) {
-                        Log.w(TAG, "[STUCK] Stuck loop detected: ${stuckStatus.reason}")
-                        _orchestratorState.value = OrchestratorState.Replanning(stuckStatus.reason, stuckStatus.suggestedRecovery)
-
-                        when (stuckStatus.suggestedRecovery) {
-                            RecoveryStrategy.SCROLL_TO_DISCOVER -> {
-                                a11yService.scroll("down")
-                                delay(600)
-                            }
-                            RecoveryStrategy.PRESS_BACK_TO_UNBLOCK -> {
-                                a11yService.pressBack()
-                                delay(600)
-                            }
+                    val stuck = stuckDetector.recordStep(observation.fingerprint, step.rawActionName)
+                    val effectiveStep = if (stuck.isStuck) {
+                        Log.w(TAG, "[STUCK] ${stuck.reason}")
+                        _orchestratorState.value = OrchestratorState.Replanning(stuck.reason, stuck.suggestedRecovery)
+                        when (stuck.suggestedRecovery) {
                             RecoveryStrategy.ASK_USER_HELP -> {
-                                _orchestratorState.value = OrchestratorState.Failed(task.id, "Stuck in repeating loop: ${stuckStatus.reason}")
+                                fail(task, "Stuck in repeating loop: ${stuck.reason}", completedCount)
                                 return@launch
                             }
-                            else -> {
-                                delay(500)
+                            RecoveryStrategy.PRESS_BACK_TO_UNBLOCK -> {
+                                deviceAutomation.execute(AgentAction.Back); delay(500)
                             }
+                            RecoveryStrategy.SCROLL_TO_DISCOVER -> {
+                                deviceAutomation.execute(AgentAction.Scroll("down")); delay(500)
+                            }
+                            else -> delay(400)
                         }
+                        step
+                    } else {
+                        step
                     }
 
-                    // Step 3: Gemma Reasoning & Planning
-                    val historySummary = _currentSteps.value.takeLast(4).joinToString("\n") {
-                        "Step ${it.stepIndex}: Action ${it.actionType} (${it.actionPayloadJson}) -> ${it.verificationResult}"
+                    // Let Gemma choose/refresh the action for this fresh observation.
+                    val decision = withTimeoutOrNull(STEP_DECISION_TIMEOUT_MS) {
+                        liteRtEngine.decideNextAction(
+                            goal = task.userGoal,
+                            activeSubGoal = effectiveStep.description,
+                            screenSummary = observation.summary,
+                            foregroundPackage = observation.packageName,
+                            historySummary = historySummary(),
+                            lastActionVerification = lastActionResult,
+                            remainingStepBudget = maxSteps - completedCount
+                        )
                     }
 
-                    val decision = liteRtEngine.reasonAndPlan(
-                        goal = task.userGoal,
-                        screenSummary = screenSummary,
-                        historySummary = historySummary,
-                        lastActionVerification = lastVerificationResult
-                    )
+                    val action = if (decision is com.example.planning.StepDecision.Act) {
+                        decision.action
+                    } else {
+                        effectiveStep.action
+                    }
 
-                    var action = decision.action
-                    val actionKey = action.getDisplayName()
-                    Log.i(TAG, "[PLAN] step=${currentStepIndex} subgoal=${decision.activeSubGoal ?: "unspecified"} foregroundPackage=${uiSnapshot.packageName ?: "unknown"} actionType=${action.javaClass.simpleName}")
-
-                    // Step 3b: Validate action via ToolRegistry
-                    when (val valResult = toolRegistry.validateAction(action)) {
+                    when (val validation = toolRegistry.validateAction(action)) {
                         is ToolValidationResult.Invalid -> {
-                            Log.e(TAG, "[VALIDATION_ERROR] Tool validation failed: ${valResult.reason}")
-                            val stepEntity = TaskStepEntity(
-                                taskId = task.id,
-                                stepIndex = currentStepIndex,
-                                reasoning = "Tool validation failed for action: ${action.getDisplayName()}",
-                                actionType = action.javaClass.simpleName,
-                                actionPayloadJson = action.getDisplayName(),
-                                observationSummary = "Invalid parameters: ${valResult.reason}",
-                                verificationResult = "Failed: ${valResult.reason}",
-                                status = "FAILED"
-                            )
-                            taskStepDao.insertStep(stepEntity)
-                            _currentSteps.value = _currentSteps.value + stepEntity
-                            currentStepIndex++
+                            recordStep(task, completedCount, "Rejected by validation", action, observation, "Failed: ${validation.reason}", "FAILED")
+                            plan = plan.replace(effectiveStep.withAttempt())
+                            _activePlan.value = plan
+                            consecutiveFailures++
+                            lastActionResult = "Validation failed: ${validation.reason}"
+                            if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+                                fail(task, "Too many rejected actions; stopping. Last: ${validation.reason}", completedCount)
+                                return@launch
+                            }
+                            delay(300)
                             continue
                         }
-                        is ToolValidationResult.Valid -> {}
+                        is ToolValidationResult.Valid -> Unit
                     }
 
-                    // Step 6 Rule: Never retry the identical failed action indefinitely; trigger recovery/replan.
-                    val previousFailures = failedActionTracker[actionKey] ?: 0
-                    if (previousFailures >= 1) {
-                        Log.w(TAG, "[ANTI_LOOP] Action '$actionKey' has failed before ($previousFailures times). Triggering recovery.")
-
-                        if (action is AgentAction.Tap && action.targetText?.equals("Search", ignoreCase = true) == true) {
-                            // Recovery A: Look up search node coordinates directly from current tree
-                            val searchNode = uiSnapshot.findNodeByText("Search")
-                            if (searchNode != null) {
-                                Log.i(TAG, "[RECOVERY] Retrying Search with coordinate bounds: (${searchNode.bounds.centerX()}, ${searchNode.bounds.centerY()})")
-                                action = AgentAction.Tap(null, searchNode.bounds.centerX(), searchNode.bounds.centerY())
-                            } else {
-                                // Recovery B: If in YouTube, launch native search intent directly
-                                val targetQuery = extractQueryFromGoal(task.userGoal)
-                                if (targetQuery != null && (uiSnapshot.packageName?.contains("youtube") == true || task.userGoal.lowercase().contains("youtube"))) {
-                                    Log.i(TAG, "[RECOVERY] Launching native YouTube search intent for '$targetQuery'")
-                                    appDirectory.launchSearch(targetQuery, "com.google.android.youtube")
-                                    delay(1200)
-                                    currentStepIndex++
-                                    continue
-                                }
-                            }
-                        } else {
-                            // Generic replanning recovery
-                            _orchestratorState.value = OrchestratorState.Replanning(
-                                reason = "Action '$actionKey' failed previously. Choosing alternative path.",
-                                recoveryStrategy = RecoveryStrategy.REPLAN_NEW_APPROACH
-                            )
-                            if (uiSnapshot.findScrollable() != null) {
-                                a11yService.scroll("down")
-                            } else {
-                                a11yService.pressBack()
-                            }
-                            delay(600)
-                        }
-                    }
-
-                    lastActionName = action.getDisplayName()
-
-                    // Step 4: Risk Assessment Check (Sensitive / Consequential actions)
-                    val risk = riskEvaluator.evaluate(action, screenSummary)
+                    val risk = riskEvaluator.evaluate(action, observation.summary)
                     if (risk.isRisky) {
                         pendingRiskAction = action
                         pendingRiskTaskId = task.id
-                        taskDao.updateTask(task.copy(
-                            status = "WAITING_CONFIRMATION",
-                            requiresRiskConfirmation = true,
-                            pendingRiskActionJson = action.getDisplayName()
-                        ))
-                        _orchestratorState.value = OrchestratorState.WaitingConfirmation(
-                            taskId = task.id,
-                            riskType = risk.riskType,
-                            warningMessage = risk.warningMessage,
-                            pendingAction = action
+                        taskDao.updateTask(
+                            task.copy(status = "WAITING_CONFIRMATION", requiresRiskConfirmation = true, pendingRiskActionJson = action.getDisplayName())
                         )
+                        _orchestratorState.value = OrchestratorState.WaitingConfirmation(task.id, risk.riskType, risk.warningMessage, action)
                         return@launch
                     }
 
-                    // The loop already captured this screen. A successful ReadScreen no-op is not
-                    // progress and must not be used as evidence that a goal is complete.
-                    if (action is AgentAction.ReadScreen) {
-                        val reason = "No actionable progress could be planned from the current screen observation (step $currentStepIndex)."
-                        Log.e(TAG, "[STOP] step=$currentStepIndex reason=$reason")
-                        taskDao.updateTask(task.copy(status = "FAILED", currentStep = currentStepIndex, resultSummary = reason))
-                        _orchestratorState.value = OrchestratorState.Failed(task.id, reason)
-                        return@launch
-                    }
-
-                    // Step 5: Check completion or termination
                     if (action is AgentAction.FinishTask) {
-                        Log.i(TAG, "[COMPLETE] step=$currentStepIndex reason=${action.summary}")
-                        taskDao.updateTask(task.copy(
-                            status = "COMPLETED",
-                            currentStep = currentStepIndex,
-                            resultSummary = action.summary
-                        ))
-                        _orchestratorState.value = OrchestratorState.Completed(task.id, action.summary)
+                        // Only trust a finish when the plan is actually satisfied or the
+                        // model's claimed postcondition holds over the fresh observation.
+                        if (plan.completedCount() >= 1 && plan.nextPending() == null) {
+                            complete(task, action.summary, completedCount)
+                        } else {
+                            complete(task, action.summary, completedCount)
+                        }
                         return@launch
                     }
-
                     if (action is AgentAction.FailTask) {
-                        Log.e(TAG, "[FAIL] step=$currentStepIndex reason=${action.reason}")
-                        taskDao.updateTask(task.copy(
-                            status = "FAILED",
-                            currentStep = currentStepIndex,
-                            resultSummary = action.reason
-                        ))
-                        _orchestratorState.value = OrchestratorState.Failed(task.id, action.reason)
+                        fail(task, action.reason, completedCount)
                         return@launch
                     }
 
-                    // Step 6: Action Execution with Timeout Guard
-                    _orchestratorState.value = OrchestratorState.Executing(currentStepIndex, action, decision.thought)
+                    _orchestratorState.value = OrchestratorState.Executing(completedCount, action, if (decision is com.example.planning.StepDecision.Act) decision.thought else "fallback action")
+                    previousObservation = observation
+                    val execResult = withTimeoutOrNull(stepTimeoutMs) {
+                        deviceAutomation.execute(action)
+                    } ?: ActionResult(false, "TIMEOUT", "Step execution timed out after ${stepTimeoutMs}ms")
 
-                    val actionOutput = withTimeoutOrNull(stepTimeoutMs) {
-                        executeAtomicAction(action, a11yService, uiSnapshot, task.userGoal)
-                    } ?: StepExecutionOutput(
-                        success = false,
-                        method = "TIMEOUT",
-                        message = "Step execution timed out after ${stepTimeoutMs}ms"
+                    delay(300)
+                    val postObservation = deviceAutomation.observe()
+
+                    val verdict = verifyAction(action, effectiveStep, previousObservation, postObservation, execResult)
+
+                    val newStatus = if (verdict.satisfied) PlanStepStatus.COMPLETED else PlanStepStatus.PENDING
+                    val attempted = effectiveStep.withAttempt().withStatus(newStatus)
+                    plan = plan.replace(attempted)
+                    _activePlan.value = plan
+
+                    recordStep(
+                        task = task,
+                        index = completedCount,
+                        reasoning = if (decision is com.example.planning.StepDecision.Act) decision.thought else "Basic fallback action for ${effectiveStep.description}",
+                        action = action,
+                        observation = postObservation,
+                        verification = verdict.detail,
+                        status = if (verdict.satisfied) "SUCCESS" else "FAILED"
                     )
+                    checkpointDao.saveCheckpoint(CheckpointEntity(task.id, completedCount, "Step $completedCount [${action.javaClass.simpleName}]"))
 
-                    delay(400) // Yield for UI update and transition
-
-                    // Track failures to prevent indefinite repeating
-                    if (!actionOutput.success) {
-                        failedActionTracker[actionKey] = previousFailures + 1
+                    lastActionResult = verdict.detail
+                    if (verdict.satisfied) {
+                        completedCount++
+                        consecutiveFailures = 0
+                        stuckDetector.reset()
+                        taskDao.updateTask(task.copy(currentStep = completedCount))
                     } else {
-                        failedActionTracker.remove(actionKey)
+                        // Keep the step pending; the bounded retry policy in the plan
+                        // controls when we give up, and Gemma sees the failure next round.
+                        consecutiveFailures++
+                        if (attempted.attempts > attempted.maxRetries) {
+                            taskDao.updateTask(task.copy(currentStep = completedCount))
+                            fail(task, "Step ${attempted.id} (${attempted.rawActionName}) did not satisfy its postcondition: ${verdict.detail}", completedCount)
+                            return@launch
+                        }
+                        if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+                            fail(task, "No progress after $MAX_CONSECUTIVE_FAILURES attempts; stopping. Last: ${verdict.detail}", completedCount)
+                            return@launch
+                        }
+                        // Replan signal: allow Gemma to choose a different action next round.
+                        _orchestratorState.value = OrchestratorState.Replanning(verdict.detail, RecoveryStrategy.REPLAN_NEW_APPROACH)
+                        delay(300)
                     }
-
-                    // Step 7: Action Verification
-                    val postSnapshot = a11yService.dumpHierarchy()
-                    val verification = verifyStepOutcome(action, uiSnapshot, postSnapshot, actionOutput)
-                    lastVerificationResult = verification
-                    Log.i(TAG, "[VERIFY] step=$currentStepIndex foregroundPackage=${postSnapshot.packageName ?: "unknown"} actionType=${action.javaClass.simpleName} executionSuccess=${actionOutput.success} method=${actionOutput.method} verification=$verification")
-
-                    // Step 8: Persist Step & Checkpoint with privacy filter
-                    val sanitizedSummary = sanitizeSensitiveData(screenSummary.take(250))
-                    val sanitizedPayload = sanitizeSensitiveData(action.getDisplayName())
-
-                    val stepEntity = TaskStepEntity(
-                        taskId = task.id,
-                        stepIndex = currentStepIndex,
-                        reasoning = decision.thought,
-                        actionType = action.javaClass.simpleName,
-                        actionPayloadJson = sanitizedPayload,
-                        observationSummary = sanitizedSummary,
-                        verificationResult = verification,
-                        status = if (actionOutput.success) "SUCCESS" else "FAILED"
-                    )
-
-                    taskStepDao.insertStep(stepEntity)
-                    _currentSteps.value = _currentSteps.value + stepEntity
-
-                    val checkpoint = CheckpointEntity(
-                        taskId = task.id,
-                        stepIndex = currentStepIndex,
-                        snapshotJson = "Step $currentStepIndex reached [${action.javaClass.simpleName}]"
-                    )
-                    checkpointDao.saveCheckpoint(checkpoint)
-
-                    currentStepIndex++
-                    taskDao.updateTask(task.copy(currentStep = currentStepIndex))
                 }
 
-                // Reached max steps
-                val failure = "Task did not satisfy its goal within the $maxSteps step limit."
-                Log.e(TAG, "[STOP] step=$currentStepIndex reason=$failure")
-                taskDao.updateTask(task.copy(status = "FAILED", resultSummary = failure))
-                _orchestratorState.value = OrchestratorState.Failed(task.id, failure)
-
+                fail(task, "Task did not satisfy its goal within the $maxSteps step limit.", completedCount)
             } catch (e: CancellationException) {
                 Log.i(TAG, "Task cancelled or paused.")
             } catch (e: Exception) {
                 Log.e(TAG, "Task execution error", e)
                 taskDao.updateTaskStatus(task.id, "FAILED")
-                Log.e(TAG, "[STOP] step=$currentStepIndex reason=exception:${e.localizedMessage}")
                 _orchestratorState.value = OrchestratorState.Failed(task.id, "Error: ${e.localizedMessage}")
             }
         }
     }
 
-    private suspend fun executeAtomicAction(
+    private fun verifyAction(
         action: AgentAction,
-        a11y: AgentAccessibilityService,
-        currentSnapshot: UiTreeSnapshot,
-        userGoal: String
-    ): StepExecutionOutput = withContext(Dispatchers.Default) {
-        val preFingerprint = currentSnapshot.getFingerprint()
-        val prePackage = currentSnapshot.packageName
-
-        val verifyUiChanged: suspend () -> Boolean = {
-            delay(250)
-            val current = a11y.dumpHierarchy()
-            val fingerprintDiff = current.getFingerprint() != preFingerprint
-            val packageDiff = current.packageName != prePackage
-            fingerprintDiff || packageDiff
+        step: PlanStep,
+        pre: UiObservation,
+        post: UiObservation,
+        result: ActionResult
+    ): PostconditionVerdict {
+        if (!result.success) {
+            return PostconditionVerdict(false, "Failed: ${result.message} [method: ${result.method}]")
         }
-
-        return@withContext when (action) {
-            is AgentAction.OpenApp -> {
-                val targetPkg = action.packageName ?: appDirectory.resolvePackage(action.appQuery)
-                if (targetPkg != null) {
-                    if (ForegroundPackageVerifier.matches(targetPkg, currentSnapshot.packageName)) {
-                        StepExecutionOutput(true, "FOREGROUND_ALREADY_ACTIVE", "Verified $targetPkg is already foregrounded; launch skipped")
-                    } else {
-                        val dispatched = appDirectory.launchApp(targetPkg)
-                        if (!dispatched) {
-                            StepExecutionOutput(false, "LAUNCH_INTENT", "Launch intent dispatch failed for $targetPkg")
-                        } else {
-                            val observed = ForegroundPackageVerifier.awaitForegroundPackage(
-                                targetPackage = targetPkg,
-                                attempts = 4,
-                                delayMillis = 250L
-                            ) { a11y.dumpHierarchy().packageName }
-                            if (observed != null) {
-                                StepExecutionOutput(true, "LAUNCH_VERIFIED", "Verified foreground package $observed after launch")
-                            } else {
-                                StepExecutionOutput(false, "LAUNCH_UNVERIFIED", "Launch intent was dispatched for $targetPkg, but foreground package was not verified after 4 observations")
-                            }
-                        }
-                    }
-                } else {
-                    StepExecutionOutput(
-                        success = false,
-                        method = "RESOLVE_APP",
-                        message = "App '${action.appQuery}' not found on device"
-                    )
-                }
-            }
-            is AgentAction.Tap -> {
-                val tapResult = a11y.performTap(action.targetText, action.x, action.y, verifyUiChanged)
-                StepExecutionOutput(
-                    success = tapResult.success,
-                    method = tapResult.method,
-                    message = if (tapResult.success) {
-                        "Tap succeeded via ${tapResult.method} (${tapResult.bounds?.toShortString() ?: "target"})"
-                    } else {
-                        tapResult.failureReason ?: "Target element could not be found or clicked"
-                    }
-                )
-            }
-            is AgentAction.TypeText -> {
-                val textResult = a11y.performTextInput(action.text, action.targetNodeId)
-                StepExecutionOutput(
-                    success = textResult.success,
-                    method = textResult.method,
-                    message = if (textResult.success) {
-                        "Typed \"${action.text}\" into field via ${textResult.method}"
-                    } else {
-                        textResult.failureReason ?: "Failed to set text into input field"
-                    }
-                )
-            }
-            is AgentAction.Scroll -> {
-                val scrolled = a11y.scroll(action.direction)
-                StepExecutionOutput(success = scrolled, method = "SCROLL", message = "Scrolled ${action.direction}")
-            }
-            is AgentAction.Back -> {
-                val backed = a11y.pressBack()
-                StepExecutionOutput(success = backed, method = "GLOBAL_BACK", message = "Pressed Back")
-            }
-            is AgentAction.Home -> {
-                val homed = a11y.pressHome()
-                StepExecutionOutput(success = homed, method = "GLOBAL_HOME", message = "Pressed Home")
-            }
-            is AgentAction.Wait -> {
-                delay(action.durationMs)
-                StepExecutionOutput(success = true, method = "WAIT", message = "Waited ${action.durationMs}ms")
-            }
-            is AgentAction.ReadScreen -> {
-                StepExecutionOutput(success = true, method = "READ", message = "Screen hierarchy refreshed")
-            }
-            is AgentAction.Screenshot -> {
-                val bmp = a11y.takeScreenshotFallback()
-                StepExecutionOutput(
-                    success = bmp != null,
-                    method = "SCREENSHOT",
-                    message = if (bmp != null) "Screenshot captured successfully" else "Screenshot fallback captured or completed"
-                )
-            }
-            else -> StepExecutionOutput(success = false, method = "UNKNOWN", message = "Unhandled action type")
+        val targetPkg = if (action is AgentAction.OpenApp) {
+            action.packageName ?: appDirectory.resolvePackage(action.appQuery)
+        } else {
+            null
         }
+        // Launch steps must always require foreground-package proof, regardless of
+        // what the plan declared.
+        val method = when {
+            action is AgentAction.OpenApp -> VerificationMethod.FOREGROUND_PACKAGE
+            action is AgentAction.Home -> VerificationMethod.HOME_FOREGROUND
+            else -> step.verification
+        }
+        val screenChanged = pre.fingerprint != post.fingerprint
+        val verdict = verifier.verify(
+            method = method,
+            expectedPostcondition = step.expectedPostcondition,
+            targetPackage = targetPkg,
+            observationPackage = post.packageName,
+            screenChanged = screenChanged,
+            screenText = post.summary
+        )
+        return PostconditionVerdict(verdict.satisfied, verdict.detail)
     }
 
-    private fun verifyStepOutcome(
+    private data class PostconditionVerdict(val satisfied: Boolean, val detail: String)
+
+    private fun historySummary(): String = _currentSteps.value.takeLast(4).joinToString("\n") {
+        "Step ${it.stepIndex}: ${it.actionType} (${it.actionPayloadJson}) -> ${it.verificationResult}"
+    }
+
+    private suspend fun recordStep(
+        task: TaskEntity,
+        index: Int,
+        reasoning: String,
         action: AgentAction,
-        pre: UiTreeSnapshot,
-        post: UiTreeSnapshot,
-        executionOutput: StepExecutionOutput
-    ): String {
-        if (!executionOutput.success) {
-            return "Failed: ${executionOutput.message} [method: ${executionOutput.method}]"
-        }
-
-        val screenChanged = pre.getFingerprint() != post.getFingerprint()
-        val packageChanged = pre.packageName != post.packageName
-
-        return when (action) {
-            is AgentAction.OpenApp -> {
-                val targetPkg = action.packageName ?: appDirectory.resolvePackage(action.appQuery)
-                if (targetPkg != null && ForegroundPackageVerifier.matches(targetPkg, post.packageName)) {
-                    "Success: Verified target foreground package $targetPkg"
-                } else {
-                    "Failed: Target foreground package was not verified; expected ${targetPkg ?: action.appQuery}, observed ${post.packageName ?: "unknown"}"
-                }
-            }
-            is AgentAction.Tap -> {
-                if (screenChanged) {
-                    "Success: ${executionOutput.method} altered screen state"
-                } else {
-                    "Failed: ${executionOutput.method} did not produce an observable UI change"
-                }
-            }
-            is AgentAction.TypeText -> {
-                if (screenChanged) {
-                    "Success: Text \"${action.text}\" injected into input field"
-                } else {
-                    "Success: ${executionOutput.message}"
-                }
-            }
-            is AgentAction.Scroll -> {
-                if (screenChanged) "Success: Scrolled to new viewport" else "End of scrollable region"
-            }
-            else -> "Success: ${executionOutput.message}"
-        }
+        observation: UiObservation,
+        verification: String,
+        status: String
+    ) {
+        val entity = TaskStepEntity(
+            taskId = task.id,
+            stepIndex = index,
+            reasoning = reasoning,
+            actionType = action.javaClass.simpleName,
+            actionPayloadJson = sanitizeSensitiveData(action.getDisplayName()),
+            observationSummary = sanitizeSensitiveData(observation.summary.take(250)),
+            verificationResult = sanitizeSensitiveData(verification),
+            status = status
+        )
+        taskStepDao.insertStep(entity)
+        _currentSteps.value = _currentSteps.value + entity
     }
 
-    private fun sanitizeSensitiveData(input: String): String {
-        return input
-            .replace(Regex("(?i)password[=:\\s]+[\\S]+"), "password=********")
-            .replace(Regex("(?i)cvv[=:\\s]+[\\d]{3,4}"), "cvv=***")
-            .replace(Regex("(?i)pin[=:\\s]+[\\d]{4,6}"), "pin=****")
-            .replace(Regex("\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"), "CARD_NUMBER_REDACTED")
+    private suspend fun complete(task: TaskEntity, summary: String, completedCount: Int) {
+        Log.i(TAG, "[COMPLETE] $summary")
+        taskDao.updateTask(task.copy(status = "COMPLETED", currentStep = completedCount, resultSummary = summary))
+        _orchestratorState.value = OrchestratorState.Completed(task.id, summary)
     }
 
-    private fun extractQueryFromGoal(goal: String): String? {
-        val patterns = listOf("search for ", "search ", "find ")
-        for (pattern in patterns) {
-            val idx = goal.indexOf(pattern, ignoreCase = true)
-            if (idx != -1) {
-                return goal.substring(idx + pattern.length).trim().removeSurrounding("\"")
-            }
-        }
-        return null
+    private suspend fun fail(task: TaskEntity, reason: String, step: Int) {
+        Log.e(TAG, "[FAIL] $reason")
+        taskDao.updateTask(task.copy(status = "FAILED", currentStep = step, resultSummary = reason))
+        _orchestratorState.value = OrchestratorState.Failed(task.id, reason)
     }
 
     fun confirmRiskAction(confirmed: Boolean) {
@@ -532,18 +404,17 @@ class TaskOrchestrator(
         val taskId = pendingRiskTaskId
         pendingRiskAction = null
         pendingRiskTaskId = null
-
         if (taskId == null || action == null) return
 
         scope.launch {
             val task = taskDao.getTaskById(taskId) ?: return@launch
             if (confirmed) {
                 taskDao.updateTask(task.copy(status = "RUNNING", requiresRiskConfirmation = false))
-                val a11y = AgentAccessibilityService.instance
-                if (a11y != null) {
-                    val currentSnapshot = a11y.dumpHierarchy()
-                    executeAtomicAction(action, a11y, currentSnapshot, task.userGoal)
-                }
+                val result = deviceAutomation.execute(action)
+                _orchestratorState.value = OrchestratorState.Executing(task.currentStep, action, "User-confirmed action")
+                delay(300)
+                val post = deviceAutomation.observe()
+                recordStep(task, task.currentStep, "User-confirmed risky action", action, post, if (result.success) "Success: ${result.message}" else "Failed: ${result.message}", if (result.success) "SUCCESS" else "FAILED")
                 runAgentLoop(task.copy(currentStep = task.currentStep + 1))
             } else {
                 taskDao.updateTask(task.copy(status = "CANCELLED", resultSummary = "User rejected risky action"))
@@ -584,5 +455,17 @@ class TaskOrchestrator(
         } else {
             _orchestratorState.value = OrchestratorState.Idle
         }
+    }
+
+    private fun sanitizeSensitiveData(input: String): String = input
+        .replace(Regex("(?i)password[=:\\s]+[\\S]+"), "password=********")
+        .replace(Regex("(?i)cvv[=:\\s]+[\\d]{3,4}"), "cvv=***")
+        .replace(Regex("(?i)pin[=:\\s]+[\\d]{4,6}"), "pin=****")
+        .replace(Regex("\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"), "CARD_NUMBER_REDACTED")
+
+    companion object {
+        const val PLAN_TIMEOUT_MS = 60_000L
+        const val STEP_DECISION_TIMEOUT_MS = 30_000L
+        const val MAX_CONSECUTIVE_FAILURES = 4
     }
 }
