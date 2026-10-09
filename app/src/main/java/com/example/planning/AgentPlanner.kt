@@ -42,8 +42,12 @@ class AgentPlanner(
         var lastReason = "unknown"
 
         repeat(2) { attempt ->
+            // The second attempt appends an explicit correction block so the model sees
+            // what was wrong instead of being handed the identical prompt again.
+            val effectivePrompt = if (attempt == 0) prompt
+                else prompt + PlannerPromptBuilder.buildRepairNote(lastRaw, lastReason)
             val raw = try {
-                inferenceEngine.generate(prompt, PlannerPromptBuilder.SYSTEM_INSTRUCTION, maxOutputTokens)
+                inferenceEngine.generate(effectivePrompt, PlannerPromptBuilder.SYSTEM_INSTRUCTION, maxOutputTokens)
             } catch (e: Exception) {
                 Log.w(TAG, "Model generate threw: ${e.message}")
                 null

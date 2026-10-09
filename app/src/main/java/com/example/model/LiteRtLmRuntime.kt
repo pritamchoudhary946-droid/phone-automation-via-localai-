@@ -72,7 +72,11 @@ class LiteRtLmRuntime(
         val config = EngineConfig(
             modelPath = modelPath,
             backend = backend,
-            cacheDir = cacheDir
+            cacheDir = cacheDir,
+            // Bound the KV/context size explicitly instead of leaving it to the model
+            // default: this limits peak RAM so the engine coexists with the
+            // accessibility service on an 8 GB device.
+            maxNumTokens = MAX_CONTEXT_TOKENS
         )
         val newEngine = Engine(config)
         newEngine.initialize()
@@ -155,5 +159,7 @@ class LiteRtLmRuntime(
         private const val TAG = "LiteRtLmRuntime"
         // Conservative thread budget on an 8 GB device that also runs an accessibility service.
         const val DEFAULT_CPU_THREADS = 4
+        // Bounded context window so peak memory stays predictable on-device.
+        const val MAX_CONTEXT_TOKENS = 2048
     }
 }
