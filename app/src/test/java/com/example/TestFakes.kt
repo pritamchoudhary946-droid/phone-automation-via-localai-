@@ -149,21 +149,21 @@ class FakeDeviceAutomation(
     }
 }
 
-fun observation(pkg: String?, summary: String, fingerprintSeed: Int): UiObservation {
+fun observation(pkg: String?, summary: String, fingerprintSeed: Int, editable: Boolean = false): UiObservation {
     val nodes = listOf(
         UiNode(
             id = "node_$fingerprintSeed",
             text = summary.take(40),
             contentDescription = null,
-            className = "android.widget.TextView",
+            className = if (editable) "android.widget.EditText" else "android.widget.TextView",
             packageName = pkg,
             bounds = android.graphics.Rect(0, 0, 100, 100),
-            isClickable = false,
+            isClickable = editable,
             isScrollable = false,
-            isEditable = false,
+            isEditable = editable,
             isCheckable = false,
             isChecked = false,
-            isFocused = false
+            isFocused = editable
         )
     )
     return UiObservation.fromSnapshot(UiTreeSnapshot(pkg, nodes, timestamp = fingerprintSeed.toLong()))

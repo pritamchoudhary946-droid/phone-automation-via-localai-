@@ -380,22 +380,23 @@ class ExampleRobolectricTest {
         assertTrue("Phase 1 should launch YouTube, got ${step1.action}", step1.action is AgentAction.OpenApp)
         assertEquals("youtube", (step1.action as AgentAction.OpenApp).appQuery)
 
-        // Phase 2: Inside YouTube with Search icon visible -> decides to tap Search
+        // Phase 2: Inside YouTube with a Search icon visible but no editable field
+        // -> must OPEN the search interface first (never type into nothing).
         val step2 = engine.reasonAndPlan(
             goal = goal,
             screenSummary = "Active Package: com.google.android.youtube\n- Button [Search] (clickable: true)",
             historySummary = "Step 0: Action OpenApp (youtube) -> Success",
             lastActionVerification = "Success: Launched youtube"
         )
-        assertTrue("Phase 2 should tap Search, got ${step2.action}", step2.action is AgentAction.Tap)
-        assertEquals("Search", (step2.action as AgentAction.Tap).targetText)
+        assertTrue("Phase 2 should open search, got ${step2.action}", step2.action is AgentAction.OpenSearch)
+        assertEquals("lo-fi beats", (step2.action as AgentAction.OpenSearch).query)
 
         // Phase 3: In Search edit text -> types query via ACTION_SET_TEXT
         val step3 = engine.reasonAndPlan(
             goal = goal,
             screenSummary = "Active Package: com.google.android.youtube\n- EditText [input] \"Search YouTube\" (focused: true, editable: true)",
-            historySummary = "Step 1: Action Tap (Search) -> Success",
-            lastActionVerification = "Success: Tap completed"
+            historySummary = "Step 1: Action OpenSearch -> Success",
+            lastActionVerification = "Success: search field now present on screen"
         )
         assertTrue("Phase 3 should type the query, got ${step3.action}", step3.action is AgentAction.TypeText)
         assertEquals("lo-fi beats", (step3.action as AgentAction.TypeText).text)
@@ -411,15 +412,15 @@ class ExampleRobolectricTest {
         assertFalse((step4.action as AgentAction.Tap).targetText == "lo-fi beats")
         assertEquals("Search", (step4.action as AgentAction.Tap).targetText)
 
-        // Regression: Search YouTube label alone must not be treated as an editable field.
+        // Regression: a Search label alone must not be treated as an editable field;
+        // it must open the search interface instead.
         val searchLabelScreen = engine.reasonAndPlan(
             goal = goal,
             screenSummary = "Active Package: com.google.android.youtube\\n- Button [Search YouTube] (clickable: true)",
             historySummary = "",
             lastActionVerification = null
         )
-        assertTrue("Search label should lead to a Search tap, got ${searchLabelScreen.action}", searchLabelScreen.action is AgentAction.Tap)
-        assertEquals("Search", (searchLabelScreen.action as AgentAction.Tap).targetText)
+        assertTrue("Search label should open search, got ${searchLabelScreen.action}", searchLabelScreen.action is AgentAction.OpenSearch)
 
         // Phase 5: Search results visible -> verifies and completes task
         val step5 = engine.reasonAndPlan(

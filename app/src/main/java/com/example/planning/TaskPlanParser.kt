@@ -152,6 +152,10 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 val nodeId = params.optString("targetNodeId", "").ifBlank { null }
                 AgentAction.TypeText(text, nodeId)
             }
+            ToolRegistry.TOOL_OPEN_SEARCH -> {
+                val query = params.optString("query", "").ifBlank { null }
+                AgentAction.OpenSearch(query)
+            }
             ToolRegistry.TOOL_SCROLL -> AgentAction.Scroll(params.optString("direction", "down"))
             ToolRegistry.TOOL_NAVIGATE_BACK -> AgentAction.Back
             ToolRegistry.TOOL_NAVIGATE_HOME -> AgentAction.Home

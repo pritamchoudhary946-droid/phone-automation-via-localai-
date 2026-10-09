@@ -40,6 +40,38 @@ data class TextInputResult(
     val targetNodeFound: Boolean = false
 )
 
+/** Outcome of attempting to open the active app's search interface. */
+data class SearchOpenResult(
+    val success: Boolean,
+    val method: String, // "EDITABLE_ALREADY_PRESENT", "ACTION_CLICK_SEARCH", "TAP_SEARCH_BOUNDS", "FAILED"
+    val message: String
+)
+
+/** Pure, unit-testable ranking helpers for locating UI affordances. */
+object SearchAffordanceHeuristics {
+    /**
+     * Ranks how strongly a node looks like a search affordance. Returns 0 when the
+     * node does not mention "search" at all, so unrelated controls are never chosen.
+     */
+    fun scoreSearchAffordance(
+        text: String?,
+        contentDescription: String?,
+        viewId: String?,
+        isClickable: Boolean,
+        isEnabled: Boolean,
+        isEditable: Boolean
+    ): Int {
+        val haystacks = listOf(text, contentDescription, viewId?.substringAfterLast('/'))
+        val mentionsSearch = haystacks.any { it?.contains("search", ignoreCase = true) == true }
+        if (!mentionsSearch) return 0
+        var score = 10
+        if (isClickable) score += 20
+        if (isEnabled) score += 5
+        if (isEditable) score += 30
+        return score
+    }
+}
+
 class AgentAccessibilityService : AccessibilityService() {
 
     companion object {
@@ -574,6 +606,122 @@ class AgentAccessibilityService : AccessibilityService() {
 
         search(root)
         return candidate
+    }
+
+    // ==========================================
+    // 3b. Search Interface Opener
+    // ==========================================
+
+    /**
+     * Opens the active app's search interface using the current accessibility tree.
+     *
+     * Order (never blind fixed coordinates):
+     *  1. If an editable field is already exposed, the search UI is already open.
+     *  2. Otherwise locate a search affordance from fresh nodes — preferring an
+     *     editable field, then a clickable node whose text/id/description mentions
+     *     "search" — and activate it (ACTION_CLICK, then a bounds gesture).
+     *  3. Only if no search affordance is exposed, fall back to the app's native
+     *     ACTION_SEARCH intent (existing supported capability) when a query is known.
+     *
+     * @return success plus the precise method used, so text entry can later target
+     *         the field this method actually focused.
+     */
+    suspend fun openSearchInterface(query: String? = null): SearchOpenResult {
+        Log.i(TAG, "[SEARCH_OPEN_START] Opening search interface (queryHint=${query ?: "none"})")
+
+        val root = rootInActiveWindow
+            ?: return SearchOpenResult(false, "FAILED", "Accessibility root window is null.")
+
+        try {
+            if (findTargetEditableNode(root, null) != null) {
+                Log.i(TAG, "[SEARCH_OPEN] Editable field already present; search UI is open.")
+                return SearchOpenResult(true, "EDITABLE_ALREADY_PRESENT", "Search field is already on screen")
+            }
+
+            val affordance = findSearchAffordance(root)
+                ?: return SearchOpenResult(false, "FAILED", "No search affordance or editable field exposed on the current screen.")
+
+            val label = affordance.label
+            // Prefer an accessibility click on the node itself / a clickable parent.
+            val clicked = affordance.node.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
+                (findFirstClickableParent(affordance.node)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false)
+
+            if (clicked) {
+                delay(500)
+                val refreshedRoot = rootInActiveWindow
+                val fieldNowPresent = refreshedRoot?.let { findTargetEditableNode(it, null) } != null
+                if (fieldNowPresent) {
+                    Log.i(TAG, "[SEARCH_OPEN_SUCCESS] ACTION_CLICK opened search; editable field now present.")
+                    return SearchOpenResult(true, "ACTION_CLICK_SEARCH", "Opened search via '$label'")
+                }
+                Log.w(TAG, "[SEARCH_OPEN_WARNING] Clicked '$label' but no editable field appeared; trying gesture.")
+            }
+
+            val bounds = Rect()
+            affordance.node.getBoundsInScreen(bounds)
+            if (bounds.width() > 0 && bounds.height() > 0) {
+                val (ok, reason) = dispatchGestureWithResult(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+                if (ok) {
+                    delay(500)
+                    val refreshedRoot = rootInActiveWindow
+                    val fieldNowPresent = refreshedRoot?.let { findTargetEditableNode(it, null) } != null
+                    if (fieldNowPresent) {
+                        Log.i(TAG, "[SEARCH_OPEN_SUCCESS] Bounds gesture opened search; editable field now present.")
+                        return SearchOpenResult(true, "TAP_SEARCH_BOUNDS", "Opened search via '$label'")
+                    }
+                    // The search surface advanced (e.g. suggestion page) even without an
+                    // editable node yet; report success so the next fresh observation decides.
+                    return SearchOpenResult(true, "TAP_SEARCH_BOUNDS", "Activated search affordance '$label'")
+                }
+                Log.w(TAG, "[SEARCH_OPEN_WARNING] Search affordance gesture failed: ${reason ?: "unknown"}")
+            }
+
+            return SearchOpenResult(false, "FAILED", "Found search affordance '$label' but could not activate it.")
+        } finally {
+            root.recycle()
+        }
+    }
+
+    private data class SearchAffordance(val node: AccessibilityNodeInfo, val label: String)
+
+    /** Depth-first search for the best "search" control in the live tree. */
+    private fun findSearchAffordance(root: AccessibilityNodeInfo): SearchAffordance? {
+        var best: AccessibilityNodeInfo? = null
+        var bestLabel = ""
+        var bestScore = 0
+
+        fun visit(node: AccessibilityNodeInfo) {
+            val text = node.text?.toString()
+            val desc = node.contentDescription?.toString()
+            val id = node.viewIdResourceName
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+            if (bounds.width() > 0 && bounds.height() > 0) {
+                val score = SearchAffordanceHeuristics.scoreSearchAffordance(
+                    text = text,
+                    contentDescription = desc,
+                    viewId = id,
+                    isClickable = node.isClickable,
+                    isEnabled = node.isEnabled,
+                    isEditable = node.isEditable
+                )
+                if (score > bestScore) {
+                    bestScore = score
+                    best?.recycle()
+                    best = AccessibilityNodeInfo.obtain(node)
+                    bestLabel = text ?: desc ?: id ?: "search"
+                }
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                visit(child)
+                child.recycle()
+            }
+        }
+
+        visit(root)
+        val node = best ?: return null
+        return SearchAffordance(node, bestLabel)
     }
 
     // ==========================================

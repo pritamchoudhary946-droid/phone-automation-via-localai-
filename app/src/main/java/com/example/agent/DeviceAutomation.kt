@@ -97,6 +97,26 @@ class AndroidDeviceAutomation(
                     message = if (r.success) "Typed \"${action.text}\" via ${r.method}" else (r.failureReason ?: "Text input failed")
                 )
             }
+            is AgentAction.OpenSearch -> {
+                val r = service.openSearchInterface(action.query)
+                if (r.success) {
+                    ActionResult(true, r.method, r.message)
+                } else if (!action.query.isNullOrBlank()) {
+                    // Bounded fallback: the accessibility tree exposed no search
+                    // affordance. Use the app's own ACTION_SEARCH intent (existing
+                    // supported capability) rather than tapping blind coordinates.
+                    val foreground = service.dumpHierarchy().packageName
+                    val launched = foreground != null && appDirectory.launchSearch(action.query, foreground)
+                    if (launched) {
+                        delay(800)
+                        ActionResult(true, "NATIVE_SEARCH_INTENT", "Opened search via ACTION_SEARCH for '${action.query}'")
+                    } else {
+                        ActionResult(false, r.method, r.message)
+                    }
+                } else {
+                    ActionResult(false, r.method, r.message)
+                }
+            }
             is AgentAction.Scroll -> ActionResult(service.scroll(action.direction), "SCROLL", "Scrolled ${action.direction}")
             is AgentAction.Back -> ActionResult(service.pressBack(), "GLOBAL_BACK", "Pressed Back")
             is AgentAction.Home -> ActionResult(service.pressHome(), "GLOBAL_HOME", "Pressed Home")

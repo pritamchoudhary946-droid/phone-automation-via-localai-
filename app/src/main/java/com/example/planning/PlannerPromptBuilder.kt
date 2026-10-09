@@ -28,6 +28,8 @@ object PlannerPromptBuilder {
         - Keep plans minimal. For "Open YouTube" produce a single launch step.
         - Stop planning once the goal is satisfied; do not add extra tasks.
         - verify=FOREGROUND_PACKAGE is required for launch_app steps.
+        - To search inside an app, use open_search before enter_text: the search
+          field is often not visible until the search interface is opened.
         - end a plan with report_status only when the goal is fully achieved.
     """.trimIndent()
 
