@@ -388,7 +388,7 @@ class LiteRtEngine(
     }
 
     private fun extractForegroundPackage(screenSummary: String): String? {
-        return Regex("(?im)^\\s*Active Package:\\s*([^\\s\\r\\n]+)")
+        return Regex("(?im)^\\s*Active Package:\\s*([A-Za-z0-9._]+)")
             .find(screenSummary)?.groupValues?.get(1)?.takeIf { it.isNotBlank() && it != "unknown" }
     }
 
