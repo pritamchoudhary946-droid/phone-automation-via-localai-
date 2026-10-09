@@ -90,10 +90,7 @@ class LiteRtLmRuntime(
                 throw LlmInferenceException("LiteRT-LM engine is not initialized")
             }
 
-            val conversationConfig = ConversationConfig(
-                systemInstruction = systemInstruction?.let { Contents.of(it) },
-                samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.2, seed = 0)
-            )
+            val conversationConfig = buildConversationConfig(systemInstruction, maxOutputTokens)
 
             try {
                 eng.createConversation(conversationConfig).use { conversation ->
@@ -121,6 +118,20 @@ class LiteRtLmRuntime(
             false
         }
     }
+
+    /**
+     * Builds the real LiteRT-LM conversation config. Extracted so tests can assert
+     * that the requested [maxOutputTokens] reaches [ConversationConfig.maxOutputToken]
+     * without loading a 2.59 GB model.
+     */
+    internal fun buildConversationConfig(systemInstruction: String?, maxOutputTokens: Int): ConversationConfig =
+        ConversationConfig(
+            systemInstruction = systemInstruction?.let { Contents.of(it) },
+            samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.2, seed = 0),
+            // Apply the caller's bound to the real generation config so full-plan and
+            // one-step decisions both stay bounded on-device.
+            maxOutputToken = maxOutputTokens.coerceAtLeast(1)
+        )
 
     private fun extractText(message: Message): String {
         return message.contents.contents

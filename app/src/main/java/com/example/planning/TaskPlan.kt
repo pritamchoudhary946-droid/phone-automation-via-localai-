@@ -35,6 +35,9 @@ data class PlanStep(
 ) {
     fun withStatus(newStatus: PlanStepStatus): PlanStep = copy(status = newStatus)
     fun withAttempt(): PlanStep = copy(attempts = attempts + 1, status = PlanStepStatus.EXECUTING)
+
+    /** Records a failed/rejected attempt but restores the step to PENDING for a bounded retry. */
+    fun withRetry(): PlanStep = copy(attempts = attempts + 1, status = PlanStepStatus.PENDING)
 }
 
 /** The full validated plan for a user goal. */

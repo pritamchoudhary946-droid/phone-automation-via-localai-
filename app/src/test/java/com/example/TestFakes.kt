@@ -62,6 +62,7 @@ class FakeLlmRuntime(
 ) : LlmRuntime {
 
     val prompts = mutableListOf<String>()
+    val requestedMaxOutputTokens = mutableListOf<Int>()
     var initializeCount = 0
     var closed = false
 
@@ -74,6 +75,7 @@ class FakeLlmRuntime(
 
     override suspend fun generate(prompt: String, systemInstruction: String?, maxOutputTokens: Int): String {
         prompts.add(prompt)
+        requestedMaxOutputTokens.add(maxOutputTokens)
         if (throwOnGenerate) throw LlmInferenceException("fake generation failure")
         return output
     }

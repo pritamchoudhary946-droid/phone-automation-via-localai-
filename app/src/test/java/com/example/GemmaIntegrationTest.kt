@@ -460,6 +460,65 @@ class GemmaIntegrationTest {
         assertTrue(engine.state.value is EngineState.NotInitialized)
     }
 
+    // 2. The requested output-token limit reaches the runtime for both plan and
+    //    one-step generation, and reaches the real LiteRT-LM conversation config.
+
+    @Test
+    fun plannerSendsBoundedOutputTokenLimitToRuntime() = runBlocking {
+        val planJson =
+            """{"steps":[{"id":1,"seq":1,"desc":"Launch YouTube","action":"launch_app","params":{"appQuery":"youtube"},"expect":"YouTube foreground","verify":"FOREGROUND_PACKAGE"}]}"""
+        val fake = FakeLlmRuntime(output = planJson)
+        val modelManager = LiteRtModelManager(context).also { fakeModelFileAt(it.getModelFile()) }
+        val engine = buildTestEngine(
+            context,
+            runtimeFactory = { _, _ -> fake },
+            modelManager = modelManager,
+            maxOutputTokens = 768
+        )
+        assertTrue(engine.initialize())
+
+        engine.planTask(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.launcher",
+            foregroundPackage = "com.android.launcher",
+            historySummary = "",
+            lastActionVerification = null,
+            remainingStepBudget = 10
+        )
+        assertEquals("full-plan generation must be bounded to the configured limit",
+            768, fake.requestedMaxOutputTokens.first())
+    }
+
+    @Test
+    fun stepDecisionUsesSmallerBoundedOutputTokens() = runBlocking {
+        val fake = FakeLlmRuntime(
+            output = """{"thought":"tap search","action":"tap_element","params":{"targetText":"Search"}}"""
+        )
+        val modelManager = LiteRtModelManager(context).also { fakeModelFileAt(it.getModelFile()) }
+        val engine = buildTestEngine(context, runtimeFactory = { _, _ -> fake }, modelManager = modelManager)
+        assertTrue(engine.initialize())
+
+        engine.decideNextAction(
+            goal = "Open YouTube",
+            activeSubGoal = "activate search",
+            screenSummary = "Active Package: com.google.android.youtube",
+            foregroundPackage = "com.google.android.youtube",
+            historySummary = "",
+            lastActionVerification = null,
+            remainingStepBudget = 8
+        )
+        assertEquals("one-step decision must use the smaller bounded budget",
+            256, fake.requestedMaxOutputTokens.first())
+    }
+
+    @Test
+    fun liteRtConversationConfigReceivesMaxOutputToken() {
+        val runtime = com.example.model.LiteRtLmRuntime(modelPath = "/tmp/unused.litertlm")
+        assertEquals(123, runtime.buildConversationConfig("sys", 123).maxOutputToken)
+        // Defensive lower bound: never request zero/negative output tokens.
+        assertEquals(1, runtime.buildConversationConfig(null, 0).maxOutputToken)
+    }
+
     // ---- helpers ----
 
     private fun stageRuntimeFromFactory(fake: FakeLlmRuntime): (String, String?) -> com.example.model.LlmRuntime =

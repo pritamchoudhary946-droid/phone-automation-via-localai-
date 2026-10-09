@@ -58,7 +58,8 @@ class TaskOrchestrator(
     private val liteRtEngine: LiteRtEngine,
     private val appDirectory: AppDirectory,
     private val deviceAutomation: DeviceAutomation = AndroidDeviceAutomation(appDirectory),
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    toolRegistry: ToolRegistry = ToolRegistry()
 ) {
     private val TAG = "TaskOrchestrator"
     private val database = AgentDatabase.getInstance(context)
@@ -69,7 +70,9 @@ class TaskOrchestrator(
     private val stuckDetector = StuckLoopDetector()
     private val riskEvaluator = RiskEvaluator()
     private val verifier = PostconditionVerifier
-    val toolRegistry = ToolRegistry()
+
+    /** Injectable so tests can force a validation rejection deterministically. */
+    val toolRegistry: ToolRegistry = toolRegistry
 
     private val _orchestratorState = MutableStateFlow<OrchestratorState>(OrchestratorState.Idle)
     val orchestratorState: StateFlow<OrchestratorState> = _orchestratorState.asStateFlow()
@@ -163,8 +166,16 @@ class TaskOrchestrator(
                 while (completedCount < maxSteps) {
                     val step = plan.nextPending()
                     if (step == null) {
-                        val summary = "Goal achieved: completed ${plan.completedCount()} of ${plan.size} planned steps."
-                        complete(task, summary, completedCount)
+                        // All planned steps are done; still require a fresh goal-level
+                        // postcondition before declaring success.
+                        val fresh = deviceAutomation.observe()
+                        val goalVerdict = verifyGoalPostcondition(plan, observation, fresh)
+                        if (goalVerdict.satisfied) {
+                            val summary = "Goal achieved: completed ${plan.completedCount()} of ${plan.size} planned steps."
+                            complete(task, summary, completedCount)
+                        } else {
+                            fail(task, "All planned steps completed but the goal postcondition was not verified: ${goalVerdict.detail}", completedCount)
+                        }
                         return@launch
                     }
                     if (step.attempts > step.maxRetries) {
@@ -221,10 +232,19 @@ class TaskOrchestrator(
                     when (val validation = toolRegistry.validateAction(action)) {
                         is ToolValidationResult.Invalid -> {
                             recordStep(task, completedCount, "Rejected by validation", action, observation, "Failed: ${validation.reason}", "FAILED")
-                            plan = plan.replace(effectiveStep.withAttempt())
+                            // Never leave the step stuck in EXECUTING: record the attempt but
+                            // restore PENDING so the plan does not look fully satisfied.
+                            val rejected = effectiveStep.withRetry()
+                            plan = plan.replace(rejected)
                             _activePlan.value = plan
                             consecutiveFailures++
                             lastActionResult = "Validation failed: ${validation.reason}"
+                            if (rejected.attempts > rejected.maxRetries) {
+                                plan = plan.replace(rejected.withStatus(PlanStepStatus.FAILED))
+                                _activePlan.value = plan
+                                fail(task, "Step ${rejected.id} rejected by validation after ${rejected.attempts} attempts: ${validation.reason}", completedCount)
+                                return@launch
+                            }
                             if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
                                 fail(task, "Too many rejected actions; stopping. Last: ${validation.reason}", completedCount)
                                 return@launch
@@ -247,14 +267,52 @@ class TaskOrchestrator(
                     }
 
                     if (action is AgentAction.FinishTask) {
-                        // Only trust a finish when the plan is actually satisfied or the
-                        // model's claimed postcondition holds over the fresh observation.
-                        if (plan.completedCount() >= 1 && plan.nextPending() == null) {
-                            complete(task, action.summary, completedCount)
-                        } else {
-                            complete(task, action.summary, completedCount)
+                        // A report_status/finish claim is never trusted on its own: every
+                        // required subgoal must already be verified AND a fresh goal-level
+                        // postcondition must hold before the task may complete.
+                        val required = plan.steps.filter {
+                            it.action !is AgentAction.FinishTask && it.action !is AgentAction.FailTask
                         }
-                        return@launch
+                        val allRequiredCompleted =
+                            required.isNotEmpty() && required.all { it.status == PlanStepStatus.COMPLETED }
+                        val goalVerdict = verifyGoalPostcondition(plan, previousObservation, observation)
+                        if (allRequiredCompleted && goalVerdict.satisfied) {
+                            complete(task, action.summary, completedCount)
+                            return@launch
+                        }
+
+                        val reason = when {
+                            required.isEmpty() -> "plan has no verifiable required subgoals"
+                            !allRequiredCompleted -> "unverified subgoals remain (${required.count { it.status != PlanStepStatus.COMPLETED }} pending)"
+                            else -> goalVerdict.detail
+                        }
+                        recordStep(task, completedCount, "Rejected premature finish", action, observation, "Rejected: $reason", "FAILED")
+
+                        // If the finish was itself a plan step, skip it so the loop can
+                        // still advance to any remaining required subgoals.
+                        if (step.action is AgentAction.FinishTask) {
+                            plan = plan.replace(step.withStatus(PlanStepStatus.SKIPPED))
+                            _activePlan.value = plan
+                        }
+
+                        if (allRequiredCompleted) {
+                            // Every step claims success yet the screen does not prove the
+                            // goal: fail honestly rather than looping.
+                            fail(task, "Model claimed completion but the goal postcondition was not verified: $reason", completedCount)
+                            return@launch
+                        }
+                        consecutiveFailures++
+                        lastActionResult = "Rejected premature finish: $reason"
+                        if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+                            fail(task, "Model claimed completion before the goal was verified: $reason", completedCount)
+                            return@launch
+                        }
+                        _orchestratorState.value = OrchestratorState.Replanning(
+                            "Rejected premature finish: $reason",
+                            RecoveryStrategy.REPLAN_NEW_APPROACH
+                        )
+                        delay(300)
+                        continue
                     }
                     if (action is AgentAction.FailTask) {
                         fail(task, action.reason, completedCount)
@@ -320,6 +378,56 @@ class TaskOrchestrator(
                 Log.e(TAG, "Task execution error", e)
                 taskDao.updateTaskStatus(task.id, "FAILED")
                 _orchestratorState.value = OrchestratorState.Failed(task.id, "Error: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    /**
+     * Fresh, goal-level postcondition check used to gate a `FinishTask` claim.
+     * It is intentionally independent of the per-step verdicts: even if the plan
+     * says every step is done, the current screen must still prove the goal.
+     */
+    private fun verifyGoalPostcondition(
+        plan: TaskPlan,
+        pre: UiObservation,
+        post: UiObservation
+    ): PostconditionVerdict {
+        val lastRequired = plan.steps.lastOrNull {
+            it.action !is AgentAction.FinishTask && it.action !is AgentAction.FailTask
+        } ?: return PostconditionVerdict(false, "Plan has no required subgoals to verify")
+
+        val targetPkg = if (lastRequired.action is AgentAction.OpenApp) {
+            lastRequired.action.packageName ?: appDirectory.resolvePackage(lastRequired.action.appQuery)
+        } else {
+            null
+        }
+        val method = when {
+            lastRequired.action is AgentAction.OpenApp -> VerificationMethod.FOREGROUND_PACKAGE
+            lastRequired.action is AgentAction.Home -> VerificationMethod.HOME_FOREGROUND
+            else -> lastRequired.verification
+        }
+        val screenChanged = pre.fingerprint != post.fingerprint
+        return when (method) {
+            VerificationMethod.NONE -> {
+                // No structured signal in the plan: only accept a completion when the
+                // final step genuinely completed and the screen advanced with it.
+                val done = lastRequired.status == PlanStepStatus.COMPLETED
+                PostconditionVerdict(
+                    done && screenChanged,
+                    if (done && screenChanged) "Final goal state advanced after the last verified step"
+                    else "Goal-level postcondition could not be independently verified"
+                )
+            }
+            else -> {
+                val verdict = verifier.verify(
+                    method = method,
+                    expectedPostcondition = lastRequired.expectedPostcondition,
+                    targetPackage = targetPkg,
+                    observationPackage = post.packageName,
+                    screenChanged = screenChanged,
+                    screenText = post.summary
+                )
+                PostconditionVerdict(verdict.satisfied, verdict.detail)
             }
         }
     }

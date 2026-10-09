@@ -7,6 +7,7 @@ import com.example.agent.AgentAction
 import com.example.agent.AppDirectory
 import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
+import com.example.agent.ToolRegistry
 import com.example.agent.UiObservation
 import com.example.model.LiteRtEngine
 import com.example.model.LiteRtModelManager
@@ -225,15 +226,21 @@ class OrchestratorLoopTest {
                         ActionResult(true, "LAUNCH_VERIFIED", "verified")
                     }
                     is AgentAction.Tap -> {
-                        defaultObservation = observation("com.google.android.youtube", "YouTube Search  edittext editable: true", 3)
-                        ActionResult(true, "TAP_ACCESSIBILITY", "tapped")
+                        val target = action.targetText?.lowercase() ?: ""
+                        if (target.contains("lo-fi") || target.contains("lofi")) {
+                            defaultObservation = observation("com.google.android.youtube", "YouTube watch Now playing lo-fi beats", 5)
+                            ActionResult(true, "TAP_ACCESSIBILITY", "opened result")
+                        } else {
+                            defaultObservation = observation("com.google.android.youtube", "YouTube Search  edittext editable: true", 3)
+                            ActionResult(true, "TAP_ACCESSIBILITY", "tapped search")
+                        }
                     }
                     is AgentAction.TypeText -> {
                         defaultObservation = observation("com.google.android.youtube", "Results for lo-fi beats  12 views videos", 4)
                         ActionResult(true, "ACTION_SET_TEXT", "typed")
                     }
                     is AgentAction.Home -> {
-                        defaultObservation = observation("com.android.launcher", "Home", 5)
+                        defaultObservation = observation("com.android.launcher", "Home", 6)
                         ActionResult(true, "GLOBAL_HOME", "home")
                     }
                     else -> ActionResult(true, "OK", "ok")
@@ -243,33 +250,124 @@ class OrchestratorLoopTest {
         val engine = modelEngine(
             """{"steps":[
               {"id":1,"seq":1,"desc":"Launch YouTube","action":"launch_app","params":{"appQuery":"youtube"},"expect":"YouTube foreground","verify":"FOREGROUND_PACKAGE"},
-              {"id":2,"seq":2,"desc":"Tap search","action":"tap_element","params":{"targetText":"Search"},"expect":"search field","verify":"SCREEN_CHANGED"},
-              {"id":3,"seq":3,"desc":"Type query","action":"enter_text","params":{"text":"lo-fi beats"},"expect":"Results","verify":"RESULTS_PRESENT"},
-              {"id":4,"seq":4,"desc":"Return home","action":"navigate_home","params":{},"expect":"home","verify":"HOME_FOREGROUND"}
+              {"id":2,"seq":2,"desc":"Activate search","action":"tap_element","params":{"targetText":"Search"},"expect":"search field","verify":"SCREEN_CHANGED"},
+              {"id":3,"seq":3,"desc":"Submit query","action":"enter_text","params":{"text":"lo-fi beats"},"expect":"results","verify":"RESULTS_PRESENT"},
+              {"id":4,"seq":4,"desc":"Open result","action":"tap_element","params":{"targetText":"lo-fi beats"},"expect":"Now playing","verify":"TEXT_PRESENT"},
+              {"id":5,"seq":5,"desc":"Return home","action":"navigate_home","params":{},"expect":"home","verify":"HOME_FOREGROUND"}
             ]}"""
         )
         val orchestrator = newOrchestrator(engine, automation)
-        orchestrator.startTask("Open YouTube, search for lo-fi beats, open a result, and return to home", maxSteps = 8)
+        orchestrator.startTask("Open YouTube, search for lo-fi beats, open a result, and return to home", maxSteps = 10)
+
+        val terminal = awaitTerminal(orchestrator, timeoutMs = 10_000)
+        assertTrue("expected completion, got $terminal", terminal is OrchestratorState.Completed)
+
+        // Every required action happened, in order, through the native layer.
+        val kinds = automation.executed.map { it::class.simpleName }
+        assertEquals(
+            listOf("OpenApp", "Tap", "TypeText", "Tap", "Home"),
+            kinds
+        )
+        // The result open is a distinct tap on the observed result, not text entry alone.
+        assertTrue(automation.executed.any {
+            it is AgentAction.Tap && it.targetText?.contains("lo-fi", ignoreCase = true) == true
+        })
+        // All required steps were verified as completed (search required results, open required the watch screen).
+        val plan = orchestrator.activePlan.value!!
+        assertTrue("all planned steps should be completed: ${plan.steps.map { it.status }}",
+            plan.steps.all { it.status == com.example.planning.PlanStepStatus.COMPLETED })
+        assertTrue(orchestrator.currentSteps.value.all { it.status == "SUCCESS" })
+    }
+
+    // 1. A report_status/finish claim must not complete the task while required steps remain unverified.
+
+    @Test
+    fun prematureReportStatusIsRejectedUntilGoalVerified() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenApp -> {
+                        defaultObservation = observation("com.google.android.youtube", "YouTube home", 2)
+                        ActionResult(true, "LAUNCH_VERIFIED", "verified")
+                    }
+                    is AgentAction.Home -> {
+                        defaultObservation = observation("com.android.launcher", "Home", 3)
+                        ActionResult(true, "GLOBAL_HOME", "home")
+                    }
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        // report_status sits in the middle: a later required step is still pending when the
+        // model first claims success, so the claim must be rejected and the plan continued.
+        val engine = modelEngine(
+            """{"steps":[
+              {"id":1,"seq":1,"desc":"Launch YouTube","action":"launch_app","params":{"appQuery":"youtube"},"expect":"YouTube foreground","verify":"FOREGROUND_PACKAGE"},
+              {"id":2,"seq":2,"desc":"Report status","action":"report_status","params":{"status":"success","summary":"done"},"expect":"goal","verify":"NONE"},
+              {"id":3,"seq":3,"desc":"Return home","action":"navigate_home","params":{},"expect":"home","verify":"HOME_FOREGROUND"}
+            ]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("Open YouTube and return home", maxSteps = 12)
+
+        val terminal = awaitTerminal(orchestrator, timeoutMs = 10_000)
+        // The premature claim was rejected explicitly...
+        assertTrue("expected the finish to be rejected as premature",
+            orchestrator.currentSteps.value.any { it.reasoning.contains("Rejected premature finish") })
+        // ...the later required step still ran through the native layer...
+        assertTrue("home must still be executed after the rejected finish",
+            automation.executed.any { it is AgentAction.Home })
+        // ...and the task only completed once that subgoal was actually verified.
+        assertTrue("expected completion after all subgoals verified, got $terminal",
+            terminal is OrchestratorState.Completed)
+        val plan = orchestrator.activePlan.value!!
+        assertTrue("all required steps should be completed: ${plan.steps.map { it.status }}",
+            plan.steps.all { it.status == com.example.planning.PlanStepStatus.COMPLETED || it.status == com.example.planning.PlanStepStatus.SKIPPED })
+    }
+
+    // 3. A validation-rejected action never leaves its step permanently EXECUTING.
+
+    @Test
+    fun validationRejectedActionRestoresPendingAndFailsCleanly() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Launch YouTube","action":"launch_app","params":{"appQuery":"youtube"},"expect":"YouTube foreground","verify":"FOREGROUND_PACKAGE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation, registry = AlwaysRejectRegistry())
+        orchestrator.startTask("Open YouTube", maxSteps = 5)
 
         val terminal = awaitTerminal(orchestrator, timeoutMs = 8_000)
-        assertTrue("expected completion, got $terminal", terminal is OrchestratorState.Completed)
-        // Executed purely through the native automation layer.
-        assertTrue(automation.executed.any { it is AgentAction.OpenApp })
-        assertTrue(automation.executed.any { it is AgentAction.Tap })
-        assertTrue(automation.executed.any { it is AgentAction.TypeText })
-        assertTrue(automation.executed.any { it is AgentAction.Home })
+        assertTrue("expected failure, got $terminal", terminal is OrchestratorState.Failed)
+        assertTrue((terminal as OrchestratorState.Failed).reason.contains("rejected by validation"))
+        // Nothing was dispatched to the device, and the step is FAILED, never EXECUTING.
+        assertTrue(automation.executed.isEmpty())
+        val step = orchestrator.activePlan.value!!.steps.first()
+        assertEquals(com.example.planning.PlanStepStatus.FAILED, step.status)
     }
 
     // ---- helpers ----
 
-    private fun newOrchestrator(engine: LiteRtEngine, automation: FakeDeviceAutomation): TaskOrchestrator {
+    private class AlwaysRejectRegistry : ToolRegistry() {
+        override fun validateAction(action: AgentAction): com.example.agent.ToolValidationResult =
+            com.example.agent.ToolValidationResult.Invalid("forced rejection for test")
+    }
+
+    private fun newOrchestrator(
+        engine: LiteRtEngine,
+        automation: FakeDeviceAutomation,
+        registry: ToolRegistry = ToolRegistry()
+    ): TaskOrchestrator {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         return TaskOrchestrator(
             context = context,
             liteRtEngine = engine,
             appDirectory = AppDirectory(context),
             deviceAutomation = automation,
-            scope = scope
+            scope = scope,
+            toolRegistry = registry
         )
     }
 
