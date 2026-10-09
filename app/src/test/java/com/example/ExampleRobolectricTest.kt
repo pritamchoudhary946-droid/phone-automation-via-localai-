@@ -365,6 +365,18 @@ class ExampleRobolectricTest {
             lastActionVerification = "Success: Injected query"
         )
         assertTrue(step4.action is AgentAction.Tap)
+        assertFalse((step4.action as AgentAction.Tap).targetText == "lo-fi beats")
+        assertEquals("Search", (step4.action as AgentAction.Tap).targetText)
+
+        // Regression: Search YouTube label alone must not be treated as an editable field.
+        val searchLabelScreen = engine.reasonAndPlan(
+            goal = goal,
+            screenSummary = "Active Package: com.google.android.youtube\\n- Button [Search YouTube] (clickable: true)",
+            historySummary = "",
+            lastActionVerification = null
+        )
+        assertTrue(searchLabelScreen.action is AgentAction.Tap)
+        assertEquals("Search", (searchLabelScreen.action as AgentAction.Tap).targetText)
 
         // Phase 5: Search results visible -> verifies and completes task
         val step5 = engine.reasonAndPlan(
