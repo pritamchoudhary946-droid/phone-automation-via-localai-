@@ -287,6 +287,11 @@ class OrchestratorLoopTest {
         assertTrue("all planned steps should be completed: ${plan.steps.map { it.status }}",
             plan.steps.all { it.status == com.example.planning.PlanStepStatus.COMPLETED })
         assertTrue(orchestrator.currentSteps.value.all { it.status == "SUCCESS" })
+
+        // Hybrid fast path: once the model produced the plan, every step was decided
+        // deterministically from the accessibility tree, so no per-step model calls ran.
+        assertEquals("no per-step model calls expected", 0, orchestrator.modelCalls.value)
+        assertTrue("fast path should handle every step", orchestrator.fastPathSteps.value >= 5)
     }
 
     // 1. A report_status/finish claim must not complete the task while required steps remain unverified.
