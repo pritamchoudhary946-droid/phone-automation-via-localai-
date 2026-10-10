@@ -19,14 +19,8 @@ import org.json.JSONObject
 class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
 
     fun parse(rawModelOutput: String, goal: String): PlanParseResult {
-        val jsonText = extractJsonObject(rawModelOutput)
+        val root = parseRootObject(rawModelOutput)
             ?: return PlanParseResult.Invalid("No JSON object found in model output", rawModelOutput)
-
-        val root = try {
-            JSONObject(jsonText)
-        } catch (e: Exception) {
-            return PlanParseResult.Invalid("Malformed JSON: ${e.message}", rawModelOutput)
-        }
 
         val stepsArray: JSONArray = root.optJSONArray("steps")
             ?: return PlanParseResult.Invalid("Plan is missing a 'steps' array", rawModelOutput)
@@ -42,8 +36,13 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
         val seenIds = mutableSetOf<Int>()
 
         for (i in 0 until stepsArray.length()) {
-            val stepObj = stepsArray.optJSONObject(i)
-                ?: return PlanParseResult.Invalid("Step $i is not a JSON object", rawModelOutput)
+            // 6.18: org.json is lenient and turns a trailing comma into a `null` array
+            // element. Skip that artifact rather than failing the whole plan; a real
+            // non-object element (e.g. a bare string) is still rejected below.
+            val stepObj = stepsArray.optJSONObject(i) ?: run {
+                if (stepsArray.isNull(i) || stepsArray.opt(i) == null) continue
+                return PlanParseResult.Invalid("Step $i is not a JSON object", rawModelOutput)
+            }
 
             val id = stepObj.optInt("id", i + 1)
             if (!seenIds.add(id)) {
@@ -104,6 +103,40 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
         return PlanParseResult.Success(TaskPlan(goal = goal, steps = ordered, fromModel = true))
     }
 
+    /**
+     * 6.18: tolerant root extraction. The small on-device model often wraps its JSON
+     * in prose or code fences, and emits trailing commas or single quotes. Rather than
+     * failing the whole task on such a near-miss, strip fences/prose, extract the first
+     * balanced object, and retry after a light normalisation. Returns null only when no
+     * usable object can be recovered at all.
+     */
+    private fun parseRootObject(rawModelOutput: String): JSONObject? {
+        val text = rawModelOutput
+            .replace("```json", " ")
+            .replace("```", " ")
+            .trim()
+        val candidate = extractJsonObject(text) ?: return null
+        return try {
+            JSONObject(candidate)
+        } catch (e: Exception) {
+            try {
+                JSONObject(normalizeJson(candidate))
+            } catch (e2: Exception) {
+                null
+            }
+        }
+    }
+
+    /** Repairs the two most common small-model JSON slips: trailing commas and single quotes. */
+    private fun normalizeJson(input: String): String {
+        var out = input.trim()
+        // Trailing commas before } or ].
+        out = out.replace(Regex(",\\s*([}\\]])"), "$1")
+        // Single-quoted strings/keys -> double-quoted (only when unescaped in place).
+        out = out.replace(Regex("'([^'\"\\\\]*)'"), "\"$1\"")
+        return out
+    }
+
     /** Extracts the first balanced top-level JSON object from surrounding prose/code fences. */
     private fun extractJsonObject(text: String): String? {
         val start = text.indexOf('{')
@@ -136,55 +169,55 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
     private fun mapAction(rawAction: String, params: JSONObject): AgentAction {
         return when (rawAction) {
             ToolRegistry.TOOL_LAUNCH_APP -> {
-                val query = params.optString("appQuery", "").ifBlank { params.optString("app", "") }
-                val pkg = params.optString("packageName", "").ifBlank { null }
+                val query = str(params, "appQuery", "app", "appName", "application")
+                val pkg = str(params, "packageName", "package", "pkg").ifBlank { null }
                 AgentAction.OpenApp(query, pkg)
             }
             ToolRegistry.TOOL_READ_SCREEN -> AgentAction.ReadScreen
             ToolRegistry.TOOL_TAP_ELEMENT -> {
-                val text = params.optString("targetText", "").ifBlank { null }
+                val text = str(params, "targetText", "element", "text", "target", "label").ifBlank { null }
                 val x = if (params.has("x")) params.optInt("x") else null
                 val y = if (params.has("y")) params.optInt("y") else null
                 AgentAction.Tap(text, x, y)
             }
             ToolRegistry.TOOL_ENTER_TEXT -> {
-                val text = params.optString("text", "")
-                val nodeId = params.optString("targetNodeId", "").ifBlank { null }
+                val text = str(params, "text", "query", "value", "message")
+                val nodeId = str(params, "targetNodeId", "nodeId", "id").ifBlank { null }
                 AgentAction.TypeText(text, nodeId)
             }
             ToolRegistry.TOOL_SUBMIT ->
-                AgentAction.Submit(params.optString("targetText", "").ifBlank { null })
-            ToolRegistry.TOOL_OPEN_URL -> AgentAction.OpenUrl(params.optString("url", ""))
+                AgentAction.Submit(str(params, "targetText", "target", "element").ifBlank { null })
+            ToolRegistry.TOOL_OPEN_URL -> AgentAction.OpenUrl(str(params, "url", "uri", "link"))
             ToolRegistry.TOOL_COPY_TEXT ->
-                AgentAction.CopyText(params.optString("targetText", "").ifBlank { null })
+                AgentAction.CopyText(str(params, "targetText", "text", "element").ifBlank { null })
             ToolRegistry.TOOL_PASTE_TEXT ->
-                AgentAction.PasteText(params.optString("targetText", "").ifBlank { null })
+                AgentAction.PasteText(str(params, "targetText", "text", "element").ifBlank { null })
             ToolRegistry.TOOL_DRAG -> AgentAction.Drag(
-                fromText = params.optString("fromText", ""),
-                toText = params.optString("toText", "")
+                fromText = str(params, "fromText", "from", "start"),
+                toText = str(params, "toText", "to", "end")
             )
-            ToolRegistry.TOOL_DEEP_LINK -> AgentAction.DeepLink(params.optString("uri", ""))
+            ToolRegistry.TOOL_DEEP_LINK -> AgentAction.DeepLink(str(params, "uri", "url", "link"))
             ToolRegistry.TOOL_READ_PAGE_CONTENT -> AgentAction.ReadPageContent
-            ToolRegistry.TOOL_WEB_SEARCH -> AgentAction.WebSearch(params.optString("query", ""))
-            ToolRegistry.TOOL_READ_URL -> AgentAction.ReadUrl(params.optString("url", ""))
+            ToolRegistry.TOOL_WEB_SEARCH -> AgentAction.WebSearch(str(params, "query", "text", "q"))
+            ToolRegistry.TOOL_READ_URL -> AgentAction.ReadUrl(str(params, "url", "uri", "link"))
             ToolRegistry.TOOL_OPEN_SEARCH -> {
-                val query = params.optString("query", "").ifBlank { null }
+                val query = str(params, "query", "text", "q").ifBlank { null }
                 AgentAction.OpenSearch(query)
             }
-            ToolRegistry.TOOL_OPEN_ITEM -> AgentAction.OpenItem(params.optString("targetText", ""))
-            ToolRegistry.TOOL_SCROLL -> AgentAction.Scroll(params.optString("direction", "down"))
+            ToolRegistry.TOOL_OPEN_ITEM -> AgentAction.OpenItem(str(params, "targetText", "text", "element", "label"))
+            ToolRegistry.TOOL_SCROLL -> AgentAction.Scroll(str(params, "direction", "dir").ifBlank { "down" })
             ToolRegistry.TOOL_LONG_PRESS -> AgentAction.LongPress(
-                targetText = params.optString("targetText", "").ifBlank { null },
+                targetText = str(params, "targetText", "text", "element", "label").ifBlank { null },
                 durationMs = params.optLong("durationMs", 700L)
             )
             ToolRegistry.TOOL_SCROLL_UNTIL_FOUND -> AgentAction.ScrollUntilFound(
-                targetText = params.optString("targetText", ""),
-                direction = params.optString("direction", "down"),
+                targetText = str(params, "targetText", "text", "element", "label"),
+                direction = str(params, "direction", "dir").ifBlank { "down" },
                 maxSwipes = params.optInt("maxSwipes", 6)
             )
             ToolRegistry.TOOL_READ_TEXT -> AgentAction.ReadText
             ToolRegistry.TOOL_WAIT_FOR_TEXT -> AgentAction.WaitForText(
-                targetText = params.optString("targetText", ""),
+                targetText = str(params, "targetText", "text", "element", "label"),
                 timeoutMs = params.optLong("timeoutMs", 5_000L)
             )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
@@ -196,7 +229,7 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_WAIT -> AgentAction.Wait(params.optLong("durationMs", 800L))
             ToolRegistry.TOOL_SCREENSHOT -> AgentAction.Screenshot
             ToolRegistry.TOOL_REPORT_STATUS -> {
-                val summary = params.optString("summary", "Goal achieved")
+                val summary = str(params, "summary", "text", "message").ifBlank { "Goal achieved" }
                 // Only an explicit success (or a bare report, whose completion is still
                 // independently verified by the orchestrator) may finish the task. Any
                 // other explicit status — "failure", "error", "partial" — must not be
@@ -212,6 +245,25 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             }
             else -> throw IllegalArgumentException("Unsupported action '$rawAction'")
         }
+    }
+
+    /**
+     * 6.19: value coercion + aliases. The small model frequently emits a param under a
+     * near-miss key, or as a number/boolean instead of a string. Accept the first
+     * non-blank alias and coerce any scalar to its string form so a near-miss validates
+     * instead of being rejected wholesale. Non-scalar values are ignored.
+     */
+    private fun str(params: JSONObject, vararg keys: String): String {
+        for (key in keys) {
+            if (!params.has(key)) continue
+            when (val value = params.opt(key)) {
+                null -> continue
+                is String -> if (value.isNotBlank()) return value
+                is Number, is Boolean -> return value.toString()
+                else -> continue
+            }
+        }
+        return ""
     }
 
     private fun parseVerification(value: String): VerificationMethod {

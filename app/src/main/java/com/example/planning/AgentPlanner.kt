@@ -30,15 +30,30 @@ class AgentPlanner(
     private val reflector = Reflector(inferenceEngine)
 
     /**
+     * When false (the default), a task is [PlanOutcome.Unavailable] instead of being
+     * silently planned by the keyword fallback while the local model is not loaded
+     * (plan 6.1: never quietly run keywords). A user-visible, explicitly enabled
+     * degraded mode sets this true, and only then does the labelled BASIC fallback run.
+     */
+    var fallbackExplicit: Boolean = false
+
+    /**
      * Produces a plan for [command]. Tries the real model with one bounded repair
-     * attempt, then falls back to the clearly labelled basic planner.
+     * attempt, then — only when the user has explicitly enabled the degraded mode —
+     * falls back to the clearly labelled basic planner.
      */
     suspend fun plan(request: PlanningRequest): PlanOutcome {
         if (!inferenceEngine.isReady()) {
-            return PlanOutcome.Planned(
-                plan = heuristicPlanner.toFallbackPlan(request.userCommand),
-                source = PlanSource.BASIC_FALLBACK
-            )
+            return if (fallbackExplicit) {
+                PlanOutcome.Planned(
+                    plan = heuristicPlanner.toFallbackPlan(request.userCommand),
+                    source = PlanSource.BASIC_FALLBACK
+                )
+            } else {
+                // 6.1: BLOCK. The local model must be healthy before a task runs; do not
+                // silently substitute the keyword planner for the AI.
+                PlanOutcome.Unavailable("Local AI not loaded - set up the model in Setup")
+            }
         }
 
         val prompt = PlannerPromptBuilder.buildPlanningPrompt(request)

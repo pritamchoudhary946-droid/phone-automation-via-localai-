@@ -279,10 +279,14 @@ class TaskOrchestrator(
                             planOutcome.plan
                         }
                         is PlanOutcome.Unavailable -> {
+                            // 6.1: Local AI is not loaded. Do not silently run keywords —
+                            // block with a clear, user-visible reason. The planner only
+                            // returns BASIC_FALLBACK here when the user explicitly enabled
+                            // the labelled degraded mode.
                             _usesModelPlanning.value = false
-                            val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
-                            Log.w(TAG, "Using fallback planner due to: ${planOutcome.reason}")
-                            fallbackPlan
+                            Log.w(TAG, "Blocking task: ${planOutcome.reason}")
+                            fail(task, planOutcome.reason, 0)
+                            return@launch
                         }
                         is PlanOutcome.Rejected -> {
                             _usesModelPlanning.value = false
