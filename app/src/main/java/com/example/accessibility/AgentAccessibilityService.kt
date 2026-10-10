@@ -65,9 +65,10 @@ object SearchAffordanceHeuristics {
         val haystacks = listOf(text, contentDescription, viewId?.substringAfterLast('/'))
         val mentionsSearch = haystacks.any { it?.contains("search", ignoreCase = true) == true }
         if (!mentionsSearch) return 0
+        // A disabled affordance can never be activated; never choose it (10.4).
+        if (!isEnabled) return 0
         var score = 10
         if (isClickable) score += 20
-        if (isEnabled) score += 5
         if (isEditable) score += 30
         return score
     }
@@ -609,22 +610,23 @@ class AgentAccessibilityService : AccessibilityService() {
     private fun findTargetEditableNode(root: AccessibilityNodeInfo, targetIdentifier: String?): AccessibilityNodeInfo? {
         val clean = targetIdentifier?.trim()?.lowercase()
 
-        var candidate: AccessibilityNodeInfo? = null
+        var targetMatch: AccessibilityNodeInfo? = null
+        var fallback: AccessibilityNodeInfo? = null
+        var editableCount = 0
 
         fun search(node: AccessibilityNodeInfo) {
             if (node.isEditable) {
-                if (clean.isNullOrBlank()) {
-                    if (candidate == null) candidate = AccessibilityNodeInfo.obtain(node)
-                } else {
-                    val text = node.text?.toString()?.lowercase()
-                    val desc = node.contentDescription?.toString()?.lowercase()
-                    val id = node.viewIdResourceName?.lowercase()
-                    if (text?.contains(clean) == true || desc?.contains(clean) == true || id?.contains(clean) == true) {
-                        candidate?.recycle()
-                        candidate = AccessibilityNodeInfo.obtain(node)
-                    } else if (candidate == null) {
-                        candidate = AccessibilityNodeInfo.obtain(node)
-                    }
+                editableCount++
+                val text = node.text?.toString()?.lowercase()
+                val desc = node.contentDescription?.toString()?.lowercase()
+                val id = node.viewIdResourceName?.lowercase()
+                val isTarget = !clean.isNullOrBlank() &&
+                    (text?.contains(clean) == true || desc?.contains(clean) == true || id?.contains(clean) == true)
+                if (isTarget) {
+                    targetMatch?.recycle()
+                    targetMatch = AccessibilityNodeInfo.obtain(node)
+                } else if (fallback == null) {
+                    fallback = AccessibilityNodeInfo.obtain(node)
                 }
             }
 
@@ -636,7 +638,18 @@ class AgentAccessibilityService : AccessibilityService() {
         }
 
         search(root)
-        return candidate
+
+        if (!clean.isNullOrBlank()) {
+            fallback?.recycle()
+            return targetMatch
+        }
+        // No target given: only a *sole* editable field may be used implicitly.
+        // Several editable fields with none focused is ambiguous (e.g. a comment
+        // box next to a search box), so refuse rather than type into the wrong one.
+        targetMatch?.recycle()
+        if (editableCount == 1) return fallback
+        fallback?.recycle()
+        return null
     }
 
     // ==========================================

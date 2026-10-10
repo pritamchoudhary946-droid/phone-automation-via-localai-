@@ -61,6 +61,28 @@ object PostconditionVerifier {
                 val present = needle.isNotBlank() && lowerText.contains(needle)
                 Verdict(present, if (present) "Expected text present: \"$expectedPostcondition\"" else "Expected text not found")
             }
+            VerificationMethod.PLAYBACK -> {
+                // A real player/playback surface - controls/title/time/progress - is
+                // required. Opening a row is not playback (10.2/10.3F).
+                val playbackSignals = listOf(
+                    "now playing", "playing", "pause", "resume", "fullscreen",
+                    "seek", "00:", "0:0", "/ 0", "watch later", "player"
+                )
+                val hasSignal = playbackSignals.any { lowerText.contains(it) }
+                val hasProgress = Regex("\\d{1,2}:\\d{2}").containsMatchIn(lowerText)
+                val hasControls = lowerText.contains("play") || lowerText.contains("pause") ||
+                    lowerText.contains("seek") || lowerText.contains("fullscreen")
+                val verified = hasSignal && (hasProgress || hasControls)
+                Verdict(
+                    verified,
+                    if (verified) "Playback/player evidence present" else "No playback evidence (player controls/progress) on screen"
+                )
+            }
+            VerificationMethod.CONTENT -> {
+                val meaningful = screenText.trim().length >= 40 &&
+                    !lowerText.contains("blank") && !lowerText.contains("protected")
+                Verdict(meaningful, if (meaningful) "Meaningful page content obtained" else "No meaningful content obtained")
+            }
             VerificationMethod.SCREEN_CHANGED ->
                 Verdict(screenChanged, if (screenChanged) "Screen changed after action" else "Screen did not change")
             VerificationMethod.NONE -> {

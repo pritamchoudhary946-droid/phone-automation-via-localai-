@@ -624,14 +624,23 @@ class TaskOrchestrator(
                     // Safety net: a text entry needs a real editable field in this fresh
                     // observation. Several apps (YouTube among them) do not show the
                     // search field until the search interface is opened, so open it first
-                    // instead of dispatching text into nothing.
-                    if (action is AgentAction.TypeText && !observationHasEditableField(observation)) {
-                        Log.w(TAG, "[GUARD] No editable field in the fresh observation; opening the search interface before typing.")
-                        _orchestratorState.value = OrchestratorState.Replanning(
-                            "No editable field visible; opening search interface first.",
-                            RecoveryStrategy.REPLAN_NEW_APPROACH
-                        )
-                        action = AgentAction.OpenSearch(action.text)
+                    // instead of dispatching text into nothing. A search-intent step must
+                    // target a *search-specific* field: a comment/message box is editable
+                    // but must never receive a search query (10.3B).
+                    if (action is AgentAction.TypeText) {
+                        val searchIntent = effectiveStep.verification == VerificationMethod.RESULTS_PRESENT ||
+                            Regex("search|query|results?", RegexOption.IGNORE_CASE)
+                                .containsMatchIn("${effectiveStep.description} ${effectiveStep.expectedPostcondition}")
+                        val needsSearchInterface = (searchIntent && !observation.hasSearchInputField()) ||
+                            !observationHasEditableField(observation)
+                        if (needsSearchInterface) {
+                            Log.w(TAG, "[GUARD] Search-specific editable field not present; opening the search interface before typing.")
+                            _orchestratorState.value = OrchestratorState.Replanning(
+                                "No usable search field visible; opening search interface first.",
+                                RecoveryStrategy.REPLAN_NEW_APPROACH
+                            )
+                            action = AgentAction.OpenSearch(action.text)
+                        }
                     }
 
                     // In-loop web tool: an explicit web search / read-url is not a UI
@@ -909,11 +918,12 @@ class TaskOrchestrator(
             null
         }
         if (lastRequired.action is AgentAction.OpenItem) {
-            return verifyOpenedItem(lastRequired.action, pre, post)
+            return verifyOpenedItem(lastRequired.action, lastRequired.verification, pre, post)
         }
         val method = when {
             lastRequired.action is AgentAction.OpenApp -> VerificationMethod.FOREGROUND_PACKAGE
             lastRequired.action is AgentAction.Home -> VerificationMethod.HOME_FOREGROUND
+            lastRequired.action is AgentAction.ReadPageContent -> VerificationMethod.CONTENT
             else -> lastRequired.verification
         }
         val screenChanged = pre.fingerprint != post.fingerprint
@@ -1040,7 +1050,7 @@ class TaskOrchestrator(
             }
         }
         if (action is AgentAction.OpenItem) {
-            return verifyOpenedItem(action, pre, post, visionDiff(pre, post))
+            return verifyOpenedItem(action, step.verification, pre, post, visionDiff(pre, post))
         }
         val targetPkg = if (action is AgentAction.OpenApp) {
             action.packageName ?: appDirectory.resolvePackage(action.appQuery)
@@ -1080,6 +1090,7 @@ class TaskOrchestrator(
      */
     private fun verifyOpenedItem(
         action: AgentAction.OpenItem,
+        declared: VerificationMethod = VerificationMethod.SCREEN_CHANGED,
         pre: UiObservation,
         post: UiObservation,
         visionChanged: Boolean = false
@@ -1093,10 +1104,28 @@ class TaskOrchestrator(
             "fullscreen", "seek", "conversation", "profile", "details"
         ).any { lower.contains(it) }
         val listSurface = lower.contains("[scrollable]") && !detailSignal
-        val verified = changed && targetPresent && detailSignal && !listSurface
+        val opened = changed && targetPresent && detailSignal && !listSurface
+        // When the plan asked for playback evidence, opening the row is not enough:
+        // the player must actually be in a playback state (10.2/10.3F).
+        if (declared == VerificationMethod.PLAYBACK) {
+            val playback = verifier.verify(
+                method = VerificationMethod.PLAYBACK,
+                expectedPostcondition = action.targetText,
+                targetPackage = null,
+                observationPackage = post.packageName,
+                screenChanged = changed,
+                screenText = post.summary
+            )
+            val verified = opened && playback.satisfied
+            return PostconditionVerdict(
+                verified,
+                if (verified) "Opened item and verified playback state"
+                else "Playback unverified: opened=$opened playback=${playback.detail}"
+            )
+        }
         return PostconditionVerdict(
-            verified,
-            if (verified) "Opened item and verified detail/player surface"
+            opened,
+            if (opened) "Opened item and verified detail/player surface"
             else "Item open is unverified: changed=$changed targetPresent=$targetPresent detailSignal=$detailSignal"
         )
     }

@@ -273,6 +273,8 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             "TEXT_PRESENT", "TEXT" -> VerificationMethod.TEXT_PRESENT
             "RESULTS_PRESENT", "RESULTS" -> VerificationMethod.RESULTS_PRESENT
             "HOME_FOREGROUND", "HOME" -> VerificationMethod.HOME_FOREGROUND
+            "PLAYBACK", "PLAYING" -> VerificationMethod.PLAYBACK
+            "CONTENT", "CONTENT_PRESENT" -> VerificationMethod.CONTENT
             else -> VerificationMethod.NONE
         }
     }

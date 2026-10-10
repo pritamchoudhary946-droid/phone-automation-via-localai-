@@ -12,6 +12,10 @@ enum class VerificationMethod {
     TEXT_PRESENT,
     RESULTS_PRESENT,
     HOME_FOREGROUND,
+    /** Player/playback evidence, not just an opened row (10.2/10.3F). */
+    PLAYBACK,
+    /** Meaningful page/content was obtained (10.2). */
+    CONTENT,
     NONE
 }
 

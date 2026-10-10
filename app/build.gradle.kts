@@ -66,7 +66,14 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      // Robolectric + Compose tests need a larger heap than the 512m default; the
+      // suite exceeded it once the Phase 10 adversarial tests were added.
+      all { it.maxHeapSize = "2g" }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
