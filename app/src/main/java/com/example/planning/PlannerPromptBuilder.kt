@@ -42,12 +42,19 @@ object PlannerPromptBuilder {
         - launch_app:  {"appQuery":"<app name>","packageName":"<optional>"}
         - open_search: {"query":"<optional hint>"}   (opens the app's search UI)
         - enter_text:  {"text":"<query>","targetNodeId":"<optional>"}
+        - submit:      {"targetText":"<optional send control label>"}  (press Enter/Send)
+        - open_url:    {"url":"https://<host>/<path>"}   (open in the browser)
+        - deep_link:   {"uri":"spotify:artist:... or app://..."}
         - tap_element: {"targetText":"<visible label>"}  or  {"x":<int>,"y":<int>}
         - long_press:  {"targetText":"<visible label>","durationMs":<optional int>}
+        - drag:        {"fromText":"<label>","toText":"<label>"}
+        - copy_text:   {"targetText":"<optional label>"}   paste_text: {"targetText":"<optional>"}
         - scroll:      {"direction":"up|down|left|right"}
         - scroll_until_found: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}
         - read_text:   {}   (reads the visible on-screen text back to you)
+        - read_page_content: {}   (extracts the visible page/article text)
         - wait_for_text: {"targetText":"<label>","timeoutMs":<int>}
+        - web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}
         - open_notifications: {}   open_quick_settings: {}   open_recents: {}
         - navigate_back: {}   navigate_home: {}   wait: {"durationMs":<int>}
         - read_screen: {}     screenshot: {}
@@ -67,6 +74,10 @@ object PlannerPromptBuilder {
         }
         if (!request.lastActionResult.isNullOrBlank()) {
             appendLine("Last action result: ${request.lastActionResult.take(300)}")
+        }
+        if (request.memorySummary.isNotBlank()) {
+            appendLine("Known about this user / past tasks (may be incomplete):")
+            appendLine(sanitizeUntrusted(request.memorySummary).take(MAX_MEMORY_CHARS))
         }
         appendLine("Current screen (bounded summary, may be truncated):")
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
@@ -136,4 +147,5 @@ object PlannerPromptBuilder {
         .trim()
 
     const val MAX_SCREEN_CHARS = 1200
+    const val MAX_MEMORY_CHARS = 600
 }

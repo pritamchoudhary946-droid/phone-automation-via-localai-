@@ -138,4 +138,45 @@ class AppDirectory(private val context: Context) {
             false
         }
     }
+
+    /**
+     * Opens an http(s) [url] in whatever app handles ACTION_VIEW (the default
+     * browser). Never falls back to a bare ACTION_VIEW with an unsupported scheme.
+     */
+    fun openUrl(url: String): Boolean {
+        val clean = url.trim()
+        if (!clean.lowercase().startsWith("http")) {
+            Log.w("AppDirectory", "openUrl rejected non-http url: $clean")
+            return false
+        }
+        return startViewIntent(clean)
+    }
+
+    /**
+     * Opens an app-specific deep link (e.g. "spotify:artist:..." or "maps://...").
+     * Any scheme other than http(s) is allowed here because the caller explicitly
+     * requested it; an unhandled scheme fails cleanly instead of crashing.
+     */
+    fun openDeepLink(uri: String): Boolean {
+        val clean = uri.trim()
+        if (clean.isBlank()) return false
+        return startViewIntent(clean)
+    }
+
+    private fun startViewIntent(uriString: String): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uriString)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (intent.resolveActivity(context.packageManager) == null) {
+                Log.w("AppDirectory", "ACTION_VIEW did not resolve for $uriString")
+                return false
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.e("AppDirectory", "ACTION_VIEW failed for $uriString: ${e.message}", e)
+            false
+        }
+    }
 }

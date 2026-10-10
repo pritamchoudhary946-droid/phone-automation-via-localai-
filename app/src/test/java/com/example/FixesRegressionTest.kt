@@ -165,7 +165,8 @@ class FixesRegressionTest {
     /** Bug: the context window was left unbounded; a bounded value must be pinned. */
     @Test
     fun engineContextWindowIsBounded() {
-        assertEquals(2048, com.example.model.LiteRtLmRuntime.MAX_CONTEXT_TOKENS)
+        // Raised from 2048 to 3072 for richer observations; still conservative for 8 GB.
+        assertEquals(3072, com.example.model.LiteRtLmRuntime.MAX_CONTEXT_TOKENS)
     }
 
     /**
@@ -503,6 +504,65 @@ class FixesRegressionTest {
         assertEquals("He said \"hello\"\nand left", gateway.extractAbstractText(body))
         assertEquals("", gateway.extractAbstractText("<html>not json</html>"))
         assertEquals("", gateway.extractAbstractText("""{"AbstractText":""}"""))
+    }
+
+    /**
+     * Bug: read_url was routed to a PDF-only header check, so the advertised
+     * "read a page's content" tool failed on ordinary HTML pages. It must fetch and
+     * return a readable text digest, and the pure HTML-to-text helper must drop
+     * scripts/styles/tags and decode entities.
+     */
+    @Test
+    fun readUrlReturnsReadableContentForHtmlPages() = runBlocking {
+        val gateway = com.example.cloudflare.CloudflareGateway()
+        assertEquals(
+            "Hello world A & B",
+            gateway.htmlToText("<html><head><title>t</title><style>x{}</style></head><body><script>bad()</script><p>Hello <b>world</b></p>A &amp; B</body></html>")
+        )
+
+        val server = okhttp3.mockwebserver.MockWebServer()
+        server.enqueue(
+            okhttp3.mockwebserver.MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/html; charset=utf-8")
+                .setBody("<html><body><h1>Title</h1><p>Body text here.</p></body></html>")
+        )
+        server.start()
+        try {
+            val result = gateway.readUrlContent(server.url("/page").toString())
+            assertTrue("expected Success, got $result", result is com.example.cloudflare.CloudflareTaskResult.Success)
+            val content = (result as com.example.cloudflare.CloudflareTaskResult.Success).content
+            assertTrue("digest missing heading: $content", content.contains("Title"))
+            assertTrue("digest missing body: $content", content.contains("Body text here."))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    /**
+     * Bug: when DuckDuckGo returned no instant answer, search_web fabricated a
+     * "summary ready" success. It must report an honest error instead.
+     */
+    @Test
+    fun searchWithoutInstantAnswerIsHonestError() = runBlocking {
+        val server = okhttp3.mockwebserver.MockWebServer()
+        server.enqueue(
+            okhttp3.mockwebserver.MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"AbstractText":""}""")
+        )
+        server.start()
+        try {
+            val gateway = com.example.cloudflare.CloudflareGateway(searchEndpoint = server.url("/").toString())
+            val result = gateway.searchWeb("obscure query")
+            assertTrue(
+                "an empty abstract must not be reported as a real summary: $result",
+                result is com.example.cloudflare.CloudflareTaskResult.Error
+            )
+        } finally {
+            server.shutdown()
+        }
     }
 
     /**

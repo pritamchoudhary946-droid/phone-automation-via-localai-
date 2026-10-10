@@ -45,7 +45,10 @@ Notes:
 `AgentAction` is the only executable surface. Beyond launch/tap/type/scroll:
 `LongPress`, `ScrollUntilFound` (bounded swipe-to-find), `ReadText` (visible-text
 digest), `WaitForText` (bounded wait), `OpenNotifications`, `OpenQuickSettings`,
-`PressRecents`. When adding an action you must update, together:
+`PressRecents`, `Submit` (press the send/search/enter affordance),
+`OpenUrl`/`DeepLink` (external navigation), `Drag`, `CopyText`/`PasteText`,
+`ReadPageContent` (UI-tree digest), and the in-loop web tools `WebSearch` /
+`ReadUrl`. When adding an action you must update, together:
 1. `AgentAction` (+ `getDisplayName`, and `RiskEvaluator` if it can be Risky),
 2. `ToolRegistry` (const, `ToolDefinition`, `validateAction`),
 3. `TaskPlanParser` (tool name -> action mapping),
@@ -76,3 +79,18 @@ An action the native layer cannot execute must not appear in the catalogue
   (e.g. a targetless `LongPress`); defer to the model instead.
 - `RiskEvaluator` also scans `FinishTask` summaries, not just Tap/TypeText, so a
   report_status claiming a payment/delete/send still needs confirmation.
+- Web tools are handled inside `TaskOrchestrator.runWebTool(...)`: a completed
+  `web_search`/`read_url` step is itself the goal evidence (the loop treats the
+  last required web-tool step as satisfied), so no UI postcondition is required.
+  `CloudflareGateway.searchWeb` reports an honest error when there is no instant
+  answer; `readUrlContent` fetches and size-caps ordinary HTML pages (not just
+  PDFs) via `htmlToText`.
+- Model tuning for the 8 GB target is pinned in `OmniAgentApplication`
+  (`USE_GPU_BACKEND`, Adreno with automatic CPU fallback) and
+  `LiteRtLmRuntime.MAX_CONTEXT_TOKENS` (3072). `FixesRegressionTest` asserts the
+  context value, so keep the test and constant in step.
+- Memory: `UserMemoryEntity`/`TaskOutcomeEntity` live in `AgentDatabase` v2
+  (`fallbackToDestructiveMigration`). `TaskOrchestrator.loadMemoryDigest(...)`
+  injects a bounded (untrusted-labelled) digest into the planning prompt, and
+  `complete`/`fail` record an outcome. Keep the digest bounded
+  (`PlannerPromptBuilder.MAX_MEMORY_CHARS`).

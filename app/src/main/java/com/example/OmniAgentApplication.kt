@@ -46,9 +46,10 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         lateinit var instance: OmniAgentApplication
             private set
 
-        // CPU first for broad compatibility: GPU acceleration is not verified on the
-        // target device, so it is opt-in rather than the default.
-        private const val USE_GPU_BACKEND = false
+        // GPU backend opt-in: the target device (Motorola Edge 70 Fusion, Adreno 810)
+        // has a GPU backend available, and LiteRtLmRuntime already falls back to CPU
+        // automatically if GPU initialization fails, so enabling this is safe.
+        private const val USE_GPU_BACKEND = true
         private const val TAG = "OmniAgentApp"
     }
 
@@ -70,8 +71,10 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         liteRtEngine = LiteRtEngine(this, modelManager, inferenceEngine, planner)
 
         appDirectory = AppDirectory(this)
-        orchestrator = TaskOrchestrator(this, liteRtEngine, appDirectory)
         cloudflareGateway = CloudflareGateway()
+        // The gateway is exposed to the loop as an explicit web tool (web_search /
+        // read_url); the on-device model remains the primary planner.
+        orchestrator = TaskOrchestrator(this, liteRtEngine, appDirectory, webGateway = cloudflareGateway)
 
         createNotificationChannels()
     }

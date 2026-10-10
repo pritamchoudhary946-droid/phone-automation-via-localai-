@@ -23,6 +23,19 @@ data class UiNode(
     val isEnabled: Boolean = true,
     val isPassword: Boolean = false
 ) {
+    companion object {
+        /**
+         * Substrings that, when they appear in a node's text/description/id, suggest a
+         * text-input field. Includes Hindi/Hinglish hints because the target user
+         * issues commands in both languages.
+         */
+        val INPUT_HINTS = listOf(
+            "search", "query", "type", "message", "composer", "input",
+            "enter ", "ask ", "reply", "comment", "write", "caption", "note",
+            "kya", "likho", "likhein", "search karein"
+        )
+    }
+
     fun bestLabel(): String {
         return when {
             !text.isNullOrBlank() -> text
@@ -36,6 +49,51 @@ data class UiNode(
         val textMatch = text?.contains(cleanQuery, ignoreCase = ignoreCase) == true
         val descMatch = contentDescription?.contains(cleanQuery, ignoreCase = ignoreCase) == true
         return textMatch || descMatch
+    }
+
+    /**
+     * Heuristic likelihood that this node is a text-input field, even when the
+     * platform does not flag `isEditable` (common in WebViews and some custom
+     * composers). Deterministic and side-effect free so it is unit-testable.
+     *
+     * Signals, by weight: editable (definitive), class name, input-ish hints in
+     * text/description/id, and focus. Password fields are never auto-targeted.
+     */
+    fun inputLikelihood(): Int {
+        if (isPassword) return -200
+        var score = 0
+        if (isEditable) score += 100
+        if (classLooksEditable()) score += 50
+        if (hasInputHint()) score += 30
+        if (isFocused) score += 20
+        return score
+    }
+
+    /** True when [inputLikelihood] reaches the threshold for a type target. */
+    fun isLikelyTextInput(): Boolean {
+        if (isPassword) return false
+        if (isEditable) return true
+        if (classLooksEditable()) return true
+        // A hint-only node counts only when it is focused or not a plain clickable
+        // button, so a "Search" action button is not mistaken for the search field.
+        return hasInputHint() && (isFocused || !isClickable)
+    }
+
+    private fun classLooksEditable(): Boolean {
+        val cls = className.lowercase()
+        return cls.contains("edittext") ||
+            cls.contains("autocompletetextview") ||
+            cls.contains("searchview") ||
+            cls.contains("textfield") ||
+            cls.contains("inputfield")
+    }
+
+    private fun hasInputHint(): Boolean {
+        val hay = listOfNotNull(text, contentDescription, id.substringAfterLast('/'))
+            .joinToString(" ")
+            .lowercase()
+        if (hay.isBlank()) return false
+        return INPUT_HINTS.any { hay.contains(it) }
     }
 
     fun toCompactString(index: Int): String {
@@ -113,6 +171,15 @@ data class UiTreeSnapshot(
 
     fun findFirstEditable(): UiNode? {
         return nodes.find { it.isEditable }
+    }
+
+    /**
+     * Best text-entry target by [UiNode.inputLikelihood], even when the platform
+     * does not flag `isEditable`. Returns null when nothing reaches the threshold.
+     */
+    fun findFirstTextInput(): UiNode? {
+        return nodes.filter { it.isLikelyTextInput() }
+            .maxByOrNull { it.inputLikelihood() }
     }
 
     fun findScrollable(): UiNode? {

@@ -152,6 +152,21 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 val nodeId = params.optString("targetNodeId", "").ifBlank { null }
                 AgentAction.TypeText(text, nodeId)
             }
+            ToolRegistry.TOOL_SUBMIT ->
+                AgentAction.Submit(params.optString("targetText", "").ifBlank { null })
+            ToolRegistry.TOOL_OPEN_URL -> AgentAction.OpenUrl(params.optString("url", ""))
+            ToolRegistry.TOOL_COPY_TEXT ->
+                AgentAction.CopyText(params.optString("targetText", "").ifBlank { null })
+            ToolRegistry.TOOL_PASTE_TEXT ->
+                AgentAction.PasteText(params.optString("targetText", "").ifBlank { null })
+            ToolRegistry.TOOL_DRAG -> AgentAction.Drag(
+                fromText = params.optString("fromText", ""),
+                toText = params.optString("toText", "")
+            )
+            ToolRegistry.TOOL_DEEP_LINK -> AgentAction.DeepLink(params.optString("uri", ""))
+            ToolRegistry.TOOL_READ_PAGE_CONTENT -> AgentAction.ReadPageContent
+            ToolRegistry.TOOL_WEB_SEARCH -> AgentAction.WebSearch(params.optString("query", ""))
+            ToolRegistry.TOOL_READ_URL -> AgentAction.ReadUrl(params.optString("url", ""))
             ToolRegistry.TOOL_OPEN_SEARCH -> {
                 val query = params.optString("query", "").ifBlank { null }
                 AgentAction.OpenSearch(query)

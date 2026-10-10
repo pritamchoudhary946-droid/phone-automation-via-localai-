@@ -18,7 +18,14 @@ sealed class CloudflareTaskResult {
  * Dedicated Gateway for off-device Web extraction, PDF parsing, and cloud API skills.
  * Kept strictly isolated from the local Android Accessibility agent loop.
  */
-class CloudflareGateway {
+class CloudflareGateway(
+    private val searchEndpoint: String = "https://api.duckduckgo.com/"
+) {
+
+    companion object {
+        /** Cap for a fetched page digest so a huge response cannot exhaust memory. */
+        const val DEFAULT_MAX_READ_BYTES = 200_000
+    }
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -48,7 +55,7 @@ class CloudflareGateway {
             // Cloudflare Worker / Web endpoint integration
             val cleanQuery = java.net.URLEncoder.encode(query, "UTF-8")
             val request = Request.Builder()
-                .url("https://api.duckduckgo.com/?q=$cleanQuery&format=json&no_html=1&skip_disambig=1")
+                .url("${searchEndpoint}?q=$cleanQuery&format=json&no_html=1&skip_disambig=1")
                 .header("User-Agent", "OmniAgent-WebWorker/1.0")
                 .build()
 
@@ -73,10 +80,8 @@ class CloudflareGateway {
                     )
                 }
 
-                return@withContext CloudflareTaskResult.Success(
-                    title = "Search Results for '$query'",
-                    content = "Found relevant topics for '$query'. Web summary ready.",
-                    sourceUrl = sourceUrl
+                return@withContext CloudflareTaskResult.Error(
+                    "No instant answer available for '$query'. Try a more specific query or open a result page and use read_url."
                 )
             }
         } catch (e: CancellationException) {
@@ -113,6 +118,70 @@ class CloudflareGateway {
         } catch (e: Exception) {
             return@withContext CloudflareTaskResult.Error("PDF parsing failed: ${e.localizedMessage}")
         }
+    }
+
+    /**
+     * Fetches a web page and returns a bounded, readable digest of its text.
+     *
+     * The label advertised to the model is "read a page's content", so this must work
+     * for ordinary HTML pages, not just PDFs. The body is capped at [maxBytes] so a
+     * huge response cannot exhaust memory, and the digest carries an honest provenance
+     * note instead of pretending a full extraction ran.
+     */
+    suspend fun readUrlContent(url: String, maxBytes: Int = DEFAULT_MAX_READ_BYTES): CloudflareTaskResult =
+        withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "OmniAgent-WebWorker/1.0")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@withContext CloudflareTaskResult.Error("Read URL HTTP error ${response.code}")
+                    }
+                    val contentType = response.header("Content-Type").orEmpty()
+                    if (contentType.contains("pdf", ignoreCase = true)) {
+                        return@withContext parsePdfDocument(url)
+                    }
+                    val body = response.body ?: return@withContext CloudflareTaskResult.Error("Empty response body")
+                    val text = body.source().let { source ->
+                        source.request(maxBytes.toLong())
+                        source.buffer.snapshot().utf8()
+                    }
+                    val digest = htmlToText(text).take(maxBytes)
+                    if (digest.isBlank()) {
+                        return@withContext CloudflareTaskResult.Error("No readable text found at $url")
+                    }
+                    CloudflareTaskResult.Success(
+                        title = "Page: ${url.substringAfterLast('/').ifBlank { url }}",
+                        content = digest,
+                        sourceUrl = url
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return@withContext CloudflareTaskResult.Error("Read URL failed: ${e.localizedMessage}")
+            }
+        }
+
+    /**
+     * Pure helper: strips HTML tags/scripts/styles and collapses whitespace so the
+     * model receives readable text. Unit-testable without network.
+     */
+    internal fun htmlToText(html: String): String {
+        if (html.isBlank()) return ""
+        var s = html
+        s = s.replace(Regex("(?is)<(script|style|noscript|svg|head)\\b[^>]*>.*?</\\1>"), " ")
+        s = s.replace(Regex("(?is)<!--.*?-->"), " ")
+        s = s.replace(Regex("(?is)<[^>]+>"), " ")
+        s = s.replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+        return s.replace(Regex("\\s+"), " ").trim()
     }
 
     suspend fun queryCustomSkill(endpointUrl: String, jsonPayload: String): CloudflareTaskResult = withContext(Dispatchers.IO) {

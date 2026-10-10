@@ -167,7 +167,9 @@ class LiteRtLmRuntime(
         private const val TAG = "LiteRtLmRuntime"
         // Conservative thread budget on an 8 GB device that also runs an accessibility service.
         const val DEFAULT_CPU_THREADS = 4
-        // Bounded context window so peak memory stays predictable on-device.
-        const val MAX_CONTEXT_TOKENS = 2048
+        // Bounded context window, raised from 2048 to 3072 to fit the richer
+        // observations (page content, tool digests) while protecting peak RAM on the
+        // confirmed 8 GB device. Kept conservative — not 4096.
+        const val MAX_CONTEXT_TOKENS = 3072
     }
 }
