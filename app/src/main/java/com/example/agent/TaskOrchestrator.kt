@@ -261,7 +261,7 @@ class TaskOrchestrator(
         return hit?.value?.let { "You told me: $it" } ?: "I don't have anything stored about that yet."
     }
 
-    fun startTask(goal: String, maxSteps: Int = defaultMaxSteps) {
+    fun startTask(goal: String, maxSteps: Int = defaultMaxSteps, resumePlan: TaskPlan? = null) {
         if (executionJob?.isActive == true) cancelCurrentTask()
         // 9.3: expand a follow-up ("and send it") into a self-contained goal before it
         // is persisted, so the plan and the history both read correctly.
@@ -295,18 +295,27 @@ class TaskOrchestrator(
         }
         scope.launch {
             taskDao.insertTask(newTask)
-            runAgentLoop(newTask)
+            runAgentLoop(newTask, resumePlan)
         }
     }
 
     /**
-     * Replays a saved skill by name: resumes its persisted plan through the normal
-     * verified loop. A skill is only ever replayed if it carries steps (plan 4.13).
+     * Replays a saved skill by name. The persisted plan is reconstructed and run
+     * through the normal verified loop, so each replayed step still has to satisfy
+     * its postcondition and the goal-level gate still applies. A skill whose JSON
+     * cannot be reconstructed (legacy label-only format, or a malformed record) is
+     * re-planned from its goal instead of replaying a guessed action.
      */
     fun runSkill(skill: SavedSkillEntity) {
         if (skill.planJson.isBlank()) return
         scope.launch { runCatching { database.skillDao().markSkillRun(skill.name, System.currentTimeMillis()) } }
-        startTask(skill.goal)
+        val plan = TaskPlanSerializer.fromJson(skill.planJson, goalOverride = skill.goal)
+        if (plan == null) {
+            Log.w(TAG, "Skill '${skill.name}' has no reconstructable plan; re-planning from its goal")
+            startTask(skill.goal)
+        } else {
+            startTask(skill.goal, resumePlan = plan)
+        }
     }
 
     private suspend fun runAgentLoop(task: TaskEntity, resumePlan: TaskPlan? = null) {
@@ -1465,7 +1474,7 @@ class TaskOrchestrator(
                 sequence = index + 1,
                 description = reasoning.ifBlank { action.getDisplayName() },
                 action = action,
-                rawActionName = action.javaClass.simpleName,
+                rawActionName = TaskPlanSerializer.toolNameFor(action) ?: action.javaClass.simpleName,
                 expectedPostcondition = "",
                 verification = VerificationMethod.NONE
             )

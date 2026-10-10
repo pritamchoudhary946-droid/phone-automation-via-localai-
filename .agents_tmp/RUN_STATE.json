@@ -1,0 +1,29 @@
+{
+  "project_done": false,
+  "sessions_done": 1,
+  "session_cap": 48,
+  "current_milestone": "4.13 skill replay: reconstruct persisted plan + record replayed catalog names",
+  "milestone_status": "in_progress",
+  "done_items": [
+    "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
+    "recording: saveWatchedSkill now stores the catalog tool name (ToolRegistry.TOOL_*) instead of the Kotlin class name, so a watched skill is replayable",
+    "regression tests: skill JSON round-trip, legacy-format refusal, unknown-action refusal, orchestrator replays saved skill without re-planning, unreconstructable skill re-plans"
+  ],
+  "in_progress": {
+    "item": "4.13 skill replay milestone",
+    "step": "targeted unit tests pass; run full suite + assembleDebug before marking done",
+    "note": "TaskPlanSerializer.fromJson + TaskPlanParser.mapPersistedAction + TaskPlanSerializer.toolNameFor(AgentAction) added; TaskOrchestrator.runSkill/startTask/runAgentLoop resume path and saveWatchedSkill updated"
+  },
+  "next_items": [
+    "Run full :app:testDebugUnitTest :app:assembleDebug and confirm no regressions",
+    "Confirm skill replay end-to-end callers (LibraryScreen.kt, AutomationScheduler.kt)",
+    "Continue item 4A mandatory full bug sweep (all bugs, not only repo-reported)",
+    "Continue Phase 5 (5.1+) remaining acceptance criteria"
+  ],
+  "branch": "auto/jarvis-autonomy-20261010-2033",
+  "open_pr": null,
+  "risky_actions_done": [],
+  "blockers": [],
+  "last_run_id": "internal-20261010T2033Z",
+  "last_updated": "2026-10-10T20:55:00Z"
+}

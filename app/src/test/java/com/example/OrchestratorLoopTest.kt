@@ -424,7 +424,10 @@ class OrchestratorLoopTest {
         val skill = com.example.data.local.AgentDatabase.getInstance(context).skillDao()
             .getSkill("Open YouTube routine")
         assertTrue("the demonstrated skill is persisted", skill != null)
-        assertTrue("the recorded action is stored", skill!!.planJson.contains("OpenApp"))
+        assertTrue(
+            "the recorded action is stored under its catalog name (replayable)",
+            skill!!.planJson.contains("launch_app")
+        )
     }
 
     @Test
@@ -434,8 +437,104 @@ class OrchestratorLoopTest {
         assertEquals(null, orchestrator.saveWatchedSkill("empty", "nothing"))
     }
 
-    // ---- Phase 9: orchestrator-integrated seams (9.3, 9.5, 9.12) ----
+    // ---- 4.13: a saved skill replays its persisted plan through the verified loop ----
 
+    @Test
+    fun savedSkillReplaysWithoutReplanning() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenApp -> {
+                        defaultObservation = observation("com.google.android.youtube", "YouTube home", 2)
+                        ActionResult(true, "LAUNCH_VERIFIED", "verified")
+                    }
+                    is AgentAction.Home -> {
+                        defaultObservation = observation("com.android.launcher", "Home screen", 3)
+                        ActionResult(true, "GLOBAL_HOME", "home")
+                    }
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        // The engine is configured to return an EMPTY plan. If runSkill re-planned, it
+        // would be rejected and the task would fail; a successful run proves the stored
+        // plan — not a fresh model call — drove the execution.
+        val engine = modelEngine("""{"steps":[]}""")
+        val orchestrator = newOrchestrator(engine, automation)
+
+        val skill = com.example.data.local.SavedSkillEntity(
+            name = "Open YouTube routine",
+            goal = "Open YouTube",
+            planJson = com.example.planning.TaskPlanSerializer.toJson(
+                com.example.planning.TaskPlan(
+                    goal = "Open YouTube",
+                    fromModel = true,
+                    steps = listOf(
+                        com.example.planning.PlanStep(
+                            id = 1, sequence = 1, description = "Launch YouTube",
+                            action = AgentAction.OpenApp("youtube", "com.google.android.youtube"),
+                            rawActionName = "launch_app", expectedPostcondition = "YouTube foreground",
+                            verification = com.example.planning.VerificationMethod.FOREGROUND_PACKAGE
+                        ),
+                        com.example.planning.PlanStep(
+                            id = 2, sequence = 2, description = "Go home",
+                            action = AgentAction.Home,
+                            rawActionName = "navigate_home", expectedPostcondition = "home",
+                            verification = com.example.planning.VerificationMethod.HOME_FOREGROUND
+                        )
+                    )
+                )
+            )
+        )
+
+        orchestrator.runSkill(skill)
+        val terminal = awaitTerminal(orchestrator)
+
+        assertTrue("a saved skill must complete from its stored plan, got $terminal", terminal is OrchestratorState.Completed)
+        assertEquals("the replayed plan runs every stored action", 2, automation.executed.size)
+        assertTrue(automation.executed[0] is AgentAction.OpenApp)
+        assertTrue(automation.executed[1] is AgentAction.Home)
+    }
+
+    @Test
+    fun unreconstructableSkillFallsBackToReplanning() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenApp -> {
+                        defaultObservation = observation("com.google.android.youtube", "YouTube home", 2)
+                        ActionResult(true, "LAUNCH_VERIFIED", "verified")
+                    }
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[
+              {"id":1,"seq":1,"desc":"Launch YouTube","action":"launch_app","params":{"appQuery":"youtube"},"expect":"YouTube foreground","verify":"FOREGROUND_PACKAGE"}
+            ]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+
+        // Legacy label-only skill JSON cannot be reconstructed, so it must be re-planned.
+        val legacy = com.example.data.local.SavedSkillEntity(
+            name = "legacy",
+            goal = "Open YouTube",
+            planJson = """{"goal":"Open YouTube","fromModel":true,"steps":[
+                {"id":1,"seq":1,"desc":"open the app","action":"launch_app","verify":"FOREGROUND_PACKAGE","opts":null}
+            ]}"""
+        )
+
+        orchestrator.runSkill(legacy)
+        val terminal = awaitTerminal(orchestrator)
+
+        assertTrue("an unreconstructable skill re-plans and still completes, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue("the re-planned action executed", automation.executed.any { it is AgentAction.OpenApp })
+    }
+
+    // ---- Phase 9: orchestrator-integrated seams (9.3, 9.5, 9.12) ----
     @Test
     fun followUpResolvesAgainstPreviousCommand() = kotlinx.coroutines.runBlocking {
         val orchestrator = newOrchestrator(basicEngine(), FakeDeviceAutomation())
