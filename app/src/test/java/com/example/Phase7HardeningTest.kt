@@ -1,6 +1,7 @@
 package com.example
 
 import android.graphics.Bitmap
+import android.graphics.Rect
 import com.example.automation.AutomationGate
 import com.example.cloudflare.CloudflareGateway
 import com.example.perception.OcrReader
@@ -57,6 +58,15 @@ class Phase7HardeningTest {
 
     private class FakeOcr(private val text: String) : OcrReader {
         override suspend fun readText(screenshot: Bitmap): String = text
+
+        override suspend fun readTextBoxes(screenshot: Bitmap): List<com.example.perception.OcrTextBox> =
+            text.split("\\n").mapIndexed { index, line ->
+                com.example.perception.OcrTextBox(
+                    text = line,
+                    bounds = Rect(10, 20 + index * 40, 90, 50 + index * 40),
+                    confidence = 0.95f
+                )
+            }
     }
 
     @Test

@@ -163,7 +163,7 @@ class SearchRecoveryTest {
                         ActionResult(true, "ACTION_CLICK_SEARCH", "opened search")
                     }
                     is AgentAction.TypeText -> {
-                        defaultObservation = observation("com.google.android.youtube", "Results for lo-fi beats  12 views videos", 4)
+                        defaultObservation = observation("com.google.android.youtube", "Search results: lo-fi beats 12 views video", 4)
                         ActionResult(true, "ACTION_SET_TEXT+IME_SEARCH", "typed and submitted")
                     }
                     else -> ActionResult(true, "OK", "ok")
@@ -244,7 +244,7 @@ class SearchRecoveryTest {
                         ActionResult(true, "ACTION_CLICK_SEARCH", "opened search")
                     }
                     is AgentAction.TypeText -> {
-                        defaultObservation = observation("com.google.android.youtube", "Results for lo-fi beats  1.2M views videos", 4)
+                        defaultObservation = observation("com.google.android.youtube", "Search results: lo-fi beats 1.2M views video", 4)
                         ActionResult(true, "ACTION_SET_TEXT+IME_SEARCH", "typed and submitted")
                     }
                     else -> ActionResult(true, "OK", "ok")

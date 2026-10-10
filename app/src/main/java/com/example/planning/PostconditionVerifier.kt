@@ -28,23 +28,30 @@ object PostconditionVerifier {
                 Verdict(onHome, if (onHome) "Home launcher is foreground" else "Launcher not foreground (${observationPackage ?: "unknown"})")
             }
             VerificationMethod.RESULTS_PRESENT -> {
-                // A submitted search rarely leaves the literal word "results" on screen, and
-                // the typed query itself is not evidence that results rendered. Accept any
-                // real result-surface signal: a list that grew/changed, a scrollable results
-                // container, an explicit results header, or a query echoed alongside results.
-                val hasExplicitResults = lowerText.contains("results") ||
-                    lowerText.contains("search results") ||
-                    lowerText.contains("no results") ||
-                    lowerText.contains("top results")
-                val hasScrollableList = lowerText.contains("[scrollable]")
+                // A changed fingerprint is only a timing/navigation signal; it is not
+                // proof that the requested result surface rendered. Require semantic
+                // evidence from the fresh screen. An explicit no-results state is still
+                // useful evidence that the search completed, but it must be reported as
+                // such so a later open-item step cannot confuse it with a result.
+                val hasExplicitResults = lowerText.contains("search results") ||
+                    lowerText.contains("top results") ||
+                    Regex("\\b(results|videos|channels|watch)\\s*[:(]").containsMatchIn(lowerText)
+                val hasNoResults = lowerText.contains("no results") ||
+                    lowerText.contains("nothing found") ||
+                    lowerText.contains("0 results")
+                val scrollableCount = Regex("\\[scrollable\\]").findAll(lowerText).count()
                 val hasResultItems = lowerText.contains("views") &&
                     (lowerText.contains("video") || lowerText.contains("channel") || lowerText.contains("watch"))
-                val present = hasExplicitResults || hasScrollableList || hasResultItems || screenChanged
+                val hasStructuredList = scrollableCount >= 2 &&
+                    (hasResultItems || lowerText.contains("video") || lowerText.contains("channel") ||
+                        lowerText.contains("watch") || lowerText.contains("mix") ||
+                        lowerText.contains("radio"))
+                val present = hasExplicitResults || hasNoResults || hasResultItems || hasStructuredList
                 val detail = when {
+                    hasNoResults -> "Search completed with an explicit no-results state"
                     hasExplicitResults -> "Search results evidence present"
-                    hasScrollableList -> "Scrollable results container present"
                     hasResultItems -> "Result items present"
-                    screenChanged -> "Screen advanced after the search"
+                    hasStructuredList -> "Structured scrollable result list present"
                     else -> "No results evidence on screen"
                 }
                 Verdict(present, detail)
@@ -56,8 +63,15 @@ object PostconditionVerifier {
             }
             VerificationMethod.SCREEN_CHANGED ->
                 Verdict(screenChanged, if (screenChanged) "Screen changed after action" else "Screen did not change")
-            VerificationMethod.NONE ->
-                Verdict(screenChanged, if (screenChanged) "Incidental screen change observed" else "No observable change")
+            VerificationMethod.NONE -> {
+                // NONE is intentionally not a success shortcut. Callers must provide
+                // a concrete postcondition or an action-specific verifier; incidental
+                // animation/navigation cannot prove task completion.
+                Verdict(
+                    false,
+                    "No structured postcondition was supplied; completion is not verifiable"
+                )
+            }
         }
     }
 

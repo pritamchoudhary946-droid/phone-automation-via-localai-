@@ -2,6 +2,7 @@ package com.example.perception
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -27,8 +28,20 @@ interface VisionGrounder {
  * OCR fallback (plan 4.2): reads text baked into images. Returns "" when no text
  * is found or the reader is unavailable, never throwing into the loop.
  */
+data class OcrTextBox(
+    val text: String,
+    val bounds: Rect,
+    val confidence: Float = 1f
+)
+
+/**
+ * OCR contract. Text-only readers remain valid for screen summaries, but coordinate
+ * grounding is allowed only through real text boxes.
+ */
 interface OcrReader {
     suspend fun readText(screenshot: Bitmap): String
+
+    suspend fun readTextBoxes(screenshot: Bitmap): List<OcrTextBox> = emptyList()
 }
 
 /** Honest no-op grounder used when no vision backend is configured. */
@@ -56,23 +69,52 @@ class MlKitOcrReader(
     override suspend fun readText(screenshot: Bitmap): String {
         if (screenshot.width <= 0 || screenshot.height <= 0) return ""
         return try {
-            suspendCancellableCoroutine { cont ->
-                val image = InputImage.fromBitmap(screenshot, 0)
-                recognizer.process(image)
-                    .addOnSuccessListener { result ->
-                        val text = result.text.trim()
-                        if (cont.isActive) cont.resume(text.take(maxChars))
-                    }
-                    .addOnFailureListener { e ->
-                        Log.w(TAG, "OCR failed: ${e.message}")
-                        if (cont.isActive) cont.resume("")
-                    }
-            }
+            recognize(screenshot)?.text?.trim()?.take(maxChars).orEmpty()
         } catch (e: Exception) {
             Log.w(TAG, "OCR threw: ${e.message}")
             ""
         }
     }
+
+    override suspend fun readTextBoxes(screenshot: Bitmap): List<OcrTextBox> {
+        if (screenshot.width <= 0 || screenshot.height <= 0) return emptyList()
+        return try {
+            recognize(screenshot)?.textBlocks
+                ?.flatMap { block ->
+                    block.lines.flatMap { line ->
+                        val elementBoxes = line.elements.mapNotNull { element ->
+                            element.boundingBox?.let { box ->
+                                OcrTextBox(element.text, Rect(box), 0.9f)
+                            }
+                        }
+                        if (elementBoxes.isNotEmpty()) {
+                            elementBoxes
+                        } else {
+                            line.boundingBox?.let { box ->
+                                listOf(OcrTextBox(line.text, Rect(box), 0.85f))
+                            }.orEmpty()
+                        }
+                    }
+                }
+                ?.filter { it.text.isNotBlank() }
+                .orEmpty()
+        } catch (e: Exception) {
+            Log.w(TAG, "OCR box extraction threw: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private suspend fun recognize(screenshot: Bitmap): com.google.mlkit.vision.text.Text? =
+        suspendCancellableCoroutine { cont ->
+            recognizer.process(InputImage.fromBitmap(screenshot, 0))
+                .addOnSuccessListener { result ->
+                    if (cont.isActive) cont.resume(result)
+                }
+                .addOnFailureListener { e ->
+                    Log.w(TAG, "OCR failed: ${e.message}")
+                    if (cont.isActive) cont.resume(null)
+                }
+        }
 
     private companion object {
         const val TAG = "MlKitOcrReader"
@@ -92,37 +134,40 @@ class OcrVisionGrounder(
     override suspend fun locate(instruction: String, screenshot: Bitmap): VisionPoint? {
         val needle = normalize(instruction)
         if (needle.isBlank()) return null
-        val text = ocrReader.readText(screenshot)
-        if (text.isBlank()) return null
 
-        // Prefer an exact/near line match; otherwise fall back to the whole-image
-        // centroid of recognised text as a coarse "attention" point.
-        var best: VisionPoint? = null
-        var y = 0
-        val lines = text.lines()
-        for (line in lines) {
-            val norm = normalize(line)
-            if (norm.isNotBlank() && (norm.contains(needle) || needle.contains(norm))) {
-                // We do not get per-line boxes from the string; approximate by
-                // distributing lines evenly down the image (bounded, honest: a point
-                // inside the matched text band, not an exact glyph box).
-                val approxY = ((y + 0.5f) / lines.size * screenshot.height).toInt()
-                best = VisionPoint(screenshot.width / 2, approxY.coerceIn(0, screenshot.height - 1), 0.5f)
-                break
+        // Coordinate grounding must use actual OCR boxes. A text-only OCR digest
+        // cannot justify tapping the screen centre, so it deliberately returns null.
+        val boxes = ocrReader.readTextBoxes(screenshot)
+        if (boxes.isEmpty()) return null
+
+        val needleTokens = needle.split(" ").filter { it.length >= 2 }.toSet()
+        val candidate = boxes.mapNotNull { box ->
+            val label = normalize(box.text)
+            if (label.isBlank()) return@mapNotNull null
+            val labelTokens = label.split(" ").filter { it.length >= 2 }.toSet()
+            val overlap = needleTokens.intersect(labelTokens).size
+            val exact = label.contains(needle) || needle.contains(label)
+            val allTokens = needleTokens.isNotEmpty() && needleTokens.all { label.contains(it) }
+            if (!exact && !allTokens) return@mapNotNull null
+            val score = when {
+                label == needle -> 1f
+                allTokens -> 0.95f
+                exact -> 0.9f
+                else -> overlap.toFloat() / needleTokens.size.coerceAtLeast(1)
             }
-            y++
-        }
-        if (best != null) return best
+            OcrTextBox(box.text, box.bounds, (box.confidence * score).coerceIn(0f, 1f))
+        }.maxByOrNull { it.confidence } ?: return null
 
-        // Coarse fallback: centre of the screen only when the instruction words appear
-        // anywhere in the OCR text; otherwise refuse (never blind-tap).
-        val words = needle.split(" ").filter { it.length >= 3 }
-        val hits = words.count { normalize(text).contains(it) }
-        return if (words.isNotEmpty() && hits > 0) {
-            VisionPoint(screenshot.width / 2, screenshot.height / 2, 0.3f)
-        } else {
-            null
-        }
+        val bounds = candidate.bounds
+        val width = bounds.right - bounds.left
+        val height = bounds.bottom - bounds.top
+        val centerX = bounds.left + width / 2
+        val centerY = bounds.top + height / 2
+        if (width <= 0 || height <= 0 ||
+            centerX !in 0 until screenshot.width ||
+            centerY !in 0 until screenshot.height
+        ) return null
+        return VisionPoint(centerX, centerY, candidate.confidence)
     }
 
     private fun normalize(s: String): String =

@@ -60,7 +60,7 @@ An action the native layer cannot execute must not appear in the catalogue
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
-  `NONE` verification requires a screen change to count as satisfied.
+  `NONE` verification never proves completion; every terminal goal needs concrete evidence.
 - Screen text is untrusted: sanitize via
   `PlannerPromptBuilder.sanitizeUntrusted(...)` before embedding in prompts.
 - Keep the model's JSON wrapper construction in `JSONObject`/`JSONArray`, never

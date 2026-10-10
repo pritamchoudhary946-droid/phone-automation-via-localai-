@@ -12,6 +12,7 @@ import com.example.agent.UiObservation
 import com.example.planning.PlanStep
 import com.example.planning.VerificationMethod
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -172,6 +173,25 @@ class HybridStepExecutorTest {
     // ---- helpers ----
 
     private var fp = 0
+    @Test
+    fun openSearchDoesNotTreatCommentFieldAsSearch() {
+        val steps = listOf(step(1, AgentAction.OpenSearch("lo-fi"), VerificationMethod.SCREEN_CHANGED))
+        val commentField = node(
+            text = "Write a comment",
+            desc = null,
+            id = "comment_input",
+            pkg = "com.google.android.youtube",
+            editable = true
+        )
+        val decision = executor.decide(
+            steps,
+            0,
+            obs("com.google.android.youtube", listOf(commentField)),
+            nudgeUsed = false
+        )
+        assertFalse("comment input must not satisfy open_search", decision is FastPathDecision.Satisfied)
+    }
+
     private fun obs(pkg: String?, nodes: List<UiNode>): UiObservation =
         UiObservation(pkg, nodes, "Active Package: ${pkg ?: "unknown"}", fingerprint = "fp_${pkg}_${fp++}")
 
