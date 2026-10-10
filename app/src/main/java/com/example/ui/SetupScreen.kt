@@ -100,7 +100,7 @@ fun SetupScreen(
         Spacer(modifier = Modifier.height(14.dp))
 
         Text(
-            text = "OmniAgent Initialization",
+            text = "Jarvis Initialization",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground
@@ -377,6 +377,11 @@ fun SetupScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
+        // 8.2: engine load status - the real reason it is (or isn't) running, with retry.
+        EngineLoadStatusCard(app = context.applicationContext as? com.example.OmniAgentApplication)
+
+        Spacer(modifier = Modifier.height(18.dp))
+
         // Step 2: Accessibility Service Configuration Card
         Card(
             modifier = Modifier
@@ -410,7 +415,7 @@ fun SetupScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Allows OmniAgent to inspect UI elements (UI tree-first) and perform safe clicks, typing, and navigation.",
+                    text = "Allows Jarvis to inspect UI elements (UI tree-first) and perform safe clicks, typing, and navigation.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -595,7 +600,7 @@ fun SetupScreen(
             shape = RoundedCornerShape(12.dp)
         ) {
             Text(
-                text = "Enter OmniAgent Dashboard",
+                text = "Enter Jarvis Dashboard",
                 color = if (downloadState is ModelDownloadState.Ready || isAccessibilityEnabled) Color.White else Color.Gray,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
@@ -609,5 +614,72 @@ fun SetupScreen(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+    }
+}
+
+/**
+ * 8.2: shows the live engine lifecycle (loading / ready / failed) with the real
+ * failure text and a retry, so Setup never leaves the user guessing.
+ */
+@Composable
+private fun EngineLoadStatusCard(app: com.example.OmniAgentApplication?) {
+    if (app == null) return
+    val engineState by app.engineState.collectAsState()
+
+    val (accent, title, detail) = when (val s = engineState) {
+        is com.example.model.EngineState.Ready ->
+            Triple(MintSuccess, "Jarvis engine ready (${s.backend})", "Planning runs on the on-device Gemma 4 E2B model.")
+        is com.example.model.EngineState.Loading ->
+            Triple(ElectricBlue, "Loading engine…", "Initializing the LiteRT-LM runtime and running a smoke test.")
+        is com.example.model.EngineState.Failed ->
+            Triple(MaterialTheme.colorScheme.error, "Engine failed to load", s.message)
+        com.example.model.EngineState.NotInitialized ->
+            Triple(AmberWarning, "Engine not loaded", "The model is not loaded yet. Download it, then retry.")
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("engine_load_status_card"),
+        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.12f)),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.45f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = when (engineState) {
+                        is com.example.model.EngineState.Ready -> Icons.Default.CheckCircle
+                        is com.example.model.EngineState.Loading -> Icons.Default.Autorenew
+                        is com.example.model.EngineState.Failed -> Icons.Default.ErrorOutline
+                        else -> Icons.Default.Info
+                    },
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = accent)
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = if (engineState is com.example.model.EngineState.Failed) FontFamily.Monospace else FontFamily.Default,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (engineState !is com.example.model.EngineState.Ready) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = { app.initializeEngineIfModelReady() },
+                    modifier = Modifier.testTag("setup_engine_retry_button"),
+                    colors = ButtonDefaults.buttonColors(containerColor = accent)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Load / Retry engine", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }

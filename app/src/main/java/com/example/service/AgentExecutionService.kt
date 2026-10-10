@@ -84,10 +84,10 @@ class AgentExecutionService : Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "OmniAgent Active Task",
+                "Jarvis Active Task",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows live status while OmniAgent is automating actions"
+                description = "Shows live status while Jarvis is automating actions"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
@@ -103,7 +103,7 @@ class AgentExecutionService : Service {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("OmniAgent Running")
+            .setContentTitle("Jarvis Running")
             .setContentText(goalText)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)

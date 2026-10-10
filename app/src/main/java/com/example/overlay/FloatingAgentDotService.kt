@@ -264,7 +264,7 @@ class FloatingAgentDotService : Service() {
         }
 
         val titleText = TextView(this).apply {
-            text = "OmniAgent"
+            text = "Jarvis"
             setTextColor(Color.parseColor("#4A46D6"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -443,7 +443,7 @@ class FloatingAgentDotService : Service() {
         })
         controlsRow2.addView(createControlBtn("Stop", "#FEE2E2", "#DC2626") {
             OmniAgentApplication.instance.orchestrator.cancelCurrentTask()
-            Toast.makeText(this, "OmniAgent: Task Stopped", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Jarvis: Task Stopped", Toast.LENGTH_SHORT).show()
             hidePanel()
         })
         container.addView(controlsRow2)
@@ -477,7 +477,7 @@ class FloatingAgentDotService : Service() {
         val a11y = AgentAccessibilityService.instance
         if (a11y != null) {
             val success = action() == true
-            Toast.makeText(this, "OmniAgent: $name executed", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Jarvis: $name executed", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(this, "Accessibility Service enable karein Settings me", Toast.LENGTH_SHORT).show()
         }
@@ -526,7 +526,7 @@ class FloatingAgentDotService : Service() {
     }
 
     private fun onDoubleTap() {
-        Toast.makeText(this, "OmniAgent: Reading active screen...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Jarvis: Reading active screen...", Toast.LENGTH_SHORT).show()
         triggerReadScreen()
     }
 
@@ -585,7 +585,7 @@ class FloatingAgentDotService : Service() {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "OmniAgent ko bol ke bataiye...")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Jarvis ko bol ke bataiye...")
             }
 
             speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -693,12 +693,12 @@ class FloatingAgentDotService : Service() {
             }
             cmd == "scroll down" || cmd == "niche scroll" || cmd == "scroll niche" || cmd == "swipe down" || cmd == "down" -> {
                 scope.launch { a11y?.scroll("down") }
-                Toast.makeText(this, "OmniAgent: Scrolling Down", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Jarvis: Scrolling Down", Toast.LENGTH_SHORT).show()
                 return
             }
             cmd == "scroll up" || cmd == "upar scroll" || cmd == "scroll upar" || cmd == "swipe up" || cmd == "up" -> {
                 scope.launch { a11y?.scroll("up") }
-                Toast.makeText(this, "OmniAgent: Scrolling Up", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Jarvis: Scrolling Up", Toast.LENGTH_SHORT).show()
                 return
             }
             cmd.contains("notification") || cmd == "notifs" || cmd == "open notification" -> {
@@ -715,7 +715,7 @@ class FloatingAgentDotService : Service() {
             }
             cmd == "stop" || cmd == "cancel" || cmd.contains("ruko") || cmd.contains("band karo") -> {
                 OmniAgentApplication.instance.orchestrator.cancelCurrentTask()
-                Toast.makeText(this, "OmniAgent: Agent Stopped", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Jarvis: Agent Stopped", Toast.LENGTH_SHORT).show()
                 return
             }
         }
@@ -733,7 +733,7 @@ class FloatingAgentDotService : Service() {
             if (resolved != null) {
                 val launched = appDir.launchApp(resolved)
                 if (launched) {
-                    Toast.makeText(this, "OmniAgent: Opening $appQuery", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Jarvis: Opening $appQuery", Toast.LENGTH_SHORT).show()
                     return
                 }
             }
@@ -755,7 +755,7 @@ class FloatingAgentDotService : Service() {
         }
 
         // 4. Multi-step Autonomous Task (Pass to Gemma Orchestrator)
-        Toast.makeText(this, "OmniAgent executing: \"$rawCommand\"", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Jarvis executing: \"$rawCommand\"", Toast.LENGTH_SHORT).show()
         OmniAgentApplication.instance.orchestrator.startTask(rawCommand)
     }
 

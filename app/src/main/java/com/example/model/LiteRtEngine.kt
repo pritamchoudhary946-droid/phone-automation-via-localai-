@@ -193,7 +193,10 @@ class LiteRtEngine(
 
 
     companion object {
-        const val MAX_CONTEXT_TOKENS = 2048
+        // 8.1: reconciled with the runtime's actual KV/context bound (was a stale 2048,
+        // while LiteRtLmRuntime requested 3072). Reuse the single source of truth so the
+        // config can never drift again.
+        const val MAX_CONTEXT_TOKENS = LiteRtLmRuntime.MAX_CONTEXT_TOKENS
         const val SYSTEM_PROMPT = PlannerPromptBuilder.SYSTEM_INSTRUCTION
     }
 }

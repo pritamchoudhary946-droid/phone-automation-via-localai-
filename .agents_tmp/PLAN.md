@@ -7,16 +7,18 @@ memory of the user and past tasks.
 
 Scope for this work: Phases 0, 1, 2, 3, 4 (all items 4.1 - 4.17), Phase 5
 (Autonomy & Self-Healing, items 5.1 - 5.10), Phase 6 (Reasoning & Reliability
-Rescue, items 6.1 - 6.24) AND Phase 7 (Completion & Hardening, items 7.1 - 7.17).
-Phase 6 (reasoning/reliability rescue) is landed; Phase 7 is now the top priority
-because the code audit shows several Phase 4/5 features are interfaces with
-"Unavailable"/disabled defaults (vision, OCR, voice input, Shizuku, cloud,
-automations), and the pinned model artifact needs verifying before anything else
-can be trusted. Real reported failures ("open WhatsApp, message Prateek" -> app
+Rescue, items 6.1 - 6.24), Phase 7 (Completion & Hardening, items 7.1 - 7.17) AND
+Phase 8 (Jarvis rebrand, working model load, premium UI - items 8.1 - 8.6).
+Phase 6 is landed; Phase 7 finishes the seams; Phase 8 fixes the live device
+blockers and rebrands the app to "Jarvis". The code audit shows several Phase
+4/5 features are interfaces with "Unavailable"/disabled defaults (vision, OCR,
+voice input, Shizuku, cloud, automations), and the pinned model artifact needs
+verifying before anything else can be trusted. Real reported failures ("open
+WhatsApp, message Prateek" -> app
 opens then scrolls forever; "search for X" -> text not verified in the field;
 unclear whether the local AI is even used) trace to concrete defects, listed in
 section 4 under "Observed defects". Phase 6 fixed those; Phase 7 closes the rest
-of the gap.
+of the gap, and Phase 8 fixes the live "won't load" bug and rebrands to Jarvis.
 
 Confirmed decisions (locked):
 - Model-not-loaded behavior: BLOCK. The app requires a healthy local model
@@ -70,6 +72,12 @@ Full scope at a glance (everything in this plan):
   opt-in settings surface, on-device instrumentation tests + an in-app self-test,
   Hindi/Roman-Hindi end-to-end, and reliability hardening from real device runs.
   All Phase 7 items are built together in one pass.
+- Phase 8 (TOP PRIORITY, user-requested) - Jarvis rebrand + working load + premium
+  UI (8.1 - 8.6): make the model actually load after a verified download and show
+  the real failure reason (never a silent "not loaded"); rebrand all user-visible
+  text to "Jarvis"; redesign the UI into a cool, premium, Jarvis-like interface; a
+  new launcher/in-app icon; and a polish pass so task progress is always visible.
+  Built together with Phase 7 in the same pass.
 
 Honest framing: a phone cannot be literal Jarvis. But the gap between today and
 that feel is a concrete, ordered set of capability upgrades, not one magic
@@ -138,25 +146,67 @@ A) Real and working today (do NOT rebuild these; only extend):
 - `CloudflareGateway` (DuckDuckGo instant answer + `read_url` + PDF head check).
 - Phase 6 fixes landed: 6.1, 6.2, 6.3/6.4, 6.6/6.10, 6.12, 6.16, 6.18, 6.19, 6.22.
 
-B) Seams only - interface exists but the capability is NOT actually there (THE
-REAL GAP). Each line is a must-fix, with the Phase 7 item that fixes it:
-- 4.1 vision grounding -> only `UnavailableVisionGrounder` (returns null)
-  -> fix in 7.2.
-- 4.2 OCR -> only `UnavailableOcrReader` (returns "") -> fix in 7.3.
-- 4.6 multimodal -> `LiteRtLmRuntime` sends text only, no image -> fix in 7.4.
-- 4.5 Shizuku -> bridge has `exec = null` (always refuses) -> fix in 7.7.
-- 4.7 Gemini Nano -> no AICore -> fix in 7.12.
-- 4.8 cloud fallback -> hard-disabled -> fix in 7.6.
-- 4.10/4.12 voice -> a flag exists but NO speech recognizer at all -> fix in 7.5.
-- 4.14 automations -> pure logic, nothing scheduled (no WorkManager) -> fix in 7.8.
-- 4.16/4.17 self-critique / learn-from-demo -> not wired -> fix in 7.10.
-- 6.23 model-fit guard -> not implemented -> fix in 7.9.
+B) The tree has ADVANCED since the first audit - the build agent kept landing
+Phase 7 items. VERIFIED present in the tree right now:
+- 7.15: `ui/SettingsScreen.kt` + `settings/CapabilitySettings.kt` + a
+  `Capabilities` tab in `MainActivity`. Landed.
+- 7.8: `automation/AutomationScheduler.kt` + `AutomationWorker` using real
+  WorkManager (`androidx.work` wired in `app/build.gradle.kts`). Landed.
+- 7.5: real `SpeechRecognizer` voice input + hands-free re-arm in
+  `ui/AgentDashboardScreen.kt`. Landed.
+- 7.4: multimodal `generateWithImage(...)` in `LiteRtLmRuntime`. Landed.
+- 7.9: `isFitForDevice()` device-fit report in `LiteRtModelManager`. Landed.
+- 7.1: `probeRemoteArtifact()` + `logRemoteArtifactCheck()` in
+  `LiteRtModelManager`. Landed (still verify the hash at build time - 7.1).
+- 8.2 partial: the dashboard DOES read `EngineState` - but only to show a generic
+  label, not the real failure reason (see C2).
+- 7.3 PARTIAL: `mlkit-text-recognition` IS wired in `app/build.gradle.kts`, but a
+  search for `com.google.mlkit` / `TextRecognition` finds NO code using it yet - so
+  the dependency is present but the OCR reader is NOT implemented. Finish it.
 
-C) High-risk item to verify while building (not a gate, part of the same pass):
+STILL SEAMS until proven otherwise (re-verify at build time - the tree is moving
+fast): 4.1 vision grounding (`UnavailableVisionGrounder`), 4.5 Shizuku
+(`exec = null`), 4.8 cloud planner fallback (hard-disabled), 4.7 Gemini Nano,
+4.16/4.17 self-critique / learn-from-demonstration, and the OCR reader above.
+
+C) LIVE BLOCKERS reported by the user (these are the top priority - fix first):
+- C1 MODEL WON'T LOAD AFTER A SUCCESSFUL DOWNLOAD. The model file downloads and
+  verifies, but the engine never becomes ready. This is the headline bug.
+  Verified root-cause candidates in the code + the upstream runtime:
+  * `initializeEngineIfModelReady()` in `OmniAgentApplication` only LOGS a failure
+    (`Log.w`/`Log.e`) - it never surfaces the reason to the user, so the screen
+    just says "not loaded" with no cause. `SetupScreen` renders ONLY
+    `downloadState` (download/verify) and never shows `EngineState`
+    (`NotInitialized`/`Loading`/`Ready`/`Failed`). The engine-failure reason is
+    invisible. This exactly matches "downloaded, but load hi nahi ho raha, pata
+    nahi kya error".
+  * REAL upstream compatibility risk: `litertlm-android` (pinned 0.16.1) + a
+    Gemma-4 E2B `.litertlm` artifact is known to fail `Engine.initialize()` on
+    some library builds with errors like "Unsupported or unknown file format",
+    a vision-encoder signature mismatch ("...must have exactly one signature but
+    got 3"), or GPU delegate allocation failure. Community fixes were a specific
+    library version and/or forcing the CPU backend. So "downloads, then won't
+    load" is a version/backend problem, not a corrupt file.
+  * `LiteRtEngine.kt` still claims `MAX_CONTEXT_TOKENS = 2048` while
+    `LiteRtLmRuntime` requests 3072 - a mismatch to reconcile.
+- C2 THE MODEL-LOAD ERROR IS NEVER SHOWN, and the label is misleading. The
+  dashboard does read `EngineState` but only renders a GENERIC label
+  ("Local AI unavailable • Basic mode" / "Model not loaded • Basic mode") - the
+  real exception text from `GemmaInferenceEngine` is never surfaced. `SetupScreen`
+  shows only `downloadState` (download/verify), not `EngineState` at all. And with
+  6.1 the app BLOCKS when the model is missing, so the "Basic mode" wording is
+  itself wrong. Must show the real reason + a Retry, and fix the label.
+- C3 REBRAND: everything user-visible still says "OmniAgent" (`strings.xml`
+  `app_name`, accessibility service label/description, notifications, dashboard,
+  setup copy, launcher). The user wants it named "Jarvis".
+- C4 UI: the user wants a much better, "Jarvis-like", cool/premium interface and
+  a new small icon, not the current generic look.
+
+D) High-risk item to verify while building (not a gate, part of the same pass):
 - `LiteRtModelManager` pins `gemma-4-E2B-it.litertlm` with a hardcoded byte length
   and SHA-256. The repo/filename are confirmed real; the exact hash still must be
   verified, because a wrong hash deletes the file and (with 6.1) the app blocks.
-  -> handled in 7.1.
+  -> handled in 7.1; the load failure itself is handled in Phase 8 (8.1).
 
 Note: the seam map, the "working today" list, and the full Phase 7 detail also
 appear in section 4 (Observed defects) and section 5. They are repeated here so
@@ -989,13 +1039,72 @@ artifact) is listed first only because a wrong hash would block everything else
 at runtime - it is not a gate you must finish before starting the rest; build it
 alongside the others in the same pass.
 
+Phase 8 - Jarvis rebrand, working load, and premium UI (TOP PRIORITY, user-requested
+8.1 - 8.6). Do all together with Phase 7 in the same build pass. This phase fixes
+the exact complaints: the model downloads but will not load, no error is ever
+shown, the app is still called "OmniAgent", and the UI is generic.
+
+- 8.1 MAKE THE MODEL ACTUALLY LOAD (the headline bug). Goal: after a verified
+  download, `EngineState` reaches `Ready` and planning uses the real model.
+  Method: (a) surface the real failure - record the init exception text into
+  `EngineState.Failed(message)` and show it; (b) reconcile the library/model
+  combination that fails `Engine.initialize()`: try the CPU backend first (already
+  the default) and, if init still fails, correct the `litertlm-android` version to
+  the one that supports this Gemma-4 E2B artifact and/or re-verify which `.litertlm`
+  is actually loadable on Android; (c) fix the `MAX_CONTEXT_TOKENS` mismatch
+  (2048 in `LiteRtEngine` vs 3072 in `LiteRtLmRuntime`) so the config is coherent;
+  (d) add a bounded retry that re-attempts load once on a transient failure.
+  Reference: `model/GemmaInferenceEngine.kt`, `model/LiteRtLmRuntime.kt`,
+  `model/LiteRtEngine.kt`, `OmniAgentApplication.kt`, `gradle/libs.versions.toml`.
+- 8.2 SHOW THE MODEL-LOAD ERROR (never a silent "not loaded"). Goal: the user
+  always sees why. Method: surface the real `EngineState.Failed(message)` text in
+  the dashboard and in `SetupScreen` (which currently shows download state only),
+  with a prominent reason and a Retry button; stop showing the generic
+  "Basic mode" label when 6.1 actually BLOCKS, and correct that wording. Reference:
+  `ui/AgentDashboardScreen.kt`, `ui/SetupScreen.kt`,
+  `model/GemmaInferenceEngine.kt`, `MainActivity.kt`.
+- 8.3 REBRAND to "Jarvis" everywhere user-visible. Goal: no "OmniAgent" remains on
+  screen. Method: change `strings.xml` `app_name`, the accessibility service
+  label/description, notification titles, dashboard/setup/settings copy, and the
+  launcher label. Keep internal class names (`OmniAgentApplication`, package
+  `com.example`) to avoid a massive rename unless the user asks for it - but ALL
+  user-facing text becomes "Jarvis". Reference: `res/values/strings.xml`,
+  `res/values*/`, `ui/*`, `notifications/CompletionNotifier.kt`,
+  `service/AgentExecutionService.kt`, `AndroidManifest.xml`.
+- 8.4 PREMIUM "JARVIS" UI REDESIGN. Goal: a cool, modern, high-quality interface
+  worthy of the Jarvis name. Method: rebuild the app shell and primary screens with
+  a cohesive dark, glassy/sci-fi theme - a central animated status orb, subtle
+  glow/gradient accents, smooth transitions, an icon/capability status strip, and
+  a clear voice/text command bar as the focal element. Keep the existing tabs
+  working (`Agent`, `Live Monitor`, `Setup`, `Capabilities`, `History`) but make
+  them feel premium and consistent. Reference: `ui/theme/*`, `ui/AgentDashboardScreen.kt`,
+  `ui/AgentLiveMonitorScreen.kt`, `ui/SetupScreen.kt`, `ui/SettingsScreen.kt`,
+  `MainActivity.kt`.
+- 8.5 NEW SMALL ICON / BRAND MARK. Goal: a distinct Jarvis launcher icon and in-app
+  mark, not the default. Method: add adaptive-icon resources (foreground/background/
+  monochrome) with a clean minimalist mark, update `mipmap-anydpi-v26`, and use the
+  same mark as the in-app logo and the floating orb. Reference:
+  `res/mipmap-anydpi-v26/*`, `res/drawable/*`, `AndroidManifest.xml`,
+  `overlay/AgentOrbView.kt`.
+- 8.6 UI polish pass for the flows that felt broken. Goal: when Jarvis opens an app
+  or types, the user SEES what is happening. Method: surface the live "what I'm
+  doing now" line (open app / find field / type / press Enter / verify), a
+  model-use badge (Jarvis AI vs basic mode), and a clear success/failure summary on
+  each task; wire these to the orchestrator's existing observables. Reference:
+  `ui/AgentDashboardScreen.kt`, `ui/AgentLiveMonitorScreen.kt`,
+  `agent/TaskOrchestrator.kt`.
+
+Phase 8 scope note: do ALL of 8.1 - 8.6 together. 8.1 and 8.2 are the functional
+fix; 8.3 - 8.6 are the rebrand and UI. They ship in the same pass.
+
 # 5. TESTING AND VALIDATION
 
 Success is defined per phase; each phase must keep the existing behaviour
 honest (no step may be marked COMPLETED unless a fresh observation proves it).
 Phases implemented: 0, 1, 2, 3, 4 (all items 4.1 - 4.17; 4.9 documented and
-deferred), 5 (items 5.1 - 5.10), and 6 (items 6.1 - 6.24). Phase 7 is the next
-work and turns the remaining seams into real capabilities.
+deferred), 5 (items 5.1 - 5.10), 6 (items 6.1 - 6.24), and 7 (items 7.1 - 7.17).
+Phase 8 (8.1 - 8.6) is the rebrand + working-load + UI phase and is done next,
+together with any remaining Phase 7 seams.
 
 Phase 0 (must pass first):
 - A simulated "Open ChatGPT, say hi, then press Enter" task reaches
@@ -1134,6 +1243,19 @@ Phase 7 (completion & hardening):
   response end-to-end.
 - Regression: all existing tests stay green; no seam regresses to a fake success.
 
+Phase 8 (Jarvis rebrand, working load, premium UI):
+- 8.1: after a verified download on the Motorola Edge 70 Fusion, `EngineState`
+  reaches `Ready` and a command is planned by the real model (Live Monitor shows
+  "Jarvis AI", not basic mode).
+- 8.2: when the model genuinely cannot load, the screen shows the real reason
+  (exception text) with a Retry button - never a bare "not loaded".
+- 8.3: every user-visible string reads "Jarvis"; no "OmniAgent" text remains on
+  screen, in notifications, or on the launcher.
+- 8.4/8.5: the app opens to the new premium UI with the new Jarvis icon/brand
+  mark; no default/generic icon remains.
+- 8.6: while a task runs, the UI shows the current step ("Opening app", "Typing",
+  "Pressing Enter", "Verifying") and a clear final success/failure summary.
+
 Global:
 - `./gradlew :app:testDebugUnitTest` passes (Robolectric, sdk 34, JDK 21,
   Android platform 36.1; `--no-daemon` in a sandbox).
@@ -1143,4 +1265,7 @@ Global:
   it; "open google.com in the browser" opens the URL; a multi-app task (e.g.
   open an app, search, read a page, return home) completes with each step proven
   by a fresh, settled observation.
+- Manual device check (Phase 8): the app installs as "Jarvis" with the new icon,
+  the model loads to Ready after download (or shows the real failure + Retry), and
+  the premium UI shows live step progress during a run.
 
