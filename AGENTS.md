@@ -226,4 +226,17 @@ An action the native layer cannot execute must not appear in the catalogue
     live loop; its fixed budget/foreground are documented as such.
   * BS10 no reachable `Unavailable*` default: the app wires real OCR/vision/
     summarizer/cloud; the stubs are inert constructor defaults for tests only.
+- Smoke probe (8.8): a blank smoke answer is NOT a load failure. A healthy Gemma-4
+  E2B build can return an empty string for a tiny probe. `LiteRtLmRuntime.smokeTest`
+  routes through the shared, unit-tested `runTolerantSmokeProbe(...)` — up to 2
+  bounded attempts with a growing token budget; non-blank OR empty-without-exception
+  succeeds; only a THROWN generation on every attempt fails. Never close a working
+  runtime on an inconclusive probe. Keep the `LlmRuntime.smokeTest` contract ("empty
+  is usable") in step with any new runtime.
+- Learn-from-demonstration (4.17): the dashboard's "Watch me / Save skill" card is
+  the entry point. `TaskOrchestrator.startWatching()` records each executed step;
+  `saveWatchedSkill(name, goal)` persists it via `skillDao`. Do not remove the UI
+  wiring without another reachable entry, or the capture becomes dead again.
+- `AgentDashboardScreen` is large; keep new wiring behind a `testTag` so it stays
+  reachable to the UI tests.
 

@@ -37,7 +37,15 @@ interface LlmRuntime : AutoCloseable {
         imageBytes: ByteArray
     ): String = generate(prompt, systemInstruction, maxOutputTokens)
 
-    /** Performs a tiny real generation to prove the engine can serve requests end to end. */
+    /**
+     * Performs a tiny real generation to prove the engine can serve requests end to end.
+     *
+     * Returns false ONLY for a real failure (the runtime is not ready or generation
+     * threw). A blank result from a small probe is NOT a failure: a healthy model can
+     * legitimately answer a tiny prompt with an empty string (e.g. thinking-token-only
+     * output), so an empty-but-no-exception probe counts as usable. Implementations do
+     * their own bounded retry before giving up (plan 8.1).
+     */
     suspend fun smokeTest(): Boolean
 
     /** Human-readable backend label, e.g. "CPU" or "GPU". */
