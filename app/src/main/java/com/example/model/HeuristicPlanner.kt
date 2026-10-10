@@ -65,6 +65,12 @@ class HeuristicPlanner {
         val lower = goal.lowercase().trim()
         val list = mutableListOf<SubGoal>()
 
+        // Workflow templates (plan 6.22): recognise common, well-understood shapes as
+        // generic slot-filled patterns — never an app-hardcoded branch. Single-app
+        // open/search/home commands already flow through the clause splitter below.
+        parseCallIntent(goal)?.let { return callSubGoals(it) }
+        parseSettingsToggleIntent(goal)?.let { return settingsToggleSubGoals(it) }
+
         // 6.4: a messaging command ("WhatsApp Prateek ko message karo") becomes the real
         // launch -> search -> open chat -> type message -> submit subgoals, as a generic
         // pattern with slots (app, contact, body) — never an app-hardcoded branch.
@@ -143,6 +149,43 @@ class HeuristicPlanner {
 
     private fun isVerbOrGrammarWord(token: String): Boolean =
         token.lowercase() in setOf("karo", "kar", "do", "de", "bhejo", "likho", "message", "msg", "text", "send", "on", "to", "pe", "par", "ko")
+
+    /** Recognises "call <contact>" / "<contact> ko call karo" (plan 6.22). Returns null otherwise. */
+    fun parseCallIntent(goal: String): String? {
+        val lower = goal.lowercase()
+        if (!lower.contains("call") && !lower.contains("phone karo") && !lower.contains("dial")) return null
+        // Hindi "<contact> ko call/phone" is tried first: the English "call <x>" pattern
+        // would otherwise capture the trailing verb in "call karo".
+        val m = Regex("(?i)\\b([A-Za-z0-9]+)\\s+ko\\s+(?:call|phone)\\b").find(goal)
+            ?: Regex("(?i)\\bcall\\s+([A-Za-z0-9]+)\\b").find(goal)
+        val contact = m?.groupValues?.get(1)
+        return contact?.takeIf { it.isNotBlank() && !isVerbOrGrammarWord(it) }
+    }
+
+    /** The generic call recipe: launch the dialer -> open the contact -> start the call (plan 6.22). */
+    private fun callSubGoals(contact: String): List<SubGoal> = listOf(
+        SubGoal("Open the phone app", SubGoalKind.LAUNCH_APP, "phone"),
+        SubGoal("Open search in the phone app", SubGoalKind.OPEN_SEARCH, null),
+        SubGoal("Find contact \"$contact\"", SubGoalKind.TYPE_CONTACT, contact),
+        SubGoal("Open contact \"$contact\"", SubGoalKind.OPEN_ITEM, contact)
+    )
+
+    /** Recognises "turn on/off wifi" / "wifi band karo" as a settings toggle (plan 6.22). Returns null otherwise. */
+    fun parseSettingsToggleIntent(goal: String): String? {
+        val lower = goal.lowercase()
+        val hasVerb = lower.contains("turn on") || lower.contains("turn off") ||
+            lower.contains("enable") || lower.contains("disable") || lower.contains("toggle") ||
+            lower.contains("band") || lower.contains("chalu") || lower.contains("off karo")
+        if (!hasVerb) return null
+        val features = listOf("wifi", "wi-fi", "bluetooth", "airplane", "flight mode", "location", "hotspot", "dnd", "do not disturb")
+        return features.firstOrNull { lower.contains(it) }
+    }
+
+    /** The generic settings recipe: open quick settings, then toggle the named feature (plan 6.22). */
+    private fun settingsToggleSubGoals(feature: String): List<SubGoal> = listOf(
+        SubGoal("Open Quick Settings", SubGoalKind.CUSTOM, "__open_quick_settings__"),
+        SubGoal("Toggle $feature", SubGoalKind.TOGGLE_SETTING, feature)
+    )
 
     /** The generic messaging recipe: launch -> open search -> type contact -> open chat -> type body -> send (plan 6.4/6.22). */
     private fun messagingSubGoals(intent: MessagingIntent): List<SubGoal> {
@@ -272,7 +315,8 @@ class HeuristicPlanner {
         SubGoalKind.RETURN_HOME -> AgentAction.Home
         SubGoalKind.NAVIGATE_BACK -> AgentAction.Back
         SubGoalKind.SCREENSHOT -> AgentAction.Screenshot
-        SubGoalKind.CUSTOM -> AgentAction.ReadScreen
+        SubGoalKind.CUSTOM ->
+            if (subGoal.target == "__open_quick_settings__") AgentAction.OpenQuickSettings else AgentAction.ReadScreen
     }
 
     private fun verificationFor(kind: SubGoalKind): VerificationMethod = when (kind) {
@@ -322,7 +366,7 @@ class HeuristicPlanner {
                 SubGoalKind.RETURN_HOME -> isHomeForeground(foregroundPackage)
                 SubGoalKind.NAVIGATE_BACK -> lowerHistory.contains("back")
                 SubGoalKind.SCREENSHOT -> lowerHistory.contains("screenshot")
-                SubGoalKind.CUSTOM -> false
+                SubGoalKind.CUSTOM -> sg.target == "__open_quick_settings__" && isQuickSettingsVisible(screenSummary, foregroundPackage)
             }
 
             if (isComplete && i < subGoals.size - 1) {
@@ -464,6 +508,17 @@ class HeuristicPlanner {
             )
         }
 
+        if (activeSubGoal?.kind == SubGoalKind.CUSTOM && activeSubGoal.target == "__open_quick_settings__") {
+            if (!isQuickSettingsVisible(screenSummary, foregroundPackage)) {
+                return AgentDecision(
+                    thought = "Opening the Quick Settings panel to expose the toggle.",
+                    action = AgentAction.OpenQuickSettings,
+                    rawOutput = "Thought: Opening quick settings.\nAction: open_quick_settings()",
+                    activeSubGoal = activeSubGoal.description
+                )
+            }
+        }
+
         if (activeSubGoal?.kind == SubGoalKind.RETURN_HOME) {
             if (!isHomeForeground(foregroundPackage)) {
                 return AgentDecision(
@@ -590,5 +645,12 @@ class HeuristicPlanner {
         return lower.contains("[input]") ||
             lower.contains("edittext") ||
             Regex("editable\\s*[:=]\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(screenSummary)
+    }
+
+    /** True when the system Quick Settings shade is foreground/expanded (plan 6.22). */
+    fun isQuickSettingsVisible(screenSummary: String, foregroundPackage: String?): Boolean {
+        val pkg = foregroundPackage?.lowercase()
+        if (pkg == "com.android.systemui" || pkg == "com.android.systemui.qs") return true
+        return screenSummary.lowercase().contains("quick settings")
     }
 }

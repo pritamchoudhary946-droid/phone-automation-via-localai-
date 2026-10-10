@@ -82,6 +82,43 @@ class Phase6ReliabilityTest {
         assertTrue(HeuristicPlanner().parseMessagingIntent("Open YouTube and search for lo-fi beats") == null)
     }
 
+    // --- 6.22: workflow templates (call, settings toggle) -----------------------
+
+    @Test
+    fun callCommandBuildsTheGenericCallWorkflow() {
+        val planner = HeuristicPlanner()
+        assertEquals("Prateek", planner.parseCallIntent("Call Prateek"))
+        assertEquals("Prateek", planner.parseCallIntent("Prateek ko call karo"))
+
+        val subs = planner.decomposeGoalIntoSubGoals("Call Prateek")
+        val kinds = subs.map { it.kind }
+        assertTrue("must open the dialer: $kinds", SubGoalKind.LAUNCH_APP in kinds)
+        assertTrue("must find the contact: $kinds", SubGoalKind.TYPE_CONTACT in kinds)
+        assertTrue("must open the contact: $kinds", SubGoalKind.OPEN_ITEM in kinds)
+        assertEquals("phone", subs.first { it.kind == SubGoalKind.LAUNCH_APP }.target)
+    }
+
+    @Test
+    fun settingsToggleCommandUsesQuickSettingsThenToggle() {
+        val planner = HeuristicPlanner()
+        assertEquals("wifi", planner.parseSettingsToggleIntent("Turn off WiFi"))
+        assertEquals("bluetooth", planner.parseSettingsToggleIntent("bluetooth band karo"))
+
+        val subs = planner.decomposeGoalIntoSubGoals("Turn off WiFi")
+        assertEquals("__open_quick_settings__", subs.first().target)
+        assertTrue("must toggle wifi", subs.any { it.kind == SubGoalKind.TOGGLE_SETTING && it.target == "wifi" })
+        // The fallback plan maps the marker to the real native action.
+        val plan = planner.toFallbackPlan("Turn off WiFi")
+        assertTrue("quick settings action in plan", plan.steps.first().action is AgentAction.OpenQuickSettings)
+    }
+
+    @Test
+    fun plainCommandIsNotMistakenForCallOrToggle() {
+        val planner = HeuristicPlanner()
+        assertTrue(planner.parseCallIntent("Open YouTube") == null)
+        assertTrue(planner.parseSettingsToggleIntent("Open Settings") == null)
+    }
+
     // --- 6.18: robust JSON output + repair -------------------------------------
 
     @Test
