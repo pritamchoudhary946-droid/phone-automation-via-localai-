@@ -54,6 +54,7 @@ object PlannerPromptBuilder {
         - read_text:   {}   (reads the visible on-screen text back to you)
         - read_page_content: {}   (extracts the visible page/article text)
         - wait_for_text: {"targetText":"<label>","timeoutMs":<int>}
+        - read_notifications: {}   (reads recent on-device notifications)
         - web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}
         - open_notifications: {}   open_quick_settings: {}   open_recents: {}
         - navigate_back: {}   navigate_home: {}   wait: {"durationMs":<int>}
@@ -78,6 +79,10 @@ object PlannerPromptBuilder {
         if (request.memorySummary.isNotBlank()) {
             appendLine("Known about this user / past tasks (may be incomplete):")
             appendLine(sanitizeUntrusted(request.memorySummary).take(MAX_MEMORY_CHARS))
+        }
+        if (request.retrievedContext.isNotBlank()) {
+            appendLine("Relevant notes from this user's own data (may be incomplete):")
+            appendLine(sanitizeUntrusted(request.retrievedContext).take(MAX_RETRIEVED_CHARS))
         }
         appendLine("Current screen (bounded summary, may be truncated):")
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
@@ -148,4 +153,5 @@ object PlannerPromptBuilder {
 
     const val MAX_SCREEN_CHARS = 1200
     const val MAX_MEMORY_CHARS = 600
+    const val MAX_RETRIEVED_CHARS = 400
 }

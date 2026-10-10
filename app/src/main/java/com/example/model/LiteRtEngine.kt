@@ -95,7 +95,8 @@ class LiteRtEngine(
         historySummary: String,
         lastActionVerification: String?,
         remainingStepBudget: Int,
-        memorySummary: String = ""
+        memorySummary: String = "",
+        retrievedContext: String = ""
     ): PlanOutcome {
         val request = PlanningRequest(
             userCommand = goal,
@@ -106,7 +107,8 @@ class LiteRtEngine(
             lastActionResult = lastActionVerification,
             remainingStepBudget = remainingStepBudget,
             availableActions = planner.availableActions(),
-            memorySummary = memorySummary
+            memorySummary = memorySummary,
+            retrievedContext = retrievedContext
         )
         return planner.plan(request)
     }

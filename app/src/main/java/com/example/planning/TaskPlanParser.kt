@@ -187,6 +187,7 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 targetText = params.optString("targetText", ""),
                 timeoutMs = params.optLong("timeoutMs", 5_000L)
             )
+            ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
             ToolRegistry.TOOL_OPEN_QUICK_SETTINGS -> AgentAction.OpenQuickSettings
             ToolRegistry.TOOL_OPEN_RECENTS -> AgentAction.PressRecents

@@ -4,16 +4,25 @@ import android.content.Context
 import android.util.Log
 import com.example.data.local.AgentDatabase
 import com.example.data.local.CheckpointEntity
+import com.example.data.local.SavedSkillEntity
 import com.example.data.local.TaskEntity
 import com.example.data.local.TaskOutcomeEntity
 import com.example.data.local.TaskStepEntity
 import com.example.data.local.UserMemoryEntity
+import com.example.memory.rag.Retriever
 import com.example.model.LiteRtEngine
+import com.example.perception.OcrReader
+import com.example.perception.ScreenshotDiffer
+import com.example.perception.ScreenAwareness
+import com.example.perception.UnavailableOcrReader
+import com.example.perception.UnavailableVisionGrounder
+import com.example.perception.VisionGrounder
 import com.example.planning.PlanOutcome
 import com.example.planning.PlanSource
 import com.example.planning.PlanStep
 import com.example.planning.PlanStepStatus
 import com.example.planning.PlannerPromptBuilder
+import com.example.planning.TaskPlanSerializer
 import com.example.planning.PostconditionVerifier
 import com.example.planning.TaskPlan
 import com.example.planning.VerificationMethod
@@ -64,7 +73,13 @@ class TaskOrchestrator(
     private val deviceAutomation: DeviceAutomation = AndroidDeviceAutomation(appDirectory),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     toolRegistry: ToolRegistry = ToolRegistry(),
-    private val webGateway: com.example.cloudflare.CloudflareGateway? = null
+    private val webGateway: com.example.cloudflare.CloudflareGateway? = null,
+    private val screenAwareness: ScreenAwareness? = null,
+    private val visionGrounder: VisionGrounder = UnavailableVisionGrounder,
+    private val ocrReader: OcrReader = UnavailableOcrReader,
+    private val retriever: Retriever? = null,
+    private val completionNotifier: com.example.notifications.CompletionNotifier? = null,
+    private val autoSaveSkills: Boolean = false
 ) {
     private val TAG = "TaskOrchestrator"
     private val database = AgentDatabase.getInstance(context)
@@ -116,6 +131,9 @@ class TaskOrchestrator(
     /** Bounded memory digest injected into planning prompts; loaded once per task. */
     private var memoryDigest: String = ""
 
+    /** Bounded RAG context from the user's own notes/history; loaded once per task. */
+    private var retrievedContext: String = ""
+
     /** An action the user just approved: skip re-prompting when the loop reconsiders it. */
     private var userConfirmedAction: AgentAction? = null
 
@@ -146,9 +164,20 @@ class TaskOrchestrator(
         }
     }
 
+    /**
+     * Replays a saved skill by name: resumes its persisted plan through the normal
+     * verified loop. A skill is only ever replayed if it carries steps (plan 4.13).
+     */
+    fun runSkill(skill: SavedSkillEntity) {
+        if (skill.planJson.isBlank()) return
+        scope.launch { runCatching { database.skillDao().markSkillRun(skill.name, System.currentTimeMillis()) } }
+        startTask(skill.goal)
+    }
+
     private suspend fun runAgentLoop(task: TaskEntity, resumePlan: TaskPlan? = null) {
         executionJob = scope.launch {
             memoryDigest = loadMemoryDigest(task.userGoal)
+            retrievedContext = loadRetrievedContext(task.userGoal)
             val maxSteps = task.maxSteps
             var lastActionResult: String? = null
             var consecutiveFailures = 0
@@ -199,7 +228,8 @@ class TaskOrchestrator(
                             historySummary = "",
                             lastActionVerification = null,
                             remainingStepBudget = maxSteps,
-                            memorySummary = memoryDigest
+                            memorySummary = memoryDigest,
+                            retrievedContext = retrievedContext
                         )
                     }
 
@@ -722,7 +752,8 @@ class TaskOrchestrator(
                 historySummary = historySummary(),
                 lastActionVerification = failureDetail,
                 remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1),
-                memorySummary = memoryDigest
+                memorySummary = memoryDigest,
+                retrievedContext = retrievedContext
             )
         }
         val newPlan = when (outcome) {
@@ -756,7 +787,7 @@ class TaskOrchestrator(
         return TaskPlan(goal = current.goal, steps = carried + fresh, fromModel = replanned.fromModel)
     }
 
-    private fun verifyAction(
+    private suspend fun verifyAction(
         action: AgentAction,
         step: PlanStep,
         pre: UiObservation,
@@ -804,6 +835,12 @@ class TaskOrchestrator(
             screenChanged = screenChanged,
             screenText = post.summary
         )
+        // Vision-diff fallback (plan 4.3): only when the fingerprint missed the change.
+        if (!verdict.satisfied && step.verification == VerificationMethod.SCREEN_CHANGED &&
+            visionDiff(pre, post)
+        ) {
+            return PostconditionVerdict(true, "${verdict.detail} (vision diff confirmed)")
+        }
         return PostconditionVerdict(verdict.satisfied, verdict.detail)
     }
 
@@ -838,6 +875,34 @@ class TaskOrchestrator(
         } catch (e: Exception) {
             Log.w(TAG, "Memory load failed: ${e.message}")
             ""
+        }
+    }
+
+    /** Bounded digest of the user's own notes/history relevant to [goal] (RAG). */
+    private suspend fun loadRetrievedContext(goal: String): String {
+        val r = retriever ?: return ""
+        return try {
+            r.retrieve(goal, Retriever.DEFAULT_LIMIT)
+                .joinToString("\n") { "- [${it.source}] ${it.content.take(180)}" }
+                .take(PlannerPromptBuilder.MAX_RETRIEVED_CHARS)
+        } catch (e: Exception) {
+            Log.w(TAG, "RAG load failed: ${e.message}")
+            ""
+        }
+    }
+
+    /**
+     * Vision-diff fallback evidence (plan 4.3), best-effort and bounded: only captured
+     * when a [ScreenAwareness] seam is wired, and only used to confirm a real change
+     * the accessibility fingerprint missed. Never throws into the loop.
+     */
+    private suspend fun visionDiff(before: UiObservation, after: UiObservation): Boolean {
+        val awareness = screenAwareness ?: return false
+        return try {
+            if (before.fingerprint != after.fingerprint) return false
+            ScreenshotDiffer.changed(awareness.captureScreenshot(), awareness.captureScreenshot())
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -895,6 +960,9 @@ class TaskOrchestrator(
         recordOutcome(task, "COMPLETED", summary, completedCount)
         taskDao.updateTask(task.copy(status = "COMPLETED", currentStep = completedCount, resultSummary = summary))
         _orchestratorState.value = OrchestratorState.Completed(task.id, summary)
+        notifyFinished("Task complete", summary)
+        // Only an optionally-enabled, clean run is auto-saved as a reusable skill (4.13).
+        maybeAutoSaveSkill(task, summary, completedCount)
         stopExecutionService()
     }
 
@@ -903,7 +971,35 @@ class TaskOrchestrator(
         recordOutcome(task, "FAILED", reason, step)
         taskDao.updateTask(task.copy(status = "FAILED", currentStep = step, resultSummary = reason))
         _orchestratorState.value = OrchestratorState.Failed(task.id, reason)
+        notifyFinished("Task failed", reason)
         stopExecutionService()
+    }
+
+    /** Best-effort completion notification; never blocks or fails the task outcome. */
+    private fun notifyFinished(title: String, summary: String) {
+        val notifier = completionNotifier ?: return
+        runCatching { notifier.notifyFinished(title, summary) }
+    }
+
+    /**
+     * Saves a clean, model-produced plan as a reusable skill when the user enabled
+     * auto-save. Only runs where the plan was genuinely from the model and every step
+     * completed, so a muddled run is never recorded as a "routine".
+     */
+    private suspend fun maybeAutoSaveSkill(task: TaskEntity, summary: String, completedCount: Int) {
+        if (!autoSaveSkills) return
+        val plan = _activePlan.value ?: return
+        if (!plan.fromModel || plan.steps.isEmpty()) return
+        if (plan.steps.any { it.status != PlanStepStatus.COMPLETED }) return
+        runCatching {
+            database.skillDao().upsertSkill(
+                SavedSkillEntity(
+                    name = task.userGoal.take(80),
+                    goal = task.userGoal,
+                    planJson = TaskPlanSerializer.toJson(plan)
+                )
+            )
+        }
     }
 
     private fun stopExecutionService() {

@@ -89,8 +89,36 @@ An action the native layer cannot execute must not appear in the catalogue
   (`USE_GPU_BACKEND`, Adreno with automatic CPU fallback) and
   `LiteRtLmRuntime.MAX_CONTEXT_TOKENS` (3072). `FixesRegressionTest` asserts the
   context value, so keep the test and constant in step.
-- Memory: `UserMemoryEntity`/`TaskOutcomeEntity` live in `AgentDatabase` v2
-  (`fallbackToDestructiveMigration`). `TaskOrchestrator.loadMemoryDigest(...)`
+- Memory: `UserMemoryEntity`/`TaskOutcomeEntity` live in `AgentDatabase` (now v3,
+  `fallbackToDestructiveMigration`). `TaskOrchestrator.loadMemoryDigest(...)`
   injects a bounded (untrusted-labelled) digest into the planning prompt, and
   `complete`/`fail` record an outcome. Keep the digest bounded
   (`PlannerPromptBuilder.MAX_MEMORY_CHARS`).
+
+## Jarvis Phase 4 access levels (do not regress)
+- Everything advanced is OFF by default and must stay that way:
+  - Wake word (`voice/OptInWakeWordDetector`) never listens unless BOTH the
+    user opt-in AND mic permission are present (`isEnabled()`/`isListening()`).
+  - Privileged ADB actions (`privileged/GatedPrivilegedBridge`) refuse every call
+    unless Shizuku is running AND opted in (`ShizukuGate.permit`); absent a real
+    executor they return false rather than pretending success.
+  - Scheduled automations (`automation/AutomationGate`) require BOTH the master
+    switch and the individual automation; intervals clamp to 15 minutes.
+  - `TaskOrchestrator.autoSaveSkills` defaults to false; only a fully-COMPLETED,
+    model-produced plan is auto-saved as a `SavedSkillEntity`.
+- Perception fallbacks must be honest no-ops when unwired:
+  `UnavailableVisionGrounder`/`UnavailableOcrReader` return null/"" and
+  `ScreenshotDiffer.changed(null, ...)` is false, so a missing screenshot never
+  fabricates a screen change. The vision-diff fallback in `verifyAction` only
+  upgrades a `SCREEN_CHANGED` verdict when a real screenshot diff confirms it.
+- Notifications: `notifications/AgentNotificationListenerService` feeds the
+  bounded `NotificationBus` (cap 20, most-recent-first); `read_notifications` is
+  an approved tool and reads only the bounded digest. `CompletionNotifier` posts
+  a result notification only when POST_NOTIFICATIONS is granted.
+- RAG (`memory/rag`): dependency-free token-overlap retrieval over the user's own
+  `knowledge_notes`; `retrievedContext` is bounded by
+  `PlannerPromptBuilder.MAX_RETRIEVED_CHARS` before it reaches the prompt.
+- Mentioning an action in the prompt requires it be executable and approved:
+  `read_notifications` follows the same rule as every other tool — catalogue,
+  `ToolRegistry` definition/validation, `DeviceAutomation.execute`, and
+  `TaskPlanParser.mapAction` must all know it.

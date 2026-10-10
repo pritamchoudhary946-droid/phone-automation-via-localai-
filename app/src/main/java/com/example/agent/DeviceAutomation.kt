@@ -3,6 +3,8 @@ package com.example.agent
 import com.example.accessibility.AgentAccessibilityService
 import com.example.accessibility.UiNode
 import com.example.accessibility.UiTreeSnapshot
+import com.example.notifications.NotificationBus
+import com.example.notifications.NotificationSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -84,7 +86,8 @@ interface DeviceAutomation {
 /** Real implementation backed by the existing [AgentAccessibilityService]. */
 class AndroidDeviceAutomation(
     private val appDirectory: AppDirectory,
-    private val serviceProvider: () -> AgentAccessibilityService? = { AgentAccessibilityService.instance }
+    private val serviceProvider: () -> AgentAccessibilityService? = { AgentAccessibilityService.instance },
+    private val notificationSource: NotificationSource = NotificationBus
 ) : DeviceAutomation {
 
     companion object {
@@ -278,6 +281,18 @@ class AndroidDeviceAutomation(
                     success = text.isNotBlank(),
                     method = "READ_PAGE_CONTENT",
                     message = if (text.isNotBlank()) "Extracted ${text.length} chars of page content" else "No page content found"
+                )
+            }
+            is AgentAction.ReadNotifications -> {
+                val items = notificationSource.recent(NotificationSource.DEFAULT_LIMIT)
+                ActionResult(
+                    success = items.isNotEmpty(),
+                    method = "READ_NOTIFICATIONS",
+                    message = if (items.isEmpty()) {
+                        "No recent notifications available (grant notification access to enable this)"
+                    } else {
+                        items.joinToString(" | ") { "${it.packageName}: ${it.title} — ${it.text}".take(120) }
+                    }
                 )
             }
             else -> ActionResult(false, "UNKNOWN", "Unsupported action for execution layer")

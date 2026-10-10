@@ -90,3 +90,51 @@ interface MemoryDao {
     @Query("DELETE FROM task_outcomes")
     suspend fun clearOutcomes()
 }
+
+@Dao
+interface SkillDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSkill(skill: SavedSkillEntity)
+
+    @Query("SELECT * FROM saved_skills ORDER BY createdAt DESC")
+    fun getAllSkills(): Flow<List<SavedSkillEntity>>
+
+    @Query("SELECT * FROM saved_skills WHERE name = :name LIMIT 1")
+    suspend fun getSkill(name: String): SavedSkillEntity?
+
+    @Query("UPDATE saved_skills SET runCount = runCount + 1, lastRunAt = :timestamp WHERE name = :name")
+    suspend fun markSkillRun(name: String, timestamp: Long)
+
+    @Query("DELETE FROM saved_skills WHERE name = :name")
+    suspend fun deleteSkill(name: String)
+}
+
+@Dao
+interface KnowledgeDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertNote(note: KnowledgeNoteEntity)
+
+    @Query("SELECT * FROM knowledge_notes ORDER BY createdAt DESC LIMIT :limit")
+    suspend fun getRecentNotes(limit: Int): List<KnowledgeNoteEntity>
+
+    @Query("SELECT * FROM knowledge_notes")
+    suspend fun getAllNotes(): List<KnowledgeNoteEntity>
+
+    @Query("DELETE FROM knowledge_notes")
+    suspend fun clearNotes()
+}
+
+@Dao
+interface AutomationDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAutomation(automation: AutomationEntity)
+
+    @Query("SELECT * FROM automations ORDER BY createdAt DESC")
+    fun getAllAutomations(): Flow<List<AutomationEntity>>
+
+    @Query("SELECT * FROM automations WHERE enabled = 1")
+    suspend fun getEnabledAutomations(): List<AutomationEntity>
+
+    @Query("DELETE FROM automations WHERE id = :id")
+    suspend fun deleteAutomation(id: Long)
+}

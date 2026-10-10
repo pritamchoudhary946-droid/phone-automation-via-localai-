@@ -11,9 +11,12 @@ import androidx.room.RoomDatabase
         TaskStepEntity::class,
         CheckpointEntity::class,
         UserMemoryEntity::class,
-        TaskOutcomeEntity::class
+        TaskOutcomeEntity::class,
+        SavedSkillEntity::class,
+        KnowledgeNoteEntity::class,
+        AutomationEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AgentDatabase : RoomDatabase() {
@@ -21,6 +24,9 @@ abstract class AgentDatabase : RoomDatabase() {
     abstract fun taskStepDao(): TaskStepDao
     abstract fun checkpointDao(): CheckpointDao
     abstract fun memoryDao(): MemoryDao
+    abstract fun skillDao(): SkillDao
+    abstract fun knowledgeDao(): KnowledgeDao
+    abstract fun automationDao(): AutomationDao
 
     companion object {
         @Volatile
