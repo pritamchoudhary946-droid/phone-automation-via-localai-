@@ -240,3 +240,30 @@ An action the native layer cannot execute must not appear in the catalogue
 - `AgentDashboardScreen` is large; keep new wiring behind a `testTag` so it stays
   reachable to the UI tests.
 
+## Phase 9 (proactive / hands-free / self-healing) - seams
+- Every Phase 9 capability is OPT-IN and OFF by default: 9.1 proactive awareness,
+  9.2 location triggers, 9.7 hands-free, 9.8 briefing, 9.9 triage. Never enable a
+  capability implicitly. `CapabilitySettings` is the single home for the flags.
+- 9.1 `ProactiveEngine.Runner` is started once from `OmniAgentApplication`; it only
+  *offers* (notification/TTS) and is gated by the toggle AND `BatteryGuard` (9.14).
+- 9.7 `VoiceLoop`/`VoiceLoopController` drive wake -> listen -> confirm -> execute ->
+  spoken result with a hard stop phrase; wired in `AgentDashboardScreen` behind
+  opt-in + mic permission. `OptInWakeWordDetector` must stay the only arm path.
+- 9.8 `DailyBriefing`/`BriefingScheduler` are synced both on app startup and when
+  the Settings toggle flips; keep those two call sites in step.
+- 9.11 `ElementRanker` ranks the on-screen tree for the step-decision prompt; always
+  keep the `ifBlank { observation.summary }` fallback so ranking never regresses
+  behavior.
+- Notification ids are deliberately distinct (`CompletionNotifier`): 4210 task
+  result, 4211 briefing, 4212 suggestion. Do not collapse them.
+
+## Build gotcha (found in the Phase 9 lint gate)
+- Android Lint (`lintAnalyzeDebug`) can CRASH with
+  `Bad parent: class org.jetbrains.kotlin.psi.KtDeclarationModifierList` (an
+  `ExperimentalDetector`/`LightClassUtil` bug) on a declaration annotated
+  `@Volatile`. Prefer a plain `var`/`@Synchronized` here; if it recurs, the
+  suggested escape hatch is `lint { disable("UnsafeOptInUsageError",
+  "UnsafeOptInUsageWarning") }` - but first just drop the offending modifier.
+- Always run the full gate locally before pushing:
+  `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug`.
+
