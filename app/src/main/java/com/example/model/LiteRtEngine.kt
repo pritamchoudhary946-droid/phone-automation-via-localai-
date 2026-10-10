@@ -69,6 +69,9 @@ class LiteRtEngine(
         planner.fallbackExplicit = enabled
     }
 
+    /** True only when the user explicitly enabled degraded heuristic planning. */
+    fun isFallbackExplicit(): Boolean = planner.fallbackExplicit
+
     fun engineState(): EngineState = inferenceEngine.state.value
 
     /** Observable engine lifecycle state for the UI. */
