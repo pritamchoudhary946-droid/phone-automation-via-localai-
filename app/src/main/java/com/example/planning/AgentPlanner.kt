@@ -90,14 +90,22 @@ class AgentPlanner(
         return PlanOutcome.Planned(fallback, PlanSource.BASIC_FALLBACK)
     }
 
-    /** Asks the model to choose the single next action given the fresh observation. */
-    suspend fun decideNextAction(request: StepDecisionRequest): StepDecision {
+    /**
+     * Asks the model to choose the single next action given the fresh observation.
+     * When [screenshotBytes] is provided (a tree-miss/blind screen, plan 7.4) the
+     * vision-capable model receives the image alongside the text prompt.
+     */
+    suspend fun decideNextAction(request: StepDecisionRequest, screenshotBytes: ByteArray? = null): StepDecision {
         if (!inferenceEngine.isReady()) {
             return StepDecision.None("Gemma engine not ready")
         }
         val prompt = PlannerPromptBuilder.buildStepDecisionPrompt(request)
         val raw = try {
-            inferenceEngine.generate(prompt, PlannerPromptBuilder.SYSTEM_INSTRUCTION, maxOutputTokens = 256)
+            if (screenshotBytes != null && screenshotBytes.isNotEmpty()) {
+                inferenceEngine.generateWithImage(prompt, PlannerPromptBuilder.SYSTEM_INSTRUCTION, 256, screenshotBytes)
+            } else {
+                inferenceEngine.generate(prompt, PlannerPromptBuilder.SYSTEM_INSTRUCTION, maxOutputTokens = 256)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Step decision generate threw: ${e.message}")
             null

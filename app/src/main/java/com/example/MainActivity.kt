@@ -25,6 +25,7 @@ enum class AgentTab(val title: String, val icon: ImageVector) {
     AGENT("Agent", Icons.Default.SmartToy),
     MONITOR("Live Monitor", Icons.Default.Visibility),
     SETUP("Setup & Model", Icons.Default.Download),
+    SETTINGS("Capabilities", Icons.Default.Tune),
     HISTORY("History", Icons.Default.History)
 }
 
@@ -96,6 +97,9 @@ class MainActivity : ComponentActivity() {
                                     modelManager = app.modelManager,
                                     onSetupComplete = { selectedTab = AgentTab.AGENT }
                                 )
+                            }
+                            AgentTab.SETTINGS -> {
+                                com.example.ui.SettingsScreen()
                             }
                             AgentTab.HISTORY -> {
                                 TaskHistoryScreen(

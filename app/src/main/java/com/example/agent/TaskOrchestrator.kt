@@ -23,6 +23,7 @@ import com.example.planning.DisabledCloudPlannerProvider
 import com.example.planning.EpisodeDeriver
 import com.example.planning.ExplorationRequest
 import com.example.planning.PlanOutcome
+import com.example.planning.PlanSelfReview
 import com.example.planning.PlanSource
 import com.example.planning.PlanStep
 import com.example.planning.PlanStepStatus
@@ -98,7 +99,8 @@ class TaskOrchestrator(
     private val completionNotifier: com.example.notifications.CompletionNotifier? = null,
     private val autoSaveSkills: Boolean = false,
     private val cloudPlannerProvider: CloudPlannerProvider = DisabledCloudPlannerProvider,
-    private val nanoSummarizer: com.example.model.NanoSummarizer = com.example.model.UnavailableNanoSummarizer
+    private val nanoSummarizer: com.example.model.NanoSummarizer = com.example.model.UnavailableNanoSummarizer,
+    private val speechOutput: com.example.voice.SpeechOutput? = null
 ) {
     private val TAG = "TaskOrchestrator"
     private val database = AgentDatabase.getInstance(context)
@@ -415,6 +417,10 @@ class TaskOrchestrator(
 
                     val decision = if (fastPath is FastPathDecision.ModelReason) {
                         Log.i(TAG, "[MODEL_STEP] ${fastPath.reason}")
+                        // 7.4: when the a11y tree is blind (canvas/WebView/game), give the
+                        // vision-capable model the screenshot alongside the text prompt.
+                        val screenshot = if (observation.nodes.size < 3) captureScreenshotBytes() else null
+                        if (screenshot != null) Log.i(TAG, "[MODEL_STEP] tree-miss: sending screenshot to model")
                         withTimeoutOrNull(STEP_DECISION_TIMEOUT_MS) {
                             liteRtEngine.decideNextAction(
                                 goal = task.userGoal,
@@ -423,7 +429,8 @@ class TaskOrchestrator(
                                 foregroundPackage = observation.packageName,
                                 historySummary = historySummary(),
                                 lastActionVerification = lastActionResult,
-                                remainingStepBudget = maxSteps - completedCount
+                                remainingStepBudget = maxSteps - completedCount,
+                                screenshotBytes = screenshot
                             )
                         }
                     } else {
@@ -1036,17 +1043,32 @@ class TaskOrchestrator(
         )
         taskStepDao.insertStep(entity)
         _currentSteps.value = _currentSteps.value + entity
+        // 7.10 learn-from-demonstration: capture the step while the user is "showing" a
+        // routine, so it can later be saved as a re-runnable skill.
+        if (_watching.value) watchedTurns.add(reasoning to action)
     }
 
     private suspend fun complete(task: TaskEntity, summary: String, completedCount: Int) {
         Log.i(TAG, "[COMPLETE] $summary")
-        recordOutcome(task, "COMPLETED", summary, completedCount)
+        // 7.10: self-critique of the finished run, appended to the summary so the user
+        // (and the next planning prompt via memory) sees what the run actually did.
+        val reviewLine = PlanSelfReview.toSummaryLine(
+            PlanSelfReview.review(
+                stepCount = _activePlan.value?.size ?: completedCount,
+                completed = completedCount,
+                retried = _activePlan.value?.steps?.count { it.attempts > 1 } ?: 0,
+                goalSatisfied = true
+            )
+        )
+        val finalSummary = "$summary $reviewLine"
+        narrate(task.userGoal, outcome = "Task complete", detail = summary)
+        recordOutcome(task, "COMPLETED", finalSummary, completedCount)
         recordEpisode(task, "COMPLETED")
-        taskDao.updateTask(task.copy(status = "COMPLETED", currentStep = completedCount, resultSummary = summary))
-        _orchestratorState.value = OrchestratorState.Completed(task.id, summary)
-        notifyFinished("Task complete", summary)
+        taskDao.updateTask(task.copy(status = "COMPLETED", currentStep = completedCount, resultSummary = finalSummary))
+        _orchestratorState.value = OrchestratorState.Completed(task.id, finalSummary)
+        notifyFinished("Task complete", finalSummary)
         // Only an optionally-enabled, clean run is auto-saved as a reusable skill (4.13).
-        maybeAutoSaveSkill(task, summary, completedCount)
+        maybeAutoSaveSkill(task, finalSummary, completedCount)
         stopExecutionService()
     }
 
@@ -1058,6 +1080,7 @@ class TaskOrchestrator(
         blockedOn: String? = null
     ) {
         Log.e(TAG, "[FAIL] $reason")
+        narrate(task.userGoal, outcome = "Task failed", detail = reason)
         recordOutcome(task, "FAILED", reason, step)
         recordEpisode(task, "FAILED")
         taskDao.updateTask(task.copy(status = "FAILED", currentStep = step, resultSummary = reason))
@@ -1088,6 +1111,25 @@ class TaskOrchestrator(
     private fun notifyFinished(title: String, summary: String) {
         val notifier = completionNotifier ?: return
         runCatching { notifier.notifyFinished(title, summary) }
+    }
+
+    /**
+     * 7.17: speaks a short status line in the user's language (Hindi/Roman-Hindi/English)
+     * when speech output is enabled. Best-effort and bounded; never blocks the task.
+     */
+    private fun narrate(goal: String, outcome: String, detail: String) {
+        val speech = speechOutput ?: return
+        if (!speech.isReady()) return
+        val hindi = com.example.voice.LanguageDetector.prefersHindi(goal)
+        val outcomeText = if (hindi) hindiOutcome(outcome) else outcome
+        val line = if (hindi) "$outcomeText: ${detail.take(120)}" else "$outcome: ${detail.take(160)}"
+        runCatching { speech.speak(line, if (hindi) "hi" else "") }
+    }
+
+    private fun hindiOutcome(outcome: String): String = when {
+        outcome.contains("complete", ignoreCase = true) -> "Kaam poora hua"
+        outcome.contains("fail", ignoreCase = true) -> "Kaam poora nahi hua"
+        else -> outcome
     }
 
     /**
@@ -1177,6 +1219,64 @@ class TaskOrchestrator(
             // instead of re-planning and replaying already-executed actions.
             runAgentLoop(task, resumePlan = _activePlan.value)
         }
+    }
+
+    /**
+     * 7.4: captures the current screen as JPEG bytes for the multimodal model, bounded
+     * so a full-resolution screenshot cannot blow the prompt budget. Returns null when
+     * screenshotting is unavailable (never fabricates an image).
+     */
+    private suspend fun captureScreenshotBytes(): ByteArray? {
+        val bitmap = runCatching { screenAwareness?.captureScreenshot() }.getOrNull() ?: return null
+        return runCatching {
+            java.io.ByteArrayOutputStream().use { out ->
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 60, out)
+                out.toByteArray()
+            }
+        }.getOrNull()
+    }
+
+    // --- 7.10 learn-from-demonstration -----------------------------------------
+
+    private val _watching = MutableStateFlow(false)
+    /** True while the agent is capturing a demonstrated routine. */
+    val watching: StateFlow<Boolean> = _watching.asStateFlow()
+    private val watchedTurns = mutableListOf<Pair<String, AgentAction>>()
+
+    /** Starts capturing a demonstrated run (plan 4.17). */
+    fun startWatching() {
+        watchedTurns.clear()
+        _watching.value = true
+    }
+
+    fun stopWatching() {
+        _watching.value = false
+    }
+
+    /**
+     * 7.10: converts the captured demonstration into a saved, re-runnable skill. Only
+     * the actions the demonstrated run actually performed are stored; returns the skill
+     * name on success, or null when nothing was demonstrated.
+     */
+    suspend fun saveWatchedSkill(name: String, goal: String): String? {
+        if (watchedTurns.isEmpty()) return null
+        val steps = watchedTurns.mapIndexed { index, (reasoning, action) ->
+            PlanStep(
+                id = index + 1,
+                sequence = index + 1,
+                description = reasoning.ifBlank { action.getDisplayName() },
+                action = action,
+                rawActionName = action.javaClass.simpleName,
+                expectedPostcondition = "",
+                verification = VerificationMethod.NONE
+            )
+        }
+        val plan = TaskPlan(goal = goal, steps = steps, fromModel = true)
+        val json = TaskPlanSerializer.toJson(plan)
+        runCatching { database.skillDao().upsertSkill(SavedSkillEntity(name = name, goal = goal, planJson = json)) }
+            .onFailure { return null }
+        stopWatching()
+        return name
     }
 
     fun cancelCurrentTask() {

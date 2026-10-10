@@ -67,6 +67,11 @@ fun AgentDashboardScreen(
     var isDotEnabled by remember { mutableStateOf(FloatingAgentDotService.isRunning) }
     var isListeningVoice by remember { mutableStateOf(false) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    // 7.5: hands-free listening state, refreshed from the live Settings toggle.
+    var handsFreeEnabled by remember { mutableStateOf(false) }
+    val appSettings = remember(context) {
+        (context.applicationContext as? com.example.OmniAgentApplication)?.settings
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -109,6 +114,8 @@ fun AgentDashboardScreen(
                         goalInput = matches[0]
                         Toast.makeText(context, "Heard: \"${matches[0]}\"", Toast.LENGTH_SHORT).show()
                     }
+                    // 7.5 hands-free: re-arm so the next utterance is caught without a tap.
+                    if (handsFreeEnabled) startListening()
                 }
                 override fun onError(error: Int) {
                     isListeningVoice = false
@@ -118,6 +125,12 @@ fun AgentDashboardScreen(
                         else -> "Speech recognition error: $error"
                     }
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    // Ignore transient no-match/speech timeouts while hands-free.
+                    if (handsFreeEnabled && error != SpeechRecognizer.ERROR_NO_MATCH &&
+                        error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                    ) {
+                        startListening()
+                    }
                 }
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
@@ -138,6 +151,11 @@ fun AgentDashboardScreen(
         while (true) {
             resourceStats = liteRtEngine.getResourceStats()
             isDotEnabled = FloatingAgentDotService.isRunning
+            val handsFreeNow = appSettings?.handsFreeEnabled == true
+            // Start listening once when hands-free is switched on; the listeners
+            // re-arm themselves after each utterance.
+            if (handsFreeNow && !handsFreeEnabled) startListening()
+            handsFreeEnabled = handsFreeNow
             kotlinx.coroutines.delay(2000)
         }
     }

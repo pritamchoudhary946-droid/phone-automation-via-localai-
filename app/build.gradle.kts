@@ -127,6 +127,8 @@ dependencies {
   implementation(libs.litertlm.android)
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
+  implementation(libs.mlkit.text.recognition)
+  implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)

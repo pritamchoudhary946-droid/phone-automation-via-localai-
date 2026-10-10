@@ -16,6 +16,8 @@ import com.example.model.LiteRtEngine
 import com.example.model.LiteRtLmRuntime
 import com.example.model.LiteRtModelManager
 import com.example.planning.AgentPlanner
+import com.example.planning.HttpCloudPlannerProvider
+import com.example.settings.CapabilitySettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +41,22 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         private set
     lateinit var cloudflareGateway: CloudflareGateway
         private set
+    lateinit var settings: CapabilitySettings
+        private set
+    /**
+     * 7.7: ADB-level actions, refused unless the user opted in AND Shizuku is running.
+     * Reached reflectively; a missing Shizuku runtime degrades to honest refusal.
+     */
+    val privilegedActions: com.example.privileged.PrivilegedActionBridge by lazy {
+        com.example.privileged.GatedPrivilegedBridge(
+            optIn = { settings.shizukuEnabled },
+            shizukuRunning = { com.example.privileged.ShizukuRuntime.isBinderRunning() },
+            exec = com.example.privileged.ShizukuRuntime.commandRunner()
+        )
+    }
+    /** On-device speech output (plan 7.5/7.17); gated live by the Settings toggle. */
+    lateinit var speechOutput: com.example.voice.SpeechOutput
+        private set
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -58,7 +76,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         instance = this
 
         database = AgentDatabase.getInstance(this)
+        settings = CapabilitySettings(this)
         modelManager = LiteRtModelManager(this)
+
+        // 7.1: verify the pinned artifact is reachable/consistent at startup (bounded,
+        // non-blocking) so a stale hash that would block planning is logged loudly.
+        appScope.launch { runCatching { modelManager.logRemoteArtifactCheck() } }
 
         // Exactly one heavy model instance: the engine owns the single runtime.
         inferenceEngine = GemmaInferenceEngine(
@@ -72,19 +95,45 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
 
         appDirectory = AppDirectory(this)
         cloudflareGateway = CloudflareGateway()
+
+        // 7.2/7.3: real on-device OCR + OCR-backed vision grounding, wired into the
+        // automation layer so a tree-miss surface (canvas/WebView) can still be read and
+        // tapped. 7.5/7.17: TTS output gated live by the Settings toggle.
+        val ocrReader = com.example.perception.MlKitOcrReader()
+        val visionGrounder = com.example.perception.OcrVisionGrounder(ocrReader)
+        speechOutput = com.example.voice.AndroidTextToSpeechOutput(this) { settings.voiceOutputEnabled }
+        planner.fallbackExplicit = settings.basicFallbackExplicit
+
         // The gateway is exposed to the loop as an explicit web tool (web_search /
         // read_url); the on-device model remains the primary planner.
         orchestrator = TaskOrchestrator(
             context = this,
             liteRtEngine = liteRtEngine,
             appDirectory = appDirectory,
+            deviceAutomation = com.example.agent.AndroidDeviceAutomation(
+                appDirectory,
+                ocrReader = ocrReader,
+                visionGrounder = visionGrounder
+            ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
+            visionGrounder = visionGrounder,
+            ocrReader = ocrReader,
             retriever = com.example.memory.rag.TokenOverlapRetriever(database.knowledgeDao()),
             completionNotifier = com.example.notifications.CompletionNotifier(this),
             // A clean, fully-verified run is saved as a re-runnable local skill.
-            autoSaveSkills = true
+            autoSaveSkills = true,
+            cloudPlannerProvider = HttpCloudPlannerProvider(this),
+            nanoSummarizer = com.example.model.EngineNanoSummarizer(
+                generate = { prompt, system, max -> inferenceEngine.generate(prompt, system, max) },
+                ready = { inferenceEngine.isReady() }
+            ),
+            speechOutput = speechOutput
         )
+
+        // 7.8: re-arm (or cancel) any persisted automations according to the current
+        // master switch, so a previously scheduled job cannot outlive the user's choice.
+        appScope.launch { syncAutomations() }
 
         createNotificationChannels()
     }
@@ -117,6 +166,36 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
     }
 
     fun shutdownEngine() = inferenceEngine.shutdown()
+
+    /**
+     * Re-arms or cancels all scheduled automations to match the persisted list and the
+     * master switch (plan 7.8). Safe to call whenever the toggle or the automation list
+     * changes.
+     */
+    suspend fun syncAutomations() {
+        try {
+            if (!settings.automationsEnabled) {
+                com.example.automation.AutomationScheduler.cancelAll(this)
+                return
+            }
+            val automations = database.automationDao().getEnabledAutomations()
+            automations.forEach { com.example.automation.AutomationScheduler.schedule(this, it) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Automation sync failed: ${e.message}")
+        }
+    }
+
+    /** Applies the voice-output toggle to the live speech engine (plan 7.15). */
+    fun applyVoiceOutputSetting(enabled: Boolean) {
+        settings.voiceOutputEnabled = enabled
+        if (!enabled) runCatching { speechOutput.shutdown() }
+    }
+
+    /** Applies the basic-fallback toggle to the live planner (plan 7.15). */
+    fun applyBasicFallbackSetting(enabled: Boolean) {
+        settings.basicFallbackExplicit = enabled
+        planner.fallbackExplicit = enabled
+    }
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)

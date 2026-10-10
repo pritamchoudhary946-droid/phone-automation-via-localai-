@@ -24,6 +24,19 @@ interface LlmRuntime : AutoCloseable {
      */
     suspend fun generate(prompt: String, systemInstruction: String?, maxOutputTokens: Int): String
 
+    /**
+     * Multimodal generation (plan 7.4): sends [imageBytes] (e.g. a PNG/JPEG screenshot)
+     * alongside [prompt] so the vision-capable model can ground a target the
+     * accessibility tree cannot represent. Default delegates to the text path so
+     * text-only runtimes stay unchanged and never fabricate an image-aware decision.
+     */
+    suspend fun generateWithImage(
+        prompt: String,
+        systemInstruction: String?,
+        maxOutputTokens: Int,
+        imageBytes: ByteArray
+    ): String = generate(prompt, systemInstruction, maxOutputTokens)
+
     /** Performs a tiny real generation to prove the engine can serve requests end to end. */
     suspend fun smokeTest(): Boolean
 

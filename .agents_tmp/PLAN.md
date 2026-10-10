@@ -6,13 +6,17 @@ screen awareness, open-ended multi-step task execution across many apps, and
 memory of the user and past tasks.
 
 Scope for this work: Phases 0, 1, 2, 3, 4 (all items 4.1 - 4.17), Phase 5
-(Autonomy & Self-Healing, items 5.1 - 5.10) AND Phase 6 (Reasoning & Reliability
-Rescue, items 6.1 - 6.24) - Phase 6 is now the top priority because real reported
-failures ("open WhatsApp, message Prateek" -> app opens then scrolls forever;
-"search for X" -> text not verified in the field; unclear whether the local AI is
-even used) trace to concrete defects in the current code, listed in section 4
-under "Observed defects". Earlier phases are partly implemented already; Phase 6
-fixes what is actually broken before the rest of the roadmap is polished.
+(Autonomy & Self-Healing, items 5.1 - 5.10), Phase 6 (Reasoning & Reliability
+Rescue, items 6.1 - 6.24) AND Phase 7 (Completion & Hardening, items 7.1 - 7.17).
+Phase 6 (reasoning/reliability rescue) is landed; Phase 7 is now the top priority
+because the code audit shows several Phase 4/5 features are interfaces with
+"Unavailable"/disabled defaults (vision, OCR, voice input, Shizuku, cloud,
+automations), and the pinned model artifact needs verifying before anything else
+can be trusted. Real reported failures ("open WhatsApp, message Prateek" -> app
+opens then scrolls forever; "search for X" -> text not verified in the field;
+unclear whether the local AI is even used) trace to concrete defects, listed in
+section 4 under "Observed defects". Phase 6 fixed those; Phase 7 closes the rest
+of the gap.
 
 Confirmed decisions (locked):
 - Model-not-loaded behavior: BLOCK. The app requires a healthy local model
@@ -58,6 +62,14 @@ Full scope at a glance (everything in this plan):
   workflow templates, one shared engine, stronger vision fallback, event-driven
   re-observation, a visible model-use trace, a model-fit guard, and removal of
   the dead Web Skills surface.
+- Phase 7 (TOP PRIORITY) - Completion & hardening (7.1-7.17): verify/fix the
+  pinned model artifact; make the remaining seams REAL - vision grounding, OCR,
+  multimodal E2B image input, voice input/hands-free, opt-in cloud fallback,
+  Shizuku, WorkManager automations, model-fit guard; finish
+  self-critique/learn-from-demonstration; improve web-search quality; add one
+  opt-in settings surface, on-device instrumentation tests + an in-app self-test,
+  Hindi/Roman-Hindi end-to-end, and reliability hardening from real device runs.
+  All Phase 7 items are built together in one pass.
 
 Honest framing: a phone cannot be literal Jarvis. But the gap between today and
 that feel is a concrete, ordered set of capability upgrades, not one magic
@@ -106,7 +118,51 @@ search or cloud if needed"; GPU enabled):
 # 2. CONTEXT SUMMARY
 
 The app is an on-device Android automation agent: a local Gemma model plans, an
-`AccessibilityService` executes. No cloud inference. Key seams:
+`AccessibilityService` executes. No cloud inference.
+
+## 2.1 CODE AUDIT BASELINE (compulsory - every seam below MUST be fixed)
+
+This is the state of the code as it actually stands right now, read from the
+source tree (not assumed). Everything in the "Seams only" list is COMPULSORY to
+fix - each maps to a Phase 7 item and none may be left as a stub.
+
+A) Real and working today (do NOT rebuild these; only extend):
+- Accessibility automation + action vocabulary + `HybridStepExecutor` fast path.
+- Gemma E2B engine with GPU on + CPU fallback (single shared engine).
+- Planner + strict `TaskPlanParser` + `ToolRegistry` validation.
+- Recovery loop: `Reflector`, `ProgressBudget`, `StuckLoopDetector`,
+  `FailureClassifier`.
+- Notification listener (`AgentNotificationListenerService`).
+- On-device TTS (`AndroidTextToSpeechOutput`).
+- RAG retriever (`TokenOverlapRetriever` / `LocalRag`).
+- `CloudflareGateway` (DuckDuckGo instant answer + `read_url` + PDF head check).
+- Phase 6 fixes landed: 6.1, 6.2, 6.3/6.4, 6.6/6.10, 6.12, 6.16, 6.18, 6.19, 6.22.
+
+B) Seams only - interface exists but the capability is NOT actually there (THE
+REAL GAP). Each line is a must-fix, with the Phase 7 item that fixes it:
+- 4.1 vision grounding -> only `UnavailableVisionGrounder` (returns null)
+  -> fix in 7.2.
+- 4.2 OCR -> only `UnavailableOcrReader` (returns "") -> fix in 7.3.
+- 4.6 multimodal -> `LiteRtLmRuntime` sends text only, no image -> fix in 7.4.
+- 4.5 Shizuku -> bridge has `exec = null` (always refuses) -> fix in 7.7.
+- 4.7 Gemini Nano -> no AICore -> fix in 7.12.
+- 4.8 cloud fallback -> hard-disabled -> fix in 7.6.
+- 4.10/4.12 voice -> a flag exists but NO speech recognizer at all -> fix in 7.5.
+- 4.14 automations -> pure logic, nothing scheduled (no WorkManager) -> fix in 7.8.
+- 4.16/4.17 self-critique / learn-from-demo -> not wired -> fix in 7.10.
+- 6.23 model-fit guard -> not implemented -> fix in 7.9.
+
+C) High-risk item to verify while building (not a gate, part of the same pass):
+- `LiteRtModelManager` pins `gemma-4-E2B-it.litertlm` with a hardcoded byte length
+  and SHA-256. The repo/filename are confirmed real; the exact hash still must be
+  verified, because a wrong hash deletes the file and (with 6.1) the app blocks.
+  -> handled in 7.1.
+
+Note: the seam map, the "working today" list, and the full Phase 7 detail also
+appear in section 4 (Observed defects) and section 5. They are repeated here so
+the audit is visible up front and cannot be missed.
+
+## 2.2 KEY SEAMS
 
 - Execution boundary: `DeviceAutomation` / `AndroidDeviceAutomation`
   (`agent/DeviceAutomation.kt`). `observe()` dumps the a11y tree; `execute()`
@@ -294,6 +350,20 @@ Do together: [6.8] single shared LiteRtEngine/GemmaInferenceEngine,
 model-use trace (GEMMA vs BASIC per step). Reference: `OmniAgentApplication.kt`,
 `MainActivity.kt`, `ui/WebSkillsScreen.kt`, `ui/AgentLiveMonitorScreen.kt`,
 `ui/TaskHistoryScreen.kt`, `agent/TaskOrchestrator.kt`.
+
+Workstream 9 - Completion & hardening: make the remaining seams real (Phase 7).
+Do ALL items together in one pass: [7.1] verify/fix the pinned model artifact,
+[7.2]+[7.3]+[7.4] vision stack (grounding + OCR + multimodal image input),
+[7.5] real voice input/hands-free, [7.6]+[7.11] cloud fallback + web-search
+quality, [7.7]+[7.8] Shizuku + WorkManager automations, [7.9] model-fit guard,
+[7.10]+[7.12] finish self-critique/learn-from-demo + Gemini-Nano, [7.13]
+reliability hardening, [7.15] one opt-in settings surface, [7.16] on-device
+instrumentation tests + in-app self-test, and [7.17] Hindi/Roman-Hindi end-to-end.
+Every Phase 7 item is built in this single workstream - no sub-ordering to wait on.
+Reference: `model/LiteRtModelManager.kt`, `perception/VisionPerception.kt`,
+`model/LiteRtLmRuntime.kt`, `voice/*`, `planning/CloudPlannerProvider.kt`,
+`cloudflare/CloudflareGateway.kt`, `privileged/PrivilegedActions.kt`,
+`automation/AutomationGate.kt`, `ui/SetupScreen.kt`, `app/build.gradle.kts`.
 
 Integration gates (run after each workstream, not at the end):
 - `./gradlew :app:testDebugUnitTest` stays green (Robolectric, sdk 34).
@@ -785,12 +855,147 @@ loop), then 6.10 + 6.23 (remove Web Skills + model-fit guard). Phase 6 supersede
 and subsumes the Phase 0 foundations wherever they overlap; do Phase 6 before
 polishing Phases 4-5.
 
+Current gaps audit (post-Phase-6, from reading the code as it stands now). Phase 6
+is landed and real. But several Phase 4/5 items are SEAMS ONLY (an interface plus
+an "Unavailable"/disabled default) - the loop compiles and is honest, but the
+capability is not actually present. These are the "kami" still remaining.
+
+REAL and working today:
+- Accessibility automation, action vocabulary, `HybridStepExecutor` fast path.
+- LiteRT-LM Gemma E2B engine with GPU on + CPU fallback (single shared engine in
+  `OmniAgentApplication`).
+- Planner + strict `TaskPlanParser` + `ToolRegistry` validation + `RiskEvaluator`.
+- Orchestrator recovery loop: `Reflector`, `ProgressBudget`, `StuckLoopDetector`,
+  `FailureClassifier`, episodic lessons, checkpoints.
+- `AgentNotificationListenerService` (real; reads posted notifications on grant).
+- `AndroidTextToSpeechOutput` (real Android TTS).
+- `TokenOverlapRetriever` / `LocalRag` (real Room-backed retrieval).
+- `CloudflareGateway` (real: DuckDuckGo instant-answer search + `read_url` HTML
+  text extraction + PDF head check).
+- Phase 6 fixes: 6.1, 6.2, 6.3/6.4, 6.10, 6.12, 6.16, 6.18, 6.19, 6.22.
+
+SEAM ONLY (interface exists, real backend missing) - this is the remaining work:
+- 4.1 Vision grounding: only `UnavailableVisionGrounder` (returns null).
+- 4.2 OCR: only `UnavailableOcrReader` (returns "").
+- 4.6 Multimodal E2B: `LiteRtLmRuntime` sends `Content.Text` only; no image input.
+- 4.5 Shizuku: `GatedPrivilegedBridge` has `exec = null` (always refuses); the
+  Shizuku SDK is not a dependency.
+- 4.7 Gemini Nano: `UnavailableNanoSummarizer` (no AICore); `firebase.ai` is in
+  deps but unused for Nano.
+- 4.8 Cloud fallback: only `DisabledCloudPlannerProvider` (isEnabled=false).
+- 4.10/4.12 Voice in / hands-free: `OptInWakeWordDetector` arms a flag but there
+  is NO SpeechRecognizer/ASR; voice commands are not actually captured.
+- 4.14 Scheduled automations: `AutomationGate` is pure logic; no WorkManager
+  worker is registered and nothing schedules.
+- 4.16/4.17 Self-critique / learn-from-demonstration: not wired end-to-end.
+- 6.23 Model-fit/battery guard: not implemented (deferred).
+
+Suspected HIGH-RISK issue to verify first:
+- `LiteRtModelManager` pins `gemma-4-E2B-it.litertlm` from
+  `huggingface.co/litert-community/gemma-4-E2B-it-litert-lm` with a hardcoded size
+  and SHA-256. The repo and the `gemma-4-E2B-it.litertlm` filename are CONFIRMED
+  real (checked against Hugging Face; the E4B sibling uses the same naming), so
+  the URL is very likely correct. What still must be verified is the exact byte
+  length and SHA-256, because a wrong pinned hash fails `finalizeVerifiedPart`
+  and deletes the file - and with 6.1 in place the app then BLOCKS planning.
+  Verify the hash before anything else.
+
+Phase 7 - Completion & Hardening (items 7.1 - 7.17). Goal: turn every remaining
+seam into a real capability, fix the highest-risk reliability issues, and close the
+"not fully functional" gap. All items are done together in one pass.
+
+- 7.1 VERIFY + FIX the pinned model artifact (highest priority). Goal: the model
+  actually downloads and verifies. Method: confirm the real HuggingFace repo/filename
+  and its true byte length + SHA-256; correct `OFFICIAL_MODEL_URL`,
+  `MODEL_FILENAME`, `EXPECTED_MODEL_BYTES`, `EXPECTED_MODEL_SHA256`; add a startup
+  self-check that logs a clear error if the artifact is unreachable. Reference:
+  `model/LiteRtModelManager.kt`, `ui/SetupScreen.kt`.
+- 7.2 Real vision grounding (4.1). Goal: locate a target the a11y tree cannot
+  represent. Method: implement `VisionGrounder` backed by the multimodal E2B (or a
+  lightweight on-device detector) and call it only when the tree misses the target.
+  Reference: `perception/VisionPerception.kt`, `agent/TaskOrchestrator.kt`.
+- 7.3 Real OCR (4.2). Goal: read text baked into images/canvas. Method: add an
+  offline OCR backend (e.g. ML Kit text recognition bundled) behind `OcrReader`,
+  bounding the work to the current screen. Reference: `perception/VisionPerception.kt`,
+  `app/build.gradle.kts`.
+- 7.4 Multimodal E2B input (4.6). Goal: the vision-capable model actually sees a
+  screenshot. Method: extend `LlmRuntime.generate` (or add an image overload) to
+  send `Content.Image` alongside text; feed the screenshot on a tree-miss.
+  Reference: `model/LiteRtLmRuntime.kt`, `model/GemmaInferenceEngine.kt`,
+  `planning/AgentPlanner.kt`.
+- 7.5 Real voice input / hands-free loop (4.10, 4.12). Goal: usable voice
+  commands. Method: implement a `SpeechRecognizer`-based listener behind the
+  existing opt-in + mic permission, wire recognized text into `startTask`, and add
+  a confirm-before-run step. Reference: `voice/WakeWord.kt`, `voice/SpeechOutput.kt`,
+  `MainActivity.kt`, `agent/TaskOrchestrator.kt`.
+- 7.6 Real opt-in cloud fallback (4.8). Goal: a working cloud planner when the
+  local model fails, still off by default. Method: implement an HTTPS
+  `CloudPlannerProvider` with a user-supplied endpoint/key stored locally; keep the
+  strict parser gate; never egress without explicit opt-in. Reference:
+  `planning/CloudPlannerProvider.kt`, `ui/SetupScreen.kt`, `agent/TaskOrchestrator.kt`.
+- 7.7 Shizuku real execution OR drop the promise (4.5). Goal: no inert feature.
+  Method: either add the Shizuku dependency and a real bridge executor, or remove
+  the claim and keep only the honest gate. Decide explicitly. Reference:
+  `privileged/PrivilegedActions.kt`, `app/build.gradle.kts`, `AndroidManifest.xml`.
+- 7.8 Scheduled automations via WorkManager (4.14). Goal: automations actually
+  run. Method: register a WorkManager worker honoring `AutomationGate`, persist
+  automations, and add a UI to enable them (default OFF). Reference:
+  `automation/AutomationGate.kt`, `AndroidManifest.xml`, `app/build.gradle.kts`, `ui/*`.
+- 7.9 Model-fit / battery guard (6.23). Goal: honest device-fit guidance. Method:
+  add `isFitForDevice()` (RAM/storage/backend) and surface a recommendation in
+  Setup; note the pinned E2B context (3072) is near the 8 GB ceiling. Reference:
+  `model/LiteRtModelManager.kt`, `model/LiteRtLmRuntime.kt`, `ui/SetupScreen.kt`.
+- 7.10 Self-critique + learn-from-demonstration (4.16, 4.17). Goal: finish these.
+  Method: verify `PlanSelfReview` runs before execution; add a bounded "watch me"
+  capture that turns an observed successful run into a saved skill. Reference:
+  `planning/PlanSelfReview.kt`, `data/local/*`, `agent/TaskOrchestrator.kt`.
+- 7.11 Web-search quality. Goal: `web_search` returns usable results, not only a
+  DuckDuckGo instant answer. Method: add a real results endpoint (opt-in key)
+  alongside the current one; keep `read_url` for page depth. Reference:
+  `cloudflare/CloudflareGateway.kt`, `agent/TaskOrchestrator.kt`.
+- 7.12 Gemini Nano: wire AICore or drop (4.7). Goal: no dead path. Method: either
+  add the AICore/Nano integration, or remove `NanoSummarizer` from the wiring and
+  document the E2B-only path. Reference: `model/NanoSummarizer.kt`,
+  `OmniAgentApplication.kt`.
+- 7.13 Reliability hardening from real device runs. Goal: fix the concrete bugs
+  you hit. Method: run the target flows on the Motorola Edge 70 Fusion, capture the
+  exact error text/step, and fix each root cause (this list is populated by real
+  runs, not guesses). Reference: whichever files the failures point to.
+- 7.14 Deferred by design: item 4.9 (LoRA fine-tune) stays documented-only.
+- 7.15 One opt-in capability settings screen. Goal: the new capabilities have a
+  single, honest home. Method: add a Settings surface to toggle voice, cloud
+  fallback (+endpoint/key), Shizuku, automations, GPU/CPU backend, and to read the
+  model-fit recommendation; every toggle defaults OFF and shows its state.
+  Reference: `ui/SetupScreen.kt` (or a new `ui/SettingsScreen.kt`),
+  `MainActivity.kt`, `OmniAgentApplication.kt`.
+- 7.16 On-device instrumentation tests + scripted self-test. Goal: verify the
+  real flows on the target phone, not only Robolectric. Method: add an
+  `androidTest` suite plus an in-app "Run self-test" that exercises launch /
+  search / type / submit / vision-fallback and reports pass/fail per capability.
+  Reference: `app/src/androidTest/**`, `ui/*`, `agent/TaskOrchestrator.kt`.
+- 7.17 Hindi / Roman-Hindi done end-to-end. Goal: the app speaks the user's
+  language everywhere. Method: extend the multilingual handling from commands to
+  the UI strings, TTS locale, and status/error messages (bounded, no full i18n
+  framework needed). Reference: `ui/*`, `voice/SpeechOutput.kt`,
+  `agent/TaskOrchestrator.kt`.
+
+Phase 7 scope note: do ALL of 7.1 - 7.17 together in one pass, not one-after-another.
+There is no "first this, then that" ordering to wait on - every item below is in
+scope for the same build. The only ordering that exists is the natural build
+dependency inside the code (you cannot call a real backend before you write it),
+but the whole phase is one deliverable: no item is deferred except 7.14 (item
+4.9, LoRA, which is documented-only by design). 7.1 (verify the pinned model
+artifact) is listed first only because a wrong hash would block everything else
+at runtime - it is not a gate you must finish before starting the rest; build it
+alongside the others in the same pass.
+
 # 5. TESTING AND VALIDATION
 
 Success is defined per phase; each phase must keep the existing behaviour
 honest (no step may be marked COMPLETED unless a fresh observation proves it).
 Phases implemented: 0, 1, 2, 3, 4 (all items 4.1 - 4.17; 4.9 documented and
-deferred), and 5 (items 5.1 - 5.10).
+deferred), 5 (items 5.1 - 5.10), and 6 (items 6.1 - 6.24). Phase 7 is the next
+work and turns the remaining seams into real capabilities.
 
 Phase 0 (must pass first):
 - A simulated "Open ChatGPT, say hi, then press Enter" task reaches
@@ -905,6 +1110,29 @@ Phase 6 (reasoning & reliability rescue):
   success.
 - 6.24: with a slow-loading screen, the loop waits for quiescence (bounded) and
   does not act mid-animation.
+
+Phase 7 (completion & hardening):
+- 7.1: downloading the pinned model passes size + SHA-256 verification (or fails
+  with a clear, actionable error); a wrong hash does not silently loop.
+- 7.2/7.3/7.4: with a tree-miss on a canvas/WebView screen, grounding + OCR + a
+  screenshot fed to the multimodal model locate the target; the no-op grounders
+  are only used when no backend is configured.
+- 7.5: with voice opt-in + mic permission, a spoken command is recognized and
+  routed into `startTask`; with the opt-in off, no audio is captured.
+- 7.6: with the cloud fallback disabled (default) no network egress occurs; when
+  enabled + configured it returns a validated plan through the strict parser.
+- 7.9: `isFitForDevice()` reports honestly for the 8 GB device and the Setup UI
+  shows the recommendation.
+- 7.8: an enabled automation actually fires via WorkManager; the default (off)
+  schedules nothing.
+- 7.10: a successful observed run can be saved and replayed as a skill.
+- 7.15: every new capability is reachable and OFF by default from one Settings
+  surface, and its state is visible.
+- 7.16: the in-app self-test reports pass/fail per capability on the device, and
+  the `androidTest` suite runs green.
+- 7.17: a Hindi/Roman-Hindi command produces a Hindi-appropriate status/TTS
+  response end-to-end.
+- Regression: all existing tests stay green; no seam regresses to a fake success.
 
 Global:
 - `./gradlew :app:testDebugUnitTest` passes (Robolectric, sdk 34, JDK 21,

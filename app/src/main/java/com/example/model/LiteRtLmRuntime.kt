@@ -108,6 +108,37 @@ class LiteRtLmRuntime(
             }
         }
 
+    /**
+     * Multimodal generation (plan 7.4): attaches the screenshot as an image content
+     * part alongside the text prompt so the vision-capable E2B build can locate a
+     * target the a11y tree missed. Falls back to the text path on any image-content
+     * failure so a text-only model build cannot break a step.
+     */
+    override suspend fun generateWithImage(
+        prompt: String,
+        systemInstruction: String?,
+        maxOutputTokens: Int,
+        imageBytes: ByteArray
+    ): String = withContext(Dispatchers.IO) {
+        val eng = engine
+        if (eng == null || !eng.isInitialized()) {
+            throw LlmInferenceException("LiteRT-LM engine is not initialized")
+        }
+        val config = buildConversationConfig(systemInstruction, maxOutputTokens)
+        try {
+            eng.createConversation(config).use { conversation ->
+                val contents = Contents.of(
+                    Content.Text(prompt),
+                    Content.ImageBytes(imageBytes)
+                )
+                extractText(conversation.sendMessage(contents))
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Multimodal generation failed (${e.message}); retrying text-only")
+            generate(prompt, systemInstruction, maxOutputTokens)
+        }
+    }
+
     override suspend fun smokeTest(): Boolean = withContext(Dispatchers.IO) {
         if (!isReady()) {
             Log.w(TAG, "Smoke test failed: engine not ready")
