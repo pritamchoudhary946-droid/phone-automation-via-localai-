@@ -79,14 +79,24 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * 8.9: bumped whenever a memory trim releases the engine, so an in-flight init can
+     * notice the engine was dropped and let the next explicit call re-arm it — without
+     * the app re-loading on its own and spinning load/unload cycles. Advisory only, so
+     * a plain field is fine (and deliberately not @Volatile, which crashed lint's
+     * Kotlin PSI analysis here).
+     */
+    private var trimGeneration = 0
+
     companion object {
         lateinit var instance: OmniAgentApplication
             private set
 
-        // GPU backend opt-in: the target device (Motorola Edge 70 Fusion, Adreno 810)
-        // has a GPU backend available, and LiteRtLmRuntime already falls back to CPU
-        // automatically if GPU initialization fails, so enabling this is safe.
-        private const val USE_GPU_BACKEND = true
+        // 8.10: GPU is OFF by default. The Adreno 810 + LiteRT GPU delegate is poorly
+        // supported for this VLM and a failed GPU attempt doubles the ~2.6 GB init work
+        // (and the memory churn) on an 8 GB device, which is what made the phone hang.
+        // CPU-first is the supported path; GPU stays strictly opt-in.
+        private const val USE_GPU_BACKEND = false
         private const val TAG = "OmniAgentApp"
     }
 
@@ -103,14 +113,11 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         appScope.launch { runCatching { modelManager.logRemoteArtifactCheck() } }
 
         // Exactly one heavy model instance: the engine owns the single runtime.
-        // 8.1: the primary attempt may use GPU; the one bounded retry drops to CPU,
-        // because GPU delegate failures are a known cause of "downloads but won't load".
+        // 8.9/8.10: a single CPU-first factory (no GPU-primary + CPU two-attempt
+        // scheme) so a failed backend cannot double the load work and thrash memory.
         inferenceEngine = GemmaInferenceEngine(
             runtimeFactory = { modelPath, cacheDir ->
                 LiteRtLmRuntime(modelPath = modelPath, cacheDir = cacheDir, useGpu = USE_GPU_BACKEND)
-            },
-            cpuRuntimeFactory = { modelPath, cacheDir ->
-                LiteRtLmRuntime(modelPath = modelPath, cacheDir = cacheDir, useGpu = false)
             },
             scope = appScope
         )
@@ -202,7 +209,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
     /**
      * Loads and smoke-tests the engine off the UI thread once the model is verified.
      * Returns immediately; observe [GemmaInferenceEngine.state] for the real outcome.
-     * Safe to call again (e.g. from a Retry button) - it re-attempts load.
+     *
+     * 8.9: single-flight. Concurrent callers (the MainActivity LaunchedEffect, the
+     * Setup/dashboard Retry buttons, or a model-ready re-transition) collapse onto one
+     * load, and the smoke probe runs only on the first successful load. A background
+     * trim can still drop a loaded engine; the [initGeneration] check re-loads it on
+     * the next explicit call but never spins by itself.
      */
     fun initializeEngineIfModelReady() {
         val modelFile = modelManager.getModelFile()
@@ -210,32 +222,20 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             Log.i(TAG, "Skipping engine init: model not downloaded")
             return
         }
+        val generation = trimGeneration
         appScope.launch {
             try {
-                val ok = inferenceEngine.initialize(modelFile)
-                if (ok) {
-                    if (!inferenceEngine.smokeTest(modelFile)) {
-                        // Plan 8.1(b): a healthy runtime is never thrown away. The smoke
-                        // probe now only fails on a real, repeated exception, but guard
-                        // anyway: if the engine still reports ready, keep it usable and
-                        // just note the inconclusive probe instead of closing it.
-                        if (inferenceEngine.isReady()) {
-                            Log.w(TAG, "Smoke probe inconclusive but engine reports ready; keeping it")
-                        } else {
-                            Log.w(TAG, "Smoke test failed; marking engine unavailable")
-                            inferenceEngine.reportUnavailable(
-                                "The model loaded but did not answer a test prompt (load or memory failure)"
-                            )
-                        }
-                    } else {
-                        Log.i(TAG, "Engine initialized and smoke test passed successfully")
-                    }
+                if (inferenceEngine.ensureReady(modelFile)) {
+                    Log.i(TAG, "Engine initialized and smoke test passed successfully")
                 } else {
-                    Log.w(TAG, "Engine initialization failed: see EngineState.Failed for the reason")
+                    Log.w(TAG, "Engine unavailable: see EngineState for the reason")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing engine: ${e.message}", e)
                 inferenceEngine.reportUnavailable("Engine initialization error: ${e.message ?: "unknown"}")
+            }
+            if (generation != trimGeneration) {
+                Log.i(TAG, "Engine re-armed after a memory trim; it will reload on the next use")
             }
         }
     }
@@ -272,11 +272,20 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         planner.fallbackExplicit = enabled
     }
 
+    /**
+     * 8.9: do NOT tear the ~2.6 GB engine down on an ordinary trim. Loading is a
+     * multi-second, multi-GB operation, so a trim → shutdown → reload cycle is a giant
+     * CPU+IO spike that stutters the whole device (the reported hang). Only release
+     * under genuine critical pressure, and let the next explicit use reload.
+     */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            Log.w(TAG, "onTrimMemory($level): releasing engine to protect the accessibility service")
-            inferenceEngine.shutdown()
+        if (com.example.model.MemoryTrimPolicy.shouldReleaseEngine(level)) {
+            Log.w(TAG, "onTrimMemory($level): critical pressure, releasing the engine")
+            releaseEngineForMemoryPressure()
+        } else if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            // Advisory only: keep the engine so we never thrash a multi-GB reload.
+            Log.i(TAG, "onTrimMemory($level): keeping the engine loaded to avoid a reload spike")
         }
     }
 
@@ -284,8 +293,19 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         super.onConfigurationChanged(newConfig)
     }
 
+    /**
+     * 8.9: [onLowMemory] is advisory (it is also delivered for cached/background
+     * processes). Shutting the engine down unconditionally here was the load/unload
+     * thrash that hung the phone; release only when the engine is genuinely unusable.
+     */
     override fun onLowMemory() {
         super.onLowMemory()
+        Log.w(TAG, "onLowMemory(): advisory only, keeping the engine loaded")
+    }
+
+    /** Releases the engine under genuine pressure and arms the next explicit reload. */
+    private fun releaseEngineForMemoryPressure() {
+        trimGeneration++
         inferenceEngine.shutdown()
     }
 
