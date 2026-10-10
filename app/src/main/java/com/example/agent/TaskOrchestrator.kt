@@ -625,7 +625,7 @@ class TaskOrchestrator(
         return try {
             val result = when (action) {
                 is AgentAction.WebSearch -> gateway.searchWeb(action.query)
-                is AgentAction.ReadUrl -> gateway.parsePdfDocument(action.url)
+                is AgentAction.ReadUrl -> gateway.readUrlContent(action.url)
                 else -> null
             }
             when (result) {
