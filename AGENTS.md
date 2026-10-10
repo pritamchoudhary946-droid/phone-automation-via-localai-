@@ -153,3 +153,27 @@ An action the native layer cannot execute must not appear in the catalogue
   `planning/CloudPlannerProvider` (4.8, consulted only after a local failure).
   Disabled/unconfigured providers must return null and never touch the network;
   a cloud plan is re-validated through the same `TaskPlanParser` as local output.
+
+## Phase 7 (completion & hardening) invariants
+- Every optional capability is owned by `settings/CapabilitySettings` and
+  defaults OFF. `ui/SettingsScreen.kt` is the single surface; when adding a
+  capability toggle, add it there too. Cloud on/off lives in that one place
+  (`CloudPlannerProvider.isEnabled()` reads it); endpoint/key stay in the
+  provider's own prefs.
+- Privileged actions go through `privileged/GatedPrivilegedBridge` exposed as
+  `OmniAgentApplication.privilegedActions`; `isAvailable()` is true only when the
+  user opted in AND Shizuku is running. Never execute privileged commands
+  otherwise.
+- Automations: `automation/AutomationScheduler` runs via WorkManager and must
+  honour `AutomationGate` (master switch AND per-item) and the 15-minute minimum.
+  `OmniAgentApplication.syncAutomations()` re-arms/cancels after a toggle change.
+- Vision: ML Kit OCR (`MlKitOcrReader`) + `OcrVisionGrounder`. On a tree-miss the
+  agent sends a bounded JPEG to the multimodal model; grounding refuses (null)
+  when a label is absent rather than blind-tapping.
+- Web search (`CloudflareGateway`): the HTML-results fallback is gated to the
+  built-in DuckDuckGo provider so injected/custom endpoints (and MockWebServer
+  tests) keep their own result shape. Keep `parseResultLinks`/`resolveResultUrl`
+  pure and offline-testable.
+- Public API surface is often asserted in `app/src/test/**`: before changing a
+  signature used by tests, grep the tests. `GatedPrivilegedBridge`'s `optIn` is a
+  `() -> Boolean` supplier (live toggle), not a captured Boolean.
