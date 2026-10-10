@@ -36,6 +36,12 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var automations by remember { mutableStateOf(settings?.automationsEnabled == true) }
     var basicFallback by remember { mutableStateOf(settings?.basicFallbackExplicit == true) }
     var cloudFallback by remember { mutableStateOf(settings?.cloudFallbackEnabled == true) }
+    // 8.7/BS4: cloud endpoint/key/model entry, so the opt-in fallback is reachable.
+    val cloudProvider = app?.cloudPlannerProvider
+    var cloudEndpoint by remember { mutableStateOf(cloudProvider?.currentEndpoint() ?: "") }
+    var cloudApiKey by remember { mutableStateOf(cloudProvider?.currentApiKey() ?: "") }
+    var cloudModel by remember { mutableStateOf(cloudProvider?.currentModel() ?: "") }
+    var cloudSaved by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val fit = remember { app?.modelManager?.isFitForDevice() }
@@ -131,6 +137,75 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             settings?.cloudFallbackEnabled = it
         }
 
+        // 8.7/BS4: without somewhere to enter these, the cloud fallback could never be
+        // turned on end to end. Endpoint/key/model are stored locally and only used
+        // after repeated local failures when the toggle above is on.
+        if (cloudFallback && cloudProvider != null) {
+            Card(shape = RoundedCornerShape(12.dp)) {
+                Column(
+                    Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Cloud planner configuration", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "OpenAI-style chat-completions endpoint. The key is stored only on this device.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = cloudEndpoint,
+                        onValueChange = { cloudEndpoint = it; cloudSaved = false },
+                        label = { Text("Endpoint URL") },
+                        placeholder = { Text("https://api.example.com/v1/chat/completions") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cloud_endpoint_field")
+                    )
+                    OutlinedTextField(
+                        value = cloudApiKey,
+                        onValueChange = { cloudApiKey = it; cloudSaved = false },
+                        label = { Text("API key") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cloud_api_key_field")
+                    )
+                    OutlinedTextField(
+                        value = cloudModel,
+                        onValueChange = { cloudModel = it; cloudSaved = false },
+                        label = { Text("Model") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cloud_model_field")
+                    )
+                    Row(
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                cloudProvider.saveConfiguration(cloudEndpoint, cloudApiKey, cloudModel)
+                                cloudSaved = true
+                            },
+                            enabled = cloudEndpoint.isNotBlank() && cloudApiKey.isNotBlank(),
+                            modifier = Modifier.testTag("cloud_config_save_button")
+                        ) {
+                            Text("Save")
+                        }
+                        if (cloudSaved) {
+                            Text(
+                                "Saved. The fallback will use these credentials.",
+                                fontSize = 12.sp,
+                                color = MintSuccess
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(4.dp))
         SelfTestCard(app = app)
     }
@@ -190,6 +265,11 @@ private fun SelfTestCard(app: OmniAgentApplication?) {
                     lines += "Engine ready: ${if (engine) "PASS" else "FAIL"}"
                     val fit = app?.modelManager?.isFitForDevice()
                     lines += "Device fit: ${if (fit?.fits == true) "PASS" else "WARN"}"
+                    // 8.7/BS2: report the real Shizuku bridge status instead of leaving
+                    // privilegedActions as dead wiring. Available only when opted in AND
+                    // Shizuku is running; refused (false) otherwise.
+                    val privileged = app?.privilegedActions?.isAvailable() == true
+                    lines += "Privileged (Shizuku): ${if (privileged) "PASS" else "OFF/absent"}"
                     result = lines.joinToString("\n")
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary),

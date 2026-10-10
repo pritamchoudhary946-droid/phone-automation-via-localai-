@@ -21,15 +21,28 @@ interface WakeWordDetector {
 /**
  * Default detector: disabled unless constructed with an explicit opt-in. This is
  * the safe shipped default and what tests assert (never listens when off).
+ *
+ * 8.7/BS3: a second constructor takes live suppliers so the hands-free flow can arm
+ * the detector against the current settings toggle + permission (the class was
+ * otherwise dead code, referenced by nothing).
  */
 class OptInWakeWordDetector(
     private val optIn: Boolean,
     private val hasMicPermission: () -> Boolean
 ) : WakeWordDetector {
 
+    constructor(
+        optIn: () -> Boolean,
+        hasMicPermission: () -> Boolean
+    ) : this(optIn = optIn(), hasMicPermission = hasMicPermission) {
+        this.liveOptIn = optIn
+    }
+
+    private var liveOptIn: (() -> Boolean)? = null
+
     private var armed = false
 
-    override fun isEnabled(): Boolean = optIn && hasMicPermission()
+    override fun isEnabled(): Boolean = (liveOptIn?.invoke() ?: optIn) && hasMicPermission()
 
     override fun start() {
         if (isEnabled()) armed = true

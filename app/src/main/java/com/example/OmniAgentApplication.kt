@@ -41,6 +41,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         private set
     lateinit var cloudflareGateway: CloudflareGateway
         private set
+    /**
+     * 8.7/BS4: the real cloud planner provider, exposed so SettingsScreen can persist
+     * an endpoint/key. Without this the opt-in cloud fallback was unreachable end to end.
+     */
+    lateinit var cloudPlannerProvider: HttpCloudPlannerProvider
+        private set
     lateinit var settings: CapabilitySettings
         private set
     /**
@@ -107,6 +113,9 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
 
         appDirectory = AppDirectory(this)
         cloudflareGateway = CloudflareGateway()
+        // 8.7/BS4: build the real provider once and reuse it, so the Settings surface and
+        // the orchestrator share the same prefs (the fallback is now configurable).
+        cloudPlannerProvider = HttpCloudPlannerProvider(this)
 
         // 7.2/7.3: real on-device OCR + OCR-backed vision grounding, wired into the
         // automation layer so a tree-miss surface (canvas/WebView) can still be read and
@@ -135,7 +144,7 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             completionNotifier = com.example.notifications.CompletionNotifier(this),
             // A clean, fully-verified run is saved as a re-runnable local skill.
             autoSaveSkills = true,
-            cloudPlannerProvider = HttpCloudPlannerProvider(this),
+            cloudPlannerProvider = cloudPlannerProvider,
             nanoSummarizer = com.example.model.EngineNanoSummarizer(
                 generate = { prompt, system, max -> inferenceEngine.generate(prompt, system, max) },
                 ready = { inferenceEngine.isReady() }
