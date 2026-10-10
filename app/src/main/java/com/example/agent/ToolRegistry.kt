@@ -41,6 +41,7 @@ open class ToolRegistry {
         const val TOOL_SCROLL_UNTIL_FOUND = "scroll_until_found"
         const val TOOL_READ_TEXT = "read_text"
         const val TOOL_WAIT_FOR_TEXT = "wait_for_text"
+        const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
         const val TOOL_OPEN_QUICK_SETTINGS = "open_quick_settings"
         const val TOOL_OPEN_RECENTS = "open_recents"
@@ -163,6 +164,11 @@ open class ToolRegistry {
             description = "Waits until a target label appears on screen, bounded by timeoutMs",
             requiredParameters = listOf("targetText"),
             optionalParameters = listOf("timeoutMs")
+        ),
+        TOOL_READ_NOTIFICATIONS to ToolDefinition(
+            name = TOOL_READ_NOTIFICATIONS,
+            description = "Reads a bounded list of recently posted notifications (title/text) for the planner",
+            requiredParameters = emptyList()
         ),
         TOOL_OPEN_NOTIFICATIONS to ToolDefinition(
             name = TOOL_OPEN_NOTIFICATIONS,
@@ -365,6 +371,7 @@ open class ToolRegistry {
             is AgentAction.Home,
             is AgentAction.ReadScreen,
             is AgentAction.ReadText,
+            is AgentAction.ReadNotifications,
             is AgentAction.OpenNotifications,
             is AgentAction.OpenQuickSettings,
             is AgentAction.PressRecents,

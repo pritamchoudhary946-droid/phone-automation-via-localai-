@@ -13,7 +13,9 @@ data class PlanningRequest(
     val remainingStepBudget: Int,
     val availableActions: List<String>,
     /** Bounded digest of learned user preferences / past outcomes, or blank. */
-    val memorySummary: String = ""
+    val memorySummary: String = "",
+    /** Bounded retrieved context from the user's own notes/history (RAG), or blank. */
+    val retrievedContext: String = ""
 )
 
 /** Everything the model needs to pick the single next action during execution. */
