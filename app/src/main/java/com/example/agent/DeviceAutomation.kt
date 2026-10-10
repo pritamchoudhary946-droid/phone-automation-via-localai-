@@ -58,6 +58,26 @@ data class UiObservation(
      */
     fun hasTextInputField(): Boolean =
         nodes.any { (it.packageName == null || it.packageName == packageName) && it.isLikelyTextInput() }
+
+    /**
+     * Search-specific input detection. A generic editable node is not enough:
+     * message, comment, caption and login fields are valid text inputs but are
+     * unsafe targets for an open-search step.
+     */
+    fun hasSearchInputField(): Boolean =
+        nodes.any { node ->
+            if (node.packageName != null && node.packageName != packageName) return@any false
+            if (!node.isLikelyTextInput()) return@any false
+            val haystack = listOfNotNull(
+                node.text,
+                node.contentDescription,
+                node.id.substringAfterLast('/'),
+                node.className
+            ).joinToString(" ").lowercase()
+            val searchSignal = listOf("search", "query", "searchview").any { haystack.contains(it) }
+            val negativeSignal = listOf("message", "comment", "caption", "reply", "password").any { haystack.contains(it) }
+            searchSignal || (node.isFocused && !negativeSignal && node.className.lowercase().contains("search"))
+        }
 }
 
 /** Outcome of dispatching a single native action. */
