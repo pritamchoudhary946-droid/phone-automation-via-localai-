@@ -902,6 +902,9 @@ class TaskOrchestrator(
         } else {
             null
         }
+        if (lastRequired.action is AgentAction.OpenItem) {
+            return verifyOpenedItem(lastRequired.action, pre, post)
+        }
         val method = when {
             lastRequired.action is AgentAction.OpenApp -> VerificationMethod.FOREGROUND_PACKAGE
             lastRequired.action is AgentAction.Home -> VerificationMethod.HOME_FOREGROUND
