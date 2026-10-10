@@ -5,6 +5,7 @@ import com.example.accessibility.UiNode
 import com.example.accessibility.UiTreeSnapshot
 import com.example.notifications.NotificationBus
 import com.example.notifications.NotificationSource
+import com.example.perception.TargetResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -78,6 +79,24 @@ data class UiObservation(
             val negativeSignal = listOf("message", "comment", "caption", "reply", "password").any { haystack.contains(it) }
             searchSignal || (node.isFocused && !negativeSignal && node.className.lowercase().contains("search"))
         }
+
+    /**
+     * Resolves [hint] to a single actionable target using [TargetResolver] (10.7).
+     * Only a [TargetResolver.Outcome.UNIQUE] result is actionable; ambiguous or
+     * unmatched hints return a non-actionable resolution the caller must report.
+     */
+    fun resolveTarget(
+        hint: String,
+        allowEditable: Boolean = false,
+        requireActivatable: Boolean = false
+    ): TargetResolver.Resolution =
+        TargetResolver.resolve(
+            nodes = nodes,
+            hint = hint,
+            foregroundPackage = packageName,
+            allowEditable = allowEditable,
+            requireActivatable = requireActivatable
+        )
 }
 
 /** Outcome of dispatching a single native action. */

@@ -121,13 +121,19 @@ class CloudflareGateway(
                 .build()
 
             client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext CloudflareTaskResult.Error("PDF fetch HTTP error ${response.code}")
+                }
                 val contentType = response.header("Content-Type").orEmpty()
                 val contentLength = response.header("Content-Length")?.toLongOrNull() ?: 0L
 
                 if (contentType.contains("pdf", ignoreCase = true) || pdfUrl.endsWith(".pdf", ignoreCase = true)) {
+                    // Honest provenance: this only confirms the document is reachable and
+                    // is a PDF. No text extraction is performed here, so the content must
+                    // not claim that it is "ready" (10.9/A5).
                     return@withContext CloudflareTaskResult.Success(
                         title = "PDF Document: ${pdfUrl.substringAfterLast('/')}",
-                        content = "Verified PDF document (${contentLength / 1024} KB). Structured text extraction ready.",
+                        content = "Fetched PDF document (${contentLength / 1024} KB). Binary PDF; text extraction is not available, so only metadata was read.",
                         sourceUrl = pdfUrl
                     )
                 } else {

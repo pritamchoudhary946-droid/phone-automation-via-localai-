@@ -10,8 +10,9 @@ Scope for this work: Phases 0, 1, 2, 3, 4 (all items 4.1 - 4.17), Phase 5
 (Autonomy & Self-Healing, items 5.1 - 5.10), Phase 6 (Reasoning & Reliability
 Rescue, items 6.1 - 6.24), Phase 7 (Completion & Hardening, items 7.1 - 7.17) AND
 Phase 8 (Jarvis rebrand, working model load, premium UI - items 8.1 - 8.10) AND
-Phase 9 (fully-automated Jarvis capability upgrades - items 9.1 - 9.14), followed by
-a FINAL BUG SWEEP (section 4A) that finds and fixes every remaining bug.
+Phase 9 (fully-automated Jarvis capability upgrades - items 9.1 - 9.14) AND
+Phase 10 (reliable multi-step execution, items 10.1 - 10.11), followed by a
+FINAL BUG SWEEP (section 4A) that finds and fixes every remaining bug.
 Phase 6 is landed; Phase 7 finishes the seams; Phase 8 fixes the live device
 blockers, fixes every confirmed "written but not working" defect (section 2.3),
 and rebrands the app to "Jarvis". The code audit (section 2.1) shows the tree has
@@ -93,6 +94,18 @@ Full scope at a glance (everything in this plan):
   obstacle self-healing, Hindi-first language, and a battery/thermal guard. NO new
   model (reuse the single E2B engine); every always-on/privacy feature is opt-in
   and OFF by default. Built on top of Phase 7/8.
+- Phase 10 (acceptance spec) - Reliable multi-step execution (10.1 - 10.11):
+  separate dispatch from success, goal-specific final verification, the full YouTube
+  search-to-play benchmark path (launch/search/submit/results/select/playback),
+  trustworthy observations, event-driven settling + a perception ladder, OCR
+  grounding that justifies a tap, safe target resolution, failure-typed self-healing,
+  robust NL planning + BASIC fallback integrity, an adversarial regression suite,
+  and permissions/security/user-control kept intact. Reliability-first, no new
+  model/backend.
+- Delivery rules (section 4B): work on a branch off latest `main` (review PR #25),
+  preserve all working behaviour, produce a gap matrix, honest real-device validation
+  + QA checklist, run the mandatory Gradle validation commands, and open a PR (not
+  auto-merged).
 - FINAL BUG SWEEP (section 4A, end of the pass): find and FIX every remaining bug -
   build/tests green, no reachable dead seams, no dead wiring, lint issues resolved,
   no crash on edge cases, and all honest-behaviour rules intact.
@@ -1362,11 +1375,278 @@ Phase 9 defaults (locked): all of 9.1, 9.2 (location), 9.7, 9.8, 9.9 are OPT-IN 
 OFF by default; nothing auto-sends a message or auto-spends money; NO new model is
 introduced; the single E2B engine is reused for every AI step.
 
+Phase 10 - RELIABLE MULTI-STEP EXECUTION (items 10.1 - 10.11, acceptance spec).
+Goal: one natural-language instruction (English / Hindi / Roman-Hindi) completes the
+WHOLE task across screens and apps, verified by fresh evidence - not just a plan.
+The benchmark task is the YouTube workflow: "Open YouTube, search for lo-fi music,
+select the first relevant video, verify it is playing, then return home." This phase
+is reliability-first; it does NOT add features, a bigger model, or a new backend.
+A literal, infallible fictional Jarvis is NOT the acceptance criterion: deliver the
+best practical agent within Android's APIs, the device's memory/perf limits, the
+available model, and user-consent rules. The agent must, at minimum:
+(1) understand the intended final outcome; (2) break the command into the smallest
+appropriate subgoal sequence; (3) observe the actual current device state;
+(4) select and execute a valid action; (5) verify the resulting state with fresh
+evidence; (6) recover intelligently when an action fails; (7) continue from the
+current state WITHOUT repeating completed side effects; (8) report success only when
+the requested outcome has sufficient evidence; (9) explain the actual blocker when
+reliable completion is impossible. It must NOT stop after opening an app, get stuck
+on a search field, scroll forever, or show an error unrelated to the real failure.
+
+- 10.1 SEPARATE DISPATCH FROM SUCCESS (loop integrity). Goal: a dispatched action
+  is never treated as task success. Method: audit the live path end to end
+  (`TaskOrchestrator` -> `DeviceAutomation` -> `HybridStepExecutor` -> observation ->
+  `PostconditionVerifier`); require a fresh post-action observation + an
+  action-specific postcondition before advancing task state; `VerificationMethod.NONE`
+  must NOT prove completion; keep `SCREEN_CHANGED` only as a meaningful intermediate
+  signal, never a universal substitute. A model `report_status`, an animation, a
+  keyboard opening, or an unrelated popup must never mark the task complete.
+  Reference: `agent/TaskOrchestrator.kt`, `agent/DeviceAutomation.kt`,
+  `agent/HybridStepExecutor.kt`, `planning/PostconditionVerifier.kt`.
+- 10.2 GOAL-SPECIFIC FINAL VERIFICATION. Goal: the final gate evaluates the user's
+  REQUESTED OUTCOME, not the last planned action. Method: add per-goal verifiers -
+  OpenApp -> correct foreground package; search -> query submitted + a result
+  surface (or explicit no-results); play video -> player/playback evidence, not a
+  tapped row; Wi-Fi -> the actual toggle state; home -> launcher foreground; read
+  page -> meaningful content obtained; send message -> approval + verified send
+  state where reliable. Extend the existing verification types only as required;
+  completed subgoals stay verified across replans; a replan never silently replays a
+  risky/irreversible action. When unverifiable, report failure/uncertainty, not
+  success. Reference: `planning/PostconditionVerifier.kt`,
+  `agent/ForegroundPackageVerifier.kt`, `agent/TaskOrchestrator.kt`.
+- 10.3 YOUTUBE SEARCH-TO-PLAY PATH (primary benchmark, no keyword patch). Goal: the
+  full flow actually completes. Method: (A) app launch - resolve the intended
+  installed app with overlapping names/aliases, verify the foreground package,
+  bounded cold-start waiting; (B) search interface - an arbitrary editable field is
+  NOT a search field; improve `hasSearchInputField()` /
+  `AgentAccessibilityService.openSearchInterface()` using view id, search text/
+  content-desc, widget class/hint, focus/enabled, package and context; a comment/
+  message/login/password field never qualifies; do not type into the first editable
+  element when the intended field is unresolved; (C) submit - verify the query
+  entered the intended field and that submission happened (IME search / Enter /
+  button), never assume typing auto-submitted; (D) results - build on `RESULTS_PRESENT`
+  (never a bare screen change) and distinguish available / explicit no-results /
+  loading / network failure / UI-open-unsubmitted / query-entered-unsubmitted /
+  ambiguous; (E) select - use actual visible candidates + context, semantic (not
+  crude whole-string) matching, bounded scrolling with re-observe, honest stop when
+  nothing is relevant; (F) playback - verify a real player/playback state (controls,
+  selected title, semantics, bounded wait + fresh observation) across layouts/full-
+  screen/transient controls; if playback cannot be established, report UNVERIFIED.
+  Reference: `agent/TaskOrchestrator.kt`, `accessibility/AgentAccessibilityService.kt`,
+  `agent/DeviceAutomation.kt`, `planning/PostconditionVerifier.kt`,
+  `agent/ForegroundPackageVerifier.kt`.
+- 10.4 TRUSTWORTHY OBSERVATIONS. Goal: the tree is trustworthy evidence. Method:
+  audit `dumpHierarchy()` traversal/filtering; record active package/window, visible
+  text + content-desc, view id + widget class, clickable/editable/scrollable/focused/
+  enabled/selected, bounds + hierarchy + timestamp, and a truncation/partial flag;
+  never treat invisible/off-screen/zero-area/disabled controls as valid tap targets
+  (keep disabled state for reasoning, never auto-activate); handle clickable child vs
+  ancestor, rank ambiguous candidates or report ambiguity; inspect multi-window/dialog
+  surfaces; never reuse stale nodes/coordinates after a transition. Reference:
+  `accessibility/UiNode.kt`, `accessibility/AgentAccessibilityService.kt`,
+  `agent/DeviceAutomation.kt`.
+- 10.5 EVENT-DRIVEN SETTLING + PERCEPTION LADDER. Goal: act on settled, sufficient
+  evidence. Method: reuse the a11y event stream + bounded settle (wait for a relevant
+  event or bounded condition, re-observe, compare semantic state, brief extra wait on
+  real loading evidence, then a bounded action-specific timeout - no infinite polling,
+  no second uncontrolled loop); choose screenshot/vision by meaningful coverage
+  signals (target-match failure, useful labels, truncation, missing interactive
+  elements, expected-vs-observed mismatch) NOT node count; fallback order =
+  tree semantics -> fresh semantic search -> OCR with real bounding boxes ->
+  multimodal model (when the runtime supports images) -> alternative validated app
+  action/deep link -> bounded recovery or honest blocker. Reference:
+  `perception/ScreenAwareness.kt`, `agent/DeviceAutomation.kt`,
+  `perception/VisionPerception.kt`, `agent/TaskOrchestrator.kt`.
+- 10.6 OCR GROUNDING JUSTIFIES A TAP. Goal: OCR coordinates are real, mapped, and
+  confidence-gated. Method: keep `OcrTextBox`/`readTextBoxes()`; ground from actual
+  recognised bounding boxes (never text-line-index, screen-centre, or arbitrary
+  coordinates); map screenshot coords <-> Android screen coords accounting for
+  rotation/display size/insets; on low confidence, overlapping targets, or missing
+  box return "target unresolved" and DO NOT tap; if a screenshot is sent but the
+  runtime falls back to text-only, record that truthfully and never present text-only
+  as visual inference. Audit that the active model artifact/runtime can accept images.
+  Reference: `perception/VisionPerception.kt`, `model/LiteRtLmRuntime.kt`,
+  `model/GemmaInferenceEngine.kt`.
+- 10.7 RELIABLE TARGET RESOLUTION + TEXT INPUT. Goal: no unsafe target fallbacks.
+  Method: review `findTargetNodeInfo()`/`findTargetEditableNode()`; remove the
+  "fall back to the first editable element" behaviour, disabled/invisible matching,
+  first-fuzzy-match-when-ambiguous, and "API dispatch == correct element reacted";
+  introduce a small testable resolution result (unique / ambiguous / none with
+  reason + confidence); update `AgentAction`/`ToolRegistry`/`TaskPlanParser`/
+  validation/risk/executor/tests together only when a contract truly changes.
+  Reference: `agent/DeviceAutomation.kt`, `agent/ToolRegistry.kt`,
+  `planning/TaskPlanParser.kt`, `agent/AgentAction.kt`.
+- 10.8 FAILURE DIAGNOSIS + SELF-HEALING (audit first, no duplicates). Goal: recover
+  by the REAL failure type. Method: audit actual call paths of `FailureClassifier`,
+  `StuckLoopDetector`, `ProgressBudget`, `ObstacleDetector`, `attemptReplan(...)`,
+  reflection/exploration, checkpoints, screen events; classify before recovering
+  (a11y unavailable / target missing / incomplete tree / ambiguous / wrong app /
+  wrong field / text not persisted / not submitted / loading / explicit no-results /
+  network / permission-or-login / model unavailable-or-invalid / timeout / repeated
+  loop / postcondition failed); pick recovery by type (a missing target is NOT
+  automatically "scroll"; a failed tap is NOT automatically "Back"; loading is NOT
+  always "replan"); bounded strategies only (wait, re-observe+re-resolve, retry only
+  on transient evidence, alternate interaction, alternate verified route, safe
+  backtrack, replan with current screen + completed subgoals, ask the user); detect
+  short AND long recurring loops; recovery budgets terminate. One source of truth for
+  task progress; no duplicate actions from async state/resume/UI events/overlapping
+  jobs; cancellation + pause/resume preserve intended state. Reference:
+  `agent/FailureClassifier.kt`, `agent/StuckLoopDetector.kt`, `agent/ProgressBudget.kt`,
+  `agent/ObstacleDetector.kt`, `agent/TaskOrchestrator.kt`.
+- 10.9 ROBUST NL PLANNING + FALLBACK INTEGRITY. Goal: better decisions, not bigger
+  models. Method: reuse the local planner + schema + parser + validation +
+  step-decision pipeline; improve only where real failures show a need; support
+  multiple ordered subgoals, dependent actions, conditional next steps, semantic
+  result selection, evidence-waiting, cross-screen extraction, completion-vs-partial
+  distinction, and follow-ups referencing the prior task/result; structured bounded
+  outputs, all params validated, no arbitrary code/shell/unrestricted calls; keep the
+  local model for ambiguity and deterministic actions for clear steps. Preserve +
+  regression-test the explicit BASIC fallback gate: a malformed model response must
+  NOT silently downgrade to heuristics unless BASIC was explicitly enabled; make the
+  active planning source visible in logs and UI. Do NOT increase model size or
+  context indiscriminately - the goal is better decision quality and grounding, not
+  more tokens. Reference: `planning/AgentPlanner.kt`,
+  `planning/TaskPlanParser.kt`, `planning/PlannerPromptBuilder.kt`,
+  `ui/AgentDashboardScreen.kt`.
+- 10.10 ADVERSARIAL REGRESSION SUITE (the task-3.1/4.G scenarios). Goal: failures
+  become tests. Method: add deterministic tests (real decision/verification logic,
+  not hardcoded successes) for: search icon with no field yet; comment input present;
+  multiple editable fields; unresolvable field; keyboard opens but no submit; query
+  entered but no results; changed screen with no results evidence; explicit no-results;
+  result titles differing from the query; network-delayed results; popup/ad/permission
+  prompt; tap dispatches but opens the wrong screen; result opens but playback not
+  established; already on the intended screen; user changes the screen mid-run. Plus
+  the scripted end-to-end: launch YouTube -> search -> submit -> results state ->
+  select -> player state -> playback -> home. The fake device must NOT return success
+  regardless of action. Reference: `app/src/test/java/com/example/**` (reuse
+  `TestFakes.kt`), `app/src/androidTest/**`.
+- 10.11 PERMISSIONS / SECURITY / USER CONTROL (keep intact). Goal: autonomy never
+  bypasses the user. Method: keep all execution inside the validated action/tool
+  architecture; require explicit confirmation for messages/calls/publish/delete/
+  purchase/payment and other sensitive/irreversible actions; never bypass auth/
+  biometrics/OTP/CAPTCHA/consent - ask the user; Shizuku stays off unless explicitly
+  enabled AND the service is present; cloud planning stays OFF by default and reports
+  network failures honestly without shipping private screen data; validate untrusted
+  app/web text before it enters prompts (data, never instructions); no hidden
+  surveillance/background access/data collection. Reference:
+  `agent/AgentAction.kt` (`RiskEvaluator`), `settings/CapabilitySettings.kt`,
+  `privileged/PrivilegedActions.kt`, `planning/CloudPlannerProvider.kt`,
+  `planning/PlannerPromptBuilder.kt`.
+
+Phase 10 note: prefer a small number of dependable, verifiable capabilities over many
+impressive-sounding ones. Do NOT replace the app, rewrite `TaskOrchestrator`, add a
+bigger/second model, change the GPU/CPU backend, or duplicate engines/orchestrators.
+Every item is regression-tested against the existing suite.
+- Follow one real task through the COMPLETE live path and audit at least:
+  `TaskOrchestrator.kt`, `DeviceAutomation.kt`, `HybridStepExecutor.kt`,
+  `accessibility/AgentAccessibilityService.kt`, `accessibility/UiNode.kt`,
+  `ForegroundPackageVerifier.kt`, `planning/PostconditionVerifier.kt`,
+  `planning/TaskPlanParser.kt`, `agent/ToolRegistry.kt`, `planning/AgentPlanner.kt`,
+  `model/GemmaInferenceEngine.kt`, `model/LiteRtEngine.kt`, `model/LiteRtLmRuntime.kt`,
+  `perception/VisionPerception.kt`, plus the screen-observation/event/recovery/
+  model-loading/logging/test classes. Check which code is ACTUALLY called, what
+  counts as success at each stage, and how failures propagate.
+- Tests: reuse the current fakes + orchestration test infrastructure (`TestFakes.kt`);
+  keep tests deterministic; validate NEGATIVE cases and real outcomes, not merely
+  that a helper returned a value; do not inflate test count or weaken assertions to
+  make CI green. Where Android instrumentation tests can safely exercise real service
+  wiring, include them (do not claim fake observations prove the real YouTube
+  workflow works on a physical phone).
+
+## 4B. CHANGE MANAGEMENT, VALIDATION & DELIVERY (per the acceptance spec)
+
+Apply these rules to the WHOLE pass (Phases 7-10), not just Phase 10:
+
+- Branch + review discipline: work on a dedicated branch off the latest `main`
+  (e.g. `openhands/jarvis-autonomy-reliability`); do NOT commit to `main`, merge your
+  own PR, rewrite history, or discard user changes; open a PR for review.
+- Inspect-before-change: read the actual latest `main`, current commit, working tree,
+  `AGENTS.md`, `.agents_tmp/PLAN.md`, Gradle config, manifest, tests, and the live
+  wiring of every relevant feature; review the latest merged changes INCLUDING
+  PR #25; treat this plan as a hypothesis, not truth. Produce a concise GAP MATRIX
+  (working / partially implemented / disconnected / broken / infeasible) in the PR
+  description, then implement - do not finish with an audit-only response.
+- Preserve working functionality: keep Jarvis branding/UI, the model download + init
+  flow (error reporting + retry), the on-device Gemma E2B/LiteRT architecture, the
+  a11y service + native actions + planner/parser/tool-validation pipeline, history/
+  persistence/skills/memory/voice/settings/notification/automation capabilities, the
+  permission gates/risk checks/confirmations/opt-in defaults, and all Phase 0-9
+  behaviour. Prefer targeted improvements; no unnecessary deps/abstractions/redesigns.
+- Capability audit (spec section 9): classify each Phase 0-9 capability as
+  working / under-tested / partial / broken / infeasible, then fix genuine gaps.
+  Audit each capability from the UI/trigger through the real implementation to the
+  final observable result - do NOT recreate existing features:
+  * 9.1 Voice/hands-free: speech recognition, mic-permission handling, language
+    detection, Hindi/Roman-Hindi, TTS, hands-free re-arming, pause/stop, lifecycle,
+    error recovery, and - critically - the mic must NOT stay active once the feature
+    is disabled, permission revoked, or the agent stops.
+  * 9.2 Conversational memory: persistence of preferences/recent context/outcomes/
+    cross-turn references; memory must NOT override an explicit current instruction;
+    handle stale/conflicting memories; provide inspect/correct/delete of saved info.
+  * 9.3 Skills/routines: view/save/edit/delete/replay; replays must re-resolve
+    semantic targets on the CURRENT screen (never stale coordinates); risky actions
+    still require confirmation even for a previously-approved skill.
+  * 9.4 Cross-app workflows: validated variables, bounded state, no reuse of an old
+    value after extraction fails, source/freshness tracking, no leak of sensitive
+    content.
+  * 9.5 Scheduled/event automation: WorkManager scheduling, trigger matching,
+    persistence, duplicate prevention, cancellation, permission state, battery
+    constraints; OFF by default + explicit opt-in; no risky background action.
+  * 9.6 Notifications/proactive awareness: listener + permission state; distinguish
+    confirmed data from inference; no sensitive notification content in logs; aware-
+    ness bounded/explainable/disableable; no uncontrolled proactive-action loop.
+  * 9.7 HUD/settings/diagnostics: the UI must show active model/planning source,
+    current task+subgoal, last action + verification result, recovery attempts +
+    reason, current blocker, cancellation/pause state, and model-load/permission
+    failures; it must distinguish "action dispatched" / "step verified" / "goal
+    completed" / "goal unverified" and never hide failure behind a generic label.
+  Features needing special device permissions must explain the requirement instead
+  of silently pretending to work.
+- Reliability/perf (spec section 11): profile the real lifecycle (no guesses); keep
+  init, image inference, observation and long tasks bounded + cancellable; prevent
+  repeated model init, duplicate concurrent tasks, leaks, unrecycled Android objects
+  and UI-thread blocking. Test recovery when the model/app is interrupted by: low
+  available RAM; model-load or inference error; app backgrounding; a screen
+  transition mid-execution; the accessibility service disabled/disconnected; network
+  disconnection; pause / cancellation / resume; and device resource constraints.
+  Keep the device-fit checks and the E2B architecture; only implement optimisations
+  supported by tests/measurements; battery/thermal behaviour must degrade gracefully
+  with no hidden network activity and no endless expensive retries.
+- Real-device validation + honest reporting: build/improve an in-app self-test and a
+  concise device QA checklist (Android version/device info, model readiness + actual
+  inference mode, a11y enabled, required permissions/opt-ins, the test command +
+  observed start state, screen/action sequence, expected vs observed postconditions,
+  exact failure stage + logs, and whether the run was simulated / emulator / physical).
+  NEVER report a physical-device test as passed unless it actually ran on the device;
+  if there is no phone access, say physical validation is pending and give a
+  repeatable manual procedure. Prefer reproducible failures over vague intelligence
+  claims.
+- Mandatory validation commands (from the repo root, per `AGENTS.md`): run
+  `./gradlew :app:testDebugUnitTest --no-daemon`,
+  `./gradlew :app:assembleDebug --no-daemon`,
+  `./gradlew :app:lintDebug --no-daemon` (if supported), and
+  `./gradlew :app:compileDebugAndroidTestKotlin --no-daemon` (where supported).
+  Diagnose + fix real failures and re-run; never delete tests or suppress errors to
+  force green. Inspect the final diff for unintended UI changes, duplicate impls,
+  dead/disconnected code, unsafe fallbacks, accidental permission changes, secret/
+  key exposure, unnecessary deps, regressions in download/loading, incorrect success
+  states, and non-cancellable background work. Do not confuse a green APK build with
+  real-device automation.
+- Definition of done: audit done + real gaps addressed; high-priority search/target/
+  verification bugs covered by regression tests; no false success from failed/
+  ambiguous interactions; bounded state-aware recovery; existing features + safety
+  gates intact; new tests + builds pass (or every remaining failure documented); every
+  changed capability has a real test or an honest limitation note; no unverified
+  device claims; a PR exists (not auto-merged). Final report must include: root causes
+  found in the latest code, fixes/behaviour changes, files changed + why, exact test/
+  build commands with pass/fail, what remains unimplemented/unverified on a physical
+  phone, how to build/install + reproduce the E2E tests, and the PR link.
+
 ## 4A. FINAL BUG SWEEP - FIND AND FIX EVERY BUG (compulsory, end of the pass)
 
 The user asked, explicitly, to find and fix ALL bugs/errors at the end. After
-Phases 7, 8 and 9 are implemented, run a full audit and fix every finding (do not
-just report them):
+Phases 7, 8, 9 and 10 are implemented, run a full audit and fix every finding (do
+not just report them):
 
 - Build + tests: make `./gradlew :app:assembleDebug` and
   `./gradlew :app:testDebugUnitTest` pass with zero failures; fix compile errors,
@@ -1651,6 +1931,68 @@ Phase 9 (fully-automated Jarvis capability upgrades):
 - All Phase 9 always-on/privacy features are OFF by default and require an
   explicit, visible opt-in (assert the default state for each).
 
+Phase 10 (reliable multi-step execution, acceptance spec):
+- 10.1: a dispatched-but-unverified action does NOT advance the task; a `NONE`
+  verification never marks completion; a bare screen change alone never satisfies a
+  step; a model `report_status` cannot complete the task.
+- 10.2: each goal type has its own verifier - OpenApp (foreground package), search
+  (submitted + result surface / explicit no-results), play (player/playback evidence,
+  not a tapped row), Wi-Fi (real toggle state), home (launcher foreground), read
+  (content obtained), send (approval + verified send state). Unverifiable -> honest
+  failure, not success.
+- 10.3: the full YouTube path (launch -> search -> submit -> results -> select ->
+  playback -> home) completes on scripted observations; playback-unverifiable is
+  reported UNVERIFIED, not success.
+- 10.4: invisible/off-screen/zero-area/disabled nodes are never valid tap targets;
+  disabled state is preserved for reasoning but not auto-activated; ambiguous
+  candidates are reported, not arbitrarily chosen; stale nodes are not reused.
+- 10.5: settling waits on events/bounded conditions (no infinite poll, no second
+  loop); vision is selected by coverage signals, not node count; the fallback ladder
+  is exercised in order.
+- 10.6: OCR taps use real recognised bounding boxes (no line-index/centre/arbitrary
+  coordinates); low-confidence/overlap/missing-box returns "unresolved" and does NOT
+  tap; a text-only fallback when an image was sent is recorded truthfully.
+- 10.7: no fallback to the first editable element; ambiguous/disabled/invisible
+  targets are refused; resolution returns unique/ambiguous/none with a reason.
+- 10.8: recovery is chosen by failure type (missing target != scroll; failed tap !=
+  Back; loading != replan); short and long loops are detected; budgets terminate; one
+  source of truth prevents duplicate actions; cancel/pause/resume keep state.
+- 10.9: multi-subgoal, dependent, conditional, cross-screen-extraction and follow-up
+  commands plan correctly; malformed output does NOT downgrade to heuristics unless
+  BASIC was explicitly enabled; the active planning source is visible.
+- 10.10: the full adversarial scenario list (search icon/no field, comment input,
+  multiple fields, unresolvable field, no-submit, no-results, changed-screen-no-
+  evidence, titles differing from the query, delayed results, popup/ad/permission,
+  wrong-screen tap, playback-not-established, already-on-screen, mid-run user change)
+  is covered by tests of real decision/verification logic; the fake device never
+  returns unconditional success.
+- 10.11: risky/irreversible actions still confirm; auth/OTP/CAPTCHA/consent are never
+  bypassed; Shizuku stays off unless enabled + present; cloud planning stays off by
+  default and reports failures honestly; untrusted text never overrides policy.
+
+Spec section 12 mandatory test scenarios (at minimum - deterministic, negative-case
+assertions, not just "a helper returned a value"):
+1. Correct app launch AND wrong-package rejection.
+2. Search icon versus search input.
+3. Search field versus comment/message field.
+4. Text entered into the wrong field must NOT satisfy the intended step.
+5. Text not persisted, or query not submitted.
+6. Search results missing / loading / explicitly empty.
+7. A changed screen without relevant evidence.
+8. Ambiguous target and disabled target.
+9. OCR target bounding-box grounding and absent-label rejection.
+10. Result tap with no valid detail/player transition.
+11. Playback not established.
+12. Wrong app opened, or an unexpected popup.
+13. Recovery chooses a different valid path after an actual failure.
+14. No endless scrolling / repeated same-state actions.
+15. Replanning preserves completed work and never replays a risky side effect.
+16. Invalid JSON, invalid parameters, unavailable model, explicit fallback gating.
+17. Pause/resume/cancellation and task-budget exhaustion.
+18. Hindi and Roman-Hindi commands.
+19. Skills, memory and cross-app data do not use stale values.
+20. All risky actions retain their confirmation gates.
+
 Final bug sweep (section 4A):
 - `./gradlew :app:testDebugUnitTest` and `:app:assembleDebug` are green; the whole
   app graph has no unreachable/dead capability; lint errors are resolved; the
@@ -1676,4 +2018,17 @@ Global:
   "remember that ..." fact is used in a later task; a scheduled briefing fires; and
   every always-on feature stays OFF until explicitly enabled and pauses on low
   battery.
+- Manual device check (Phase 10, the benchmark): on the Motorola Edge 70 Fusion,
+  "Open YouTube, search for lo-fi music, select the first relevant video, verify it
+  is playing, then return home" completes with a verified playback state and a
+  launcher foreground - and when playback cannot be established the app says
+  UNVERIFIED, never a false success. If no phone is available, this remains PENDING
+  and the repeatable manual QA checklist (section 4B) is the deliverable instead.
+
+Real-device QA checklist + honest reporting (section 4B): the in-app self-test and
+the manual checklist record Android/device info, model readiness + actual inference
+mode, accessibility state, required permissions/opt-ins, the test command + start
+state, the screen/action sequence, expected vs observed postconditions, the exact
+failure stage + logs, and whether the run was simulated / emulator / physical. No
+physical-device pass is claimed unless it actually ran on the device.
 

@@ -1,6 +1,7 @@
 package com.example.agent
 
 import com.example.accessibility.UiNode
+import com.example.perception.TargetResolver
 import com.example.planning.PlanStep
 
 /** Outcome of evaluating one plan step against the deterministic fast path. */
@@ -139,10 +140,14 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 val target = action.targetText
                 if (target.isNullOrBlank()) {
                     FastPathDecision.ModelReason("a coordinate-only tap needs model reasoning")
-                } else if (observation.hasActivatableLabel(target, allowEditable = true)) {
-                    FastPathDecision.Execute(AgentAction.Tap(target, null, null), "deterministic tap on an observed control")
                 } else {
-                    FastPathDecision.ModelReason("target '$target' is not visible to tap deterministically")
+                    val resolved = observation.resolveTarget(target, allowEditable = true, requireActivatable = true)
+                    if (resolved.actionable) {
+                        FastPathDecision.Execute(AgentAction.Tap(target, null, null), "deterministic tap on an observed control")
+                    } else {
+                        // Never auto-tap an ambiguous/unresolved/disabled target.
+                        FastPathDecision.ModelReason("target '$target' is not uniquely resolvable: ${resolved.reason}")
+                    }
                 }
             }
 
@@ -184,21 +189,21 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
             )
 
             is AgentAction.OpenItem -> {
-                val match = if (query != null) {
-                    observation.nodes.firstOrNull {
-                        !it.isEditable &&
-                            it.packageName == observation.packageName &&
-                            it.containsText(query) &&
-                            observation.hasActivatableLabel(query, allowEditable = false)
-                    }
+                // Prefer the step's own target label; fall back to the query typed
+                // earlier in the plan when the target is generic.
+                val hint = action.targetText.ifBlank { query ?: "" }
+                val resolved = if (hint.isNotBlank()) {
+                    observation.resolveTarget(hint, allowEditable = false, requireActivatable = true)
                 } else {
                     null
                 }
                 when {
-                    match != null -> FastPathDecision.Execute(
-                        AgentAction.OpenItem(match.bestLabel()),
-                        "deterministic open of the observed matching result"
+                    resolved?.actionable == true -> FastPathDecision.Execute(
+                        AgentAction.OpenItem(resolved.node!!.bestLabel()),
+                        "deterministic open of the uniquely-resolved result"
                     )
+                    resolved != null && resolved.outcome == TargetResolver.Outcome.AMBIGUOUS ->
+                        FastPathDecision.ModelReason("result '$hint' is ambiguous: ${resolved.reason}")
                     // Results often need a moment after the query is submitted; wait once
                     // (bounded by [nudgeUsed]) so the next observation can find the item.
                     !nudgeUsed -> FastPathDecision.Execute(
@@ -220,8 +225,16 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
             action.packageName ?: appDirectory.resolvePackage(action.appQuery)
         }
 
-    private fun editableFieldVisible(observation: UiObservation): Boolean =
-        observation.nodes.any { it.isLikelyTextInput() && inForegroundPackage(it, observation) }
+    private fun editableFieldVisible(observation: UiObservation): Boolean {
+        val inputs = observation.nodes.filter {
+            it.isLikelyTextInput() && inForegroundPackage(it, observation)
+        }
+        if (inputs.isEmpty()) return false
+        // Exactly one candidate, or one is already focused -> unambiguous.
+        // Several unfocused inputs (search box + comment box) is ambiguous; the
+        // caller must resolve which field first (10.7).
+        return inputs.size == 1 || inputs.any { it.isFocused }
+    }
 
     private fun inForegroundPackage(node: UiNode, observation: UiObservation): Boolean =
         node.packageName == null || node.packageName == observation.packageName

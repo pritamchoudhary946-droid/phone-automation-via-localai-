@@ -131,6 +131,11 @@ class OcrVisionGrounder(
     private val ocrReader: OcrReader
 ) : VisionGrounder {
 
+    private companion object {
+        /** Minimum grounded confidence before a tap is allowed (10.6). */
+        const val MIN_TAP_CONFIDENCE = 0.6f
+    }
+
     override suspend fun locate(instruction: String, screenshot: Bitmap): VisionPoint? {
         val needle = normalize(instruction)
         if (needle.isBlank()) return null
@@ -157,6 +162,10 @@ class OcrVisionGrounder(
             }
             OcrTextBox(box.text, box.bounds, (box.confidence * score).coerceIn(0f, 1f))
         }.maxByOrNull { it.confidence } ?: return null
+
+        // Confidence gate (10.6): a weak/ambiguous grounding must not justify a tap.
+        // Better to report the target unresolved than to tap a random point.
+        if (candidate.confidence < MIN_TAP_CONFIDENCE) return null
 
         val bounds = candidate.bounds
         val width = bounds.right - bounds.left
