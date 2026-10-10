@@ -111,7 +111,12 @@ object PlannerPromptBuilder {
 
     /** Short catalogue handed to the model. Never exposes free-form Android APIs. */
     fun availableActions(registry: ToolRegistry): List<String> =
-        registry.getRegisteredTools().map { it.name }
+        registry.getRegisteredTools()
+            .map { it.name }
+            // ask_confirmation cannot be executed by the native layer (the loop injects
+            // its own risk prompt). Exposing it would let the model emit a step that is
+            // always rejected, burning attempts and step budget.
+            .filter { it != ToolRegistry.TOOL_ASK_CONFIRMATION }
 
     /**
      * Neutralises instruction-like content in untrusted, app-controlled text before

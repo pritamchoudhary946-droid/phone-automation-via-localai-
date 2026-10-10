@@ -469,6 +469,56 @@ class FixesRegressionTest {
         assertTrue("home step must still run", automation.executed.any { it is AgentAction.Home })
     }
 
+    /**
+     * Bug: `com.android.systemui` was treated as a home package, so pressing Home
+     * while the notification shade was open satisfied a Home step without ever
+     * reaching the launcher. SystemUI must not count as home.
+     */
+    @Test
+    fun systemUiIsNotTreatedAsHome() {
+        assertTrue(!com.example.agent.ForegroundPackageVerifier.isHomePackage("com.android.systemui"))
+        assertTrue(com.example.agent.ForegroundPackageVerifier.isHomePackage("com.android.launcher3"))
+        assertTrue(com.example.agent.ForegroundPackageVerifier.isHomePackage("com.miui.home"))
+    }
+
+    /** Bug: substring JSON scraping mangled abstracts containing quotes/newlines. */
+    @Test
+    fun cloudflareAbstractTextParsesEscapedContentWithRealJson() {
+        val gateway = com.example.cloudflare.CloudflareGateway()
+        val body = """{"AbstractText":"He said \"hello\"\nand left","Other":"x"}"""
+        assertEquals("He said \"hello\"\nand left", gateway.extractAbstractText(body))
+        assertEquals("", gateway.extractAbstractText("<html>not json</html>"))
+        assertEquals("", gateway.extractAbstractText("""{"AbstractText":""}"""))
+    }
+
+    /**
+     * Bug: a server returning 206 with the wrong Content-Range start offset caused the
+     * download to append at the wrong position, silently corrupting the model. The
+     * resume check must detect a start that does not match the requested offset.
+     */
+    @Test
+    fun contentRangeStartIsParsedAndMismatchDetected() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val manager = LiteRtModelManager(context)
+        assertEquals(1048576L, manager.parseContentRangeStart("bytes 1048576-2588147711/2588147712"))
+        assertEquals(0L, manager.parseContentRangeStart("bytes 0-99/100"))
+        // Missing/malformed header must signal a mismatch (not a match at 0).
+        assertEquals(-1L, manager.parseContentRangeStart(null))
+        assertEquals(-1L, manager.parseContentRangeStart("bytes */2588147712"))
+    }
+
+    /**
+     * Bug: the planner advertised `ask_confirmation`, which the native layer cannot
+     * execute, so the model could emit a step that is always rejected. The prompt's
+     * action catalogue must not include it.
+     */
+    @Test
+    fun plannerActionCatalogueExcludesUnsupportedAskConfirmation() {
+        val actions = com.example.planning.PlannerPromptBuilder.availableActions(com.example.agent.ToolRegistry())
+        assertTrue(!actions.contains(com.example.agent.ToolRegistry.TOOL_ASK_CONFIRMATION))
+        assertTrue(actions.contains(com.example.agent.ToolRegistry.TOOL_LAUNCH_APP))
+    }
+
     // ---- helpers ----
 
     private fun node(isEnabled: Boolean, isClickable: Boolean): UiNode = UiNode(

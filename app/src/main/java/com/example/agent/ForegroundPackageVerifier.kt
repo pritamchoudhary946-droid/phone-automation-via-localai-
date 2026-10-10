@@ -23,8 +23,10 @@ object ForegroundPackageVerifier {
     fun isHomePackage(packageName: String?): Boolean {
         val pkg = packageName?.trim()?.lowercase() ?: return false
         if (pkg.isBlank()) return false
-        return pkg == "com.android.systemui" ||
-            pkg.contains("launcher") ||
+        // Never treat SystemUI as home: it owns the notification shade and quick
+        // settings, so a Home step performed while the shade is open would be
+        // declared complete even though the launcher was never reached.
+        return pkg.contains("launcher") ||
             pkg.endsWith(".home") ||
             pkg.contains("miui.home") ||
             pkg.contains("touchwiz") ||

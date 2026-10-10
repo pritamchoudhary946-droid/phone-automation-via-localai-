@@ -518,6 +518,9 @@ class TaskOrchestrator(
                 Log.e(TAG, "Task execution error", e)
                 taskDao.updateTaskStatus(task.id, "FAILED")
                 _orchestratorState.value = OrchestratorState.Failed(task.id, "Error: ${e.localizedMessage}")
+                // The loop ended abnormally; clear the ongoing notification so it does
+                // not linger until the process is killed.
+                runCatching { stopExecutionService() }
             }
         }
     }
@@ -701,6 +704,8 @@ class TaskOrchestrator(
                 taskDao.updateTask(task.copy(status = "CANCELLED", resultSummary = "User rejected risky action"))
                 userConfirmedAction = null
                 _orchestratorState.value = OrchestratorState.Failed(taskId, "User rejected action: ${action.getDisplayName()}")
+                // Rejecting ends the run; tear down the foreground service too.
+                stopExecutionService()
             }
         }
     }
@@ -708,6 +713,8 @@ class TaskOrchestrator(
     fun pauseCurrentTask() {
         executionJob?.cancel()
         executionJob = null
+        // The loop is gone, so nothing else will remove the ongoing notification.
+        stopExecutionService()
         val task = _currentTask.value ?: return
         scope.launch {
             taskDao.updateTaskStatus(task.id, "PAUSED")
@@ -721,6 +728,13 @@ class TaskOrchestrator(
             taskDao.updateTaskStatus(taskId, "RUNNING")
             _currentTask.value = task
             _currentSteps.value = taskStepDao.getStepsForTaskList(taskId)
+            // Pausing/cancelling tears the foreground service down, so a resume must
+            // bring it back to keep the task alive if the user leaves the app.
+            try {
+                AgentExecutionService.startService(context, task.userGoal)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not restart foreground execution service: ${e.message}")
+            }
             // Continue the existing plan (if it is still in memory for this goal)
             // instead of re-planning and replaying already-executed actions.
             runAgentLoop(task, resumePlan = _activePlan.value)

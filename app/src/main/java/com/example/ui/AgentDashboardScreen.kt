@@ -561,7 +561,8 @@ fun AgentDashboardScreen(
                 }
             }
 
-            if (activePlan != null && activePlan!!.steps.isNotEmpty()) {
+            val plan = activePlan
+            if (plan != null && plan.steps.isNotEmpty()) {
                 item {
                     Text(
                         text = "Current Task Plan",
@@ -570,7 +571,7 @@ fun AgentDashboardScreen(
                         color = MaterialTheme.colorScheme.onBackground
                     )
                 }
-                items(activePlan!!.steps) { planStep ->
+                items(plan.steps) { planStep ->
                     val statusColor = when (planStep.status) {
                         PlanStepStatus.COMPLETED -> MintSuccess
                         PlanStepStatus.FAILED -> CrimsonDanger

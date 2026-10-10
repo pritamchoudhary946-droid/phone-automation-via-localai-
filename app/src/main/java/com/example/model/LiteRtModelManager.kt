@@ -123,6 +123,20 @@ class LiteRtModelManager(
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    /**
+     * Extracts the start byte from an HTTP `Content-Range` header
+     * (e.g. `bytes 1048576-2588147711/2588147712`). Returns -1 when the header is
+     * absent or malformed, which the caller treats as a mismatch and restarts.
+     *
+     * `internal` so the resume-integrity check is unit-testable without a network.
+     */
+    internal fun parseContentRangeStart(contentRange: String?): Long {
+        val value = contentRange?.trim() ?: return -1L
+        val afterUnit = value.substringAfter("bytes", "").trim()
+        val startToken = afterUnit.substringBefore("-").trim()
+        return startToken.toLongOrNull() ?: -1L
+    }
+
     fun checkExistingModel() {
         val file = getModelFile()
         val isVerified = prefs.getBoolean(KEY_MODEL_VERIFIED, false)
@@ -228,7 +242,18 @@ class LiteRtModelManager(
                 throw NonRetryableDownloadException("HTTP ${resp.code}: ${resp.message}")
             }
             if (!isPartial) existingBytes = 0L
-            if (isPartial && resp.header("Content-Range") == null) existingBytes = 0L
+            if (isPartial) {
+                // A 206 does not guarantee the server honoured our exact offset: it may
+                // return a different range (or a range that starts at 0). Appending at
+                // the wrong offset silently corrupts the model, so verify the start byte
+                // and fall back to a full restart when it does not match.
+                val contentRange = resp.header("Content-Range")
+                val rangeStart = parseContentRangeStart(contentRange)
+                if (rangeStart != existingBytes) {
+                    Log.w(TAG, "Resume range mismatch (requested $existingBytes, Content-Range=$contentRange); restarting from 0")
+                    existingBytes = 0L
+                }
+            }
 
             val body = resp.body ?: throw NonRetryableDownloadException("Empty response body from server")
             val contentType = body.contentType()?.toString() ?: ""
