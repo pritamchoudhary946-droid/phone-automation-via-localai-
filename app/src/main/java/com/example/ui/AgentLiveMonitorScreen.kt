@@ -63,6 +63,10 @@ fun AgentLiveMonitorScreen(
     val orchestratorState by orchestrator.orchestratorState.collectAsState()
     val currentTask by orchestrator.currentTask.collectAsState()
     val steps by orchestrator.currentSteps.collectAsState()
+    // 6.12: a visible "who is deciding" trace so the user can confirm the model was used.
+    val usesModelPlanning by orchestrator.usesModelPlanning.collectAsState()
+    val modelCalls by orchestrator.modelCalls.collectAsState()
+    val fastPathSteps by orchestrator.fastPathSteps.collectAsState()
 
     // Map rich orchestrator state to simplified Status (Idle / Thinking / Acting / etc.)
     val simplifiedStatus = when (orchestratorState) {
@@ -199,6 +203,32 @@ fun AgentLiveMonitorScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 6.12: the model-use trace — GEMMA vs BASIC, with per-step counts.
+                AssistChip(
+                    onClick = {},
+                    modifier = Modifier.testTag("model_use_trace"),
+                    label = {
+                        Text(
+                            text = if (usesModelPlanning) {
+                                "Source: GEMMA · $modelCalls model calls · $fastPathSteps fast-path"
+                            } else {
+                                "Source: BASIC (rule-based) · degraded mode"
+                            },
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (usesModelPlanning) Icons.Default.AutoAwesome else Icons.Default.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (usesModelPlanning) MintSuccess else AmberWarning
+                        )
+                    }
                 )
 
                 if (currentTask != null) {

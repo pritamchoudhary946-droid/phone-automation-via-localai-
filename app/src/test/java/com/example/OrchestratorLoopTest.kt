@@ -203,6 +203,8 @@ class OrchestratorLoopTest {
         // A model engine that was never initialized: Gemma unavailable.
         val engine = basicEngine()
         assertFalse(engine.isReady())
+        // 6.1: keywords run ONLY in the explicitly enabled degraded mode.
+        engine.setFallbackExplicit(true)
 
         val orchestrator = newOrchestrator(engine, automation)
         orchestrator.startTask("Open YouTube", maxSteps = 4)
@@ -211,6 +213,27 @@ class OrchestratorLoopTest {
         assertTrue("expected completion, got $terminal", terminal is OrchestratorState.Completed)
         assertFalse("must not claim Gemma planning", orchestrator.usesModelPlanning.value)
         assertTrue(automation.executed.any { it is AgentAction.OpenApp })
+    }
+
+    // 6.1: with the model not loaded and degraded mode NOT enabled, the task must block
+    // with a clear reason instead of silently running the keyword planner.
+
+    @Test
+    fun missingModelBlocksTaskInsteadOfRunningKeywords() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation()
+        val engine = basicEngine()
+        assertFalse(engine.isReady())
+
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("Open YouTube", maxSteps = 4)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("expected an honest block, got $terminal", terminal is OrchestratorState.Failed)
+        assertTrue(
+            "block reason must name the local model",
+            (terminal as OrchestratorState.Failed).reason.contains("Local AI not loaded", ignoreCase = true)
+        )
+        assertTrue("no automation may run without the model", automation.executed.isEmpty())
     }
 
     // 12. Multi-step YouTube search + return-home still uses native actions.

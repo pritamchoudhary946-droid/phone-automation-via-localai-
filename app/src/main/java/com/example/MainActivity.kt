@@ -19,15 +19,13 @@ import com.example.ui.AgentDashboardScreen
 import com.example.ui.AgentLiveMonitorScreen
 import com.example.ui.SetupScreen
 import com.example.ui.TaskHistoryScreen
-import com.example.ui.WebSkillsScreen
 import com.example.ui.theme.MyApplicationTheme
 
 enum class AgentTab(val title: String, val icon: ImageVector) {
     AGENT("Agent", Icons.Default.SmartToy),
     MONITOR("Live Monitor", Icons.Default.Visibility),
     SETUP("Setup & Model", Icons.Default.Download),
-    HISTORY("History", Icons.Default.History),
-    WEB_SKILLS("Web Skills", Icons.Default.Language)
+    HISTORY("History", Icons.Default.History)
 }
 
 class MainActivity : ComponentActivity() {
@@ -104,11 +102,6 @@ class MainActivity : ComponentActivity() {
                                     database = app.database,
                                     orchestrator = app.orchestrator,
                                     onNavigateBack = { selectedTab = AgentTab.AGENT }
-                                )
-                            }
-                            AgentTab.WEB_SKILLS -> {
-                                WebSkillsScreen(
-                                    cloudflareGateway = app.cloudflareGateway
                                 )
                             }
                         }
