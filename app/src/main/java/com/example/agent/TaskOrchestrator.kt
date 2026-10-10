@@ -5,12 +5,15 @@ import android.util.Log
 import com.example.data.local.AgentDatabase
 import com.example.data.local.CheckpointEntity
 import com.example.data.local.TaskEntity
+import com.example.data.local.TaskOutcomeEntity
 import com.example.data.local.TaskStepEntity
+import com.example.data.local.UserMemoryEntity
 import com.example.model.LiteRtEngine
 import com.example.planning.PlanOutcome
 import com.example.planning.PlanSource
 import com.example.planning.PlanStep
 import com.example.planning.PlanStepStatus
+import com.example.planning.PlannerPromptBuilder
 import com.example.planning.PostconditionVerifier
 import com.example.planning.TaskPlan
 import com.example.planning.VerificationMethod
@@ -68,6 +71,7 @@ class TaskOrchestrator(
     private val taskDao = database.taskDao()
     private val taskStepDao = database.taskStepDao()
     private val checkpointDao = database.checkpointDao()
+    private val memoryDao = database.memoryDao()
 
     private val hybridStepExecutor = HybridStepExecutor(appDirectory)
 
@@ -109,6 +113,9 @@ class TaskOrchestrator(
     private var pendingRiskAction: AgentAction? = null
     private var pendingRiskTaskId: String? = null
 
+    /** Bounded memory digest injected into planning prompts; loaded once per task. */
+    private var memoryDigest: String = ""
+
     /** An action the user just approved: skip re-prompting when the loop reconsiders it. */
     private var userConfirmedAction: AgentAction? = null
 
@@ -141,6 +148,7 @@ class TaskOrchestrator(
 
     private suspend fun runAgentLoop(task: TaskEntity, resumePlan: TaskPlan? = null) {
         executionJob = scope.launch {
+            memoryDigest = loadMemoryDigest(task.userGoal)
             val maxSteps = task.maxSteps
             var lastActionResult: String? = null
             var consecutiveFailures = 0
@@ -190,7 +198,8 @@ class TaskOrchestrator(
                             foregroundPackage = initialObservation.packageName,
                             historySummary = "",
                             lastActionVerification = null,
-                            remainingStepBudget = maxSteps
+                            remainingStepBudget = maxSteps,
+                            memorySummary = memoryDigest
                         )
                     }
 
@@ -236,7 +245,12 @@ class TaskOrchestrator(
                         // the remaining work from the current screen.
                         val fresh = deviceAutomation.observe()
                         val goalVerdict = verifyGoalPostcondition(plan, observation, fresh)
-                        if (goalVerdict.satisfied) {
+                        val lastRequired = plan.steps.lastOrNull {
+                            it.action !is AgentAction.FinishTask && it.action !is AgentAction.FailTask
+                        }
+                        val webToolSatisfied = lastRequired?.status == PlanStepStatus.COMPLETED &&
+                            (lastRequired.action is AgentAction.WebSearch || lastRequired.action is AgentAction.ReadUrl)
+                        if (goalVerdict.satisfied || webToolSatisfied) {
                             val summary = "Goal achieved: completed ${plan.completedCount()} of ${plan.size} planned steps."
                             complete(task, summary, completedCount)
                             return@launch
@@ -462,7 +476,13 @@ class TaskOrchestrator(
                         val allRequiredCompleted =
                             required.isNotEmpty() && required.all { it.status == PlanStepStatus.COMPLETED }
                         val goalVerdict = verifyGoalPostcondition(plan, previousObservation, observation)
-                        if (allRequiredCompleted && goalVerdict.satisfied) {
+                        // A web tool produces its own evidence (a bounded result digest), so a
+                        // plan whose final required step was a completed web_search/read_url is
+                        // satisfied without a UI postcondition.
+                        val lastRequired = required.lastOrNull()
+                        val webToolSatisfied = lastRequired?.action is AgentAction.WebSearch ||
+                            lastRequired?.action is AgentAction.ReadUrl
+                        if (allRequiredCompleted && (goalVerdict.satisfied || webToolSatisfied)) {
                             complete(task, action.summary, completedCount)
                             return@launch
                         }
@@ -701,7 +721,8 @@ class TaskOrchestrator(
                 foregroundPackage = observation.packageName,
                 historySummary = historySummary(),
                 lastActionVerification = failureDetail,
-                remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1)
+                remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1),
+                memorySummary = memoryDigest
             )
         }
         val newPlan = when (outcome) {
@@ -796,6 +817,56 @@ class TaskOrchestrator(
         "Step ${it.stepIndex}: ${it.actionType} (${it.actionPayloadJson}) -> ${it.verificationResult}"
     }
 
+    /**
+     * Builds a bounded, untrusted-labelled digest of learned memory for the prompt:
+     * the most recent preferences/app-use notes plus outcomes of similar past goals.
+     * Individual values are truncated so a verbose memory cannot blow the context.
+     */
+    private suspend fun loadMemoryDigest(goal: String): String {
+        return try {
+            val parts = mutableListOf<String>()
+            val memories = memoryDao.getRecentMemories(MEMORY_LIMIT)
+            memories.forEach { m ->
+                parts += "${m.kind.lowercase()}: ${m.value.take(200)}"
+            }
+            val similar = memoryDao.getOutcomesForGoal(goal, MEMORY_OUTCOME_LIMIT)
+                .filter { it.status == "COMPLETED" }
+            similar.forEach { o ->
+                parts += "past similar task (${o.status.lowercase()}, ${o.stepsUsed} steps): ${o.summary.take(200)}"
+            }
+            parts.joinToString("\n").take(PlannerPromptBuilder.MAX_MEMORY_CHARS)
+        } catch (e: Exception) {
+            Log.w(TAG, "Memory load failed: ${e.message}")
+            ""
+        }
+    }
+
+    /** Persists a durable preference expressed by the user (e.g. "always use Spotify"). */
+    suspend fun rememberPreference(key: String, value: String, kind: String = "PREFERENCE") {
+        if (key.isBlank() || value.isBlank()) return
+        try {
+            memoryDao.upsertMemory(UserMemoryEntity(key = key, value = value, kind = kind))
+        } catch (e: Exception) {
+            Log.w(TAG, "Memory write failed: ${e.message}")
+        }
+    }
+
+    /** Records how a finished task went, so future similar goals can reuse the approach. */
+    private suspend fun recordOutcome(task: TaskEntity, status: String, summary: String, stepsUsed: Int) {
+        try {
+            memoryDao.insertOutcome(
+                TaskOutcomeEntity(
+                    goal = task.userGoal,
+                    status = status,
+                    summary = sanitizeSensitiveData(summary).take(400),
+                    stepsUsed = stepsUsed
+                )
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Outcome write failed: ${e.message}")
+        }
+    }
+
     private suspend fun recordStep(
         task: TaskEntity,
         index: Int,
@@ -821,6 +892,7 @@ class TaskOrchestrator(
 
     private suspend fun complete(task: TaskEntity, summary: String, completedCount: Int) {
         Log.i(TAG, "[COMPLETE] $summary")
+        recordOutcome(task, "COMPLETED", summary, completedCount)
         taskDao.updateTask(task.copy(status = "COMPLETED", currentStep = completedCount, resultSummary = summary))
         _orchestratorState.value = OrchestratorState.Completed(task.id, summary)
         stopExecutionService()
@@ -828,6 +900,7 @@ class TaskOrchestrator(
 
     private suspend fun fail(task: TaskEntity, reason: String, step: Int) {
         Log.e(TAG, "[FAIL] $reason")
+        recordOutcome(task, "FAILED", reason, step)
         taskDao.updateTask(task.copy(status = "FAILED", currentStep = step, resultSummary = reason))
         _orchestratorState.value = OrchestratorState.Failed(task.id, reason)
         stopExecutionService()
@@ -933,5 +1006,8 @@ class TaskOrchestrator(
          * bounded (see OrchestratorLoopTest.failedActionTriggersBoundedRecoveryThenStops).
          */
         const val MAX_REPLANS = 1
+
+        const val MEMORY_LIMIT = 8
+        const val MEMORY_OUTCOME_LIMIT = 3
     }
 }

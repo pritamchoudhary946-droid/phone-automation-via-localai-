@@ -165,7 +165,8 @@ class FixesRegressionTest {
     /** Bug: the context window was left unbounded; a bounded value must be pinned. */
     @Test
     fun engineContextWindowIsBounded() {
-        assertEquals(2048, com.example.model.LiteRtLmRuntime.MAX_CONTEXT_TOKENS)
+        // Raised from 2048 to 3072 for richer observations; still conservative for 8 GB.
+        assertEquals(3072, com.example.model.LiteRtLmRuntime.MAX_CONTEXT_TOKENS)
     }
 
     /**

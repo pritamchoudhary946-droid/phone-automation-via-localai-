@@ -94,7 +94,8 @@ class LiteRtEngine(
         foregroundPackage: String?,
         historySummary: String,
         lastActionVerification: String?,
-        remainingStepBudget: Int
+        remainingStepBudget: Int,
+        memorySummary: String = ""
     ): PlanOutcome {
         val request = PlanningRequest(
             userCommand = goal,
@@ -104,7 +105,8 @@ class LiteRtEngine(
             completedStepsSummary = historySummary,
             lastActionResult = lastActionVerification,
             remainingStepBudget = remainingStepBudget,
-            availableActions = planner.availableActions()
+            availableActions = planner.availableActions(),
+            memorySummary = memorySummary
         )
         return planner.plan(request)
     }

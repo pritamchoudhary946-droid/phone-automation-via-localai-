@@ -63,3 +63,30 @@ interface CheckpointDao {
     @Query("DELETE FROM task_checkpoints")
     suspend fun clearAllCheckpoints()
 }
+
+@Dao
+interface MemoryDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMemory(memory: UserMemoryEntity)
+
+    @Query("SELECT * FROM user_memory ORDER BY updatedAt DESC LIMIT :limit")
+    suspend fun getRecentMemories(limit: Int): List<UserMemoryEntity>
+
+    @Query("SELECT * FROM user_memory WHERE key = :key LIMIT 1")
+    suspend fun getMemory(key: String): UserMemoryEntity?
+
+    @Query("DELETE FROM user_memory")
+    suspend fun clearMemories()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOutcome(outcome: TaskOutcomeEntity)
+
+    @Query("SELECT * FROM task_outcomes ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentOutcomes(limit: Int): List<TaskOutcomeEntity>
+
+    @Query("SELECT * FROM task_outcomes WHERE goal = :goal ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getOutcomesForGoal(goal: String, limit: Int): List<TaskOutcomeEntity>
+
+    @Query("DELETE FROM task_outcomes")
+    suspend fun clearOutcomes()
+}

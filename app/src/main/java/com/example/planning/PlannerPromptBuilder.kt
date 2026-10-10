@@ -75,6 +75,10 @@ object PlannerPromptBuilder {
         if (!request.lastActionResult.isNullOrBlank()) {
             appendLine("Last action result: ${request.lastActionResult.take(300)}")
         }
+        if (request.memorySummary.isNotBlank()) {
+            appendLine("Known about this user / past tasks (may be incomplete):")
+            appendLine(sanitizeUntrusted(request.memorySummary).take(MAX_MEMORY_CHARS))
+        }
         appendLine("Current screen (bounded summary, may be truncated):")
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
         appendLine()
@@ -143,4 +147,5 @@ object PlannerPromptBuilder {
         .trim()
 
     const val MAX_SCREEN_CHARS = 1200
+    const val MAX_MEMORY_CHARS = 600
 }
