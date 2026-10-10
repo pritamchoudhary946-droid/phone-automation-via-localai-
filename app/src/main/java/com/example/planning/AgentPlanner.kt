@@ -85,9 +85,15 @@ class AgentPlanner(
             }
         }
 
-        Log.w(TAG, "Falling back to basic mode: $lastReason")
-        val fallback = heuristicPlanner.toFallbackPlan(request.userCommand)
-        return PlanOutcome.Planned(fallback, PlanSource.BASIC_FALLBACK)
+        Log.w(TAG, "Model plan rejected after bounded repair: $lastReason")
+        return if (fallbackExplicit) {
+            val fallback = heuristicPlanner.toFallbackPlan(request.userCommand)
+            PlanOutcome.Planned(fallback, PlanSource.BASIC_FALLBACK)
+        } else {
+            // Never silently downgrade a malformed model response into keyword
+            // automation. The caller surfaces this as a clear planning failure.
+            PlanOutcome.Rejected("Model output was invalid after repair: $lastReason")
+        }
     }
 
     /**
