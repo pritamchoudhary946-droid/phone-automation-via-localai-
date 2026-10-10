@@ -1040,7 +1040,7 @@ class TaskOrchestrator(
             }
         }
         if (action is AgentAction.OpenItem) {
-            return verifyOpenedItem(action, pre, post)
+            return verifyOpenedItem(action, pre, post, visionDiff(pre, post))
         }
         val targetPkg = if (action is AgentAction.OpenApp) {
             action.packageName ?: appDirectory.resolvePackage(action.appQuery)
@@ -1081,9 +1081,10 @@ class TaskOrchestrator(
     private fun verifyOpenedItem(
         action: AgentAction.OpenItem,
         pre: UiObservation,
-        post: UiObservation
+        post: UiObservation,
+        visionChanged: Boolean = false
     ): PostconditionVerdict {
-        val changed = pre.fingerprint != post.fingerprint || visionDiff(pre, post)
+        val changed = pre.fingerprint != post.fingerprint || visionChanged
         val lower = post.summary.lowercase()
         val target = action.targetText.trim().lowercase()
         val targetPresent = target.isNotBlank() && lower.contains(target)
