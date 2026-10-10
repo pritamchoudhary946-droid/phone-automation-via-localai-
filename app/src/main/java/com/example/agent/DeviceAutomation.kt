@@ -104,7 +104,7 @@ class AndroidDeviceAutomation(
 
     override fun unavailabilityReason(): String? =
         if (serviceProvider() == null) {
-            "Accessibility Service is not enabled. Enable OmniAgent in Android Settings > Accessibility."
+            "Accessibility Service is not enabled. Enable Jarvis in Android Settings > Accessibility."
         } else {
             null
         }

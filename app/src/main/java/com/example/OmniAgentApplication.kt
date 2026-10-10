@@ -58,6 +58,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
     lateinit var speechOutput: com.example.voice.SpeechOutput
         private set
 
+    /**
+     * 8.2: the engine's live lifecycle state, exposed so SetupScreen can show the real
+     * load/failure reason and a Retry - not just download progress.
+     */
+    val engineState: kotlinx.coroutines.flow.StateFlow<com.example.model.EngineState>
+        get() = inferenceEngine.state
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     companion object {
@@ -84,9 +91,14 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         appScope.launch { runCatching { modelManager.logRemoteArtifactCheck() } }
 
         // Exactly one heavy model instance: the engine owns the single runtime.
+        // 8.1: the primary attempt may use GPU; the one bounded retry drops to CPU,
+        // because GPU delegate failures are a known cause of "downloads but won't load".
         inferenceEngine = GemmaInferenceEngine(
             runtimeFactory = { modelPath, cacheDir ->
                 LiteRtLmRuntime(modelPath = modelPath, cacheDir = cacheDir, useGpu = USE_GPU_BACKEND)
+            },
+            cpuRuntimeFactory = { modelPath, cacheDir ->
+                LiteRtLmRuntime(modelPath = modelPath, cacheDir = cacheDir, useGpu = false)
             },
             scope = appScope
         )
@@ -138,7 +150,11 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         createNotificationChannels()
     }
 
-    /** Loads and smoke-tests the engine off the UI thread once the model is verified. */
+    /**
+     * Loads and smoke-tests the engine off the UI thread once the model is verified.
+     * Returns immediately; observe [GemmaInferenceEngine.state] for the real outcome.
+     * Safe to call again (e.g. from a Retry button) - it re-attempts load.
+     */
     fun initializeEngineIfModelReady() {
         val modelFile = modelManager.getModelFile()
         if (!modelFile.exists()) {
@@ -151,16 +167,18 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 if (ok) {
                     if (!inferenceEngine.smokeTest(modelFile)) {
                         Log.w(TAG, "Smoke test failed; marking engine unavailable")
-                        inferenceEngine.shutdown()
+                        inferenceEngine.reportUnavailable(
+                            "The model loaded but did not answer a test prompt (load or memory failure)"
+                        )
                     } else {
                         Log.i(TAG, "Engine initialized and smoke test passed successfully")
                     }
                 } else {
-                    Log.w(TAG, "Engine initialization failed")
+                    Log.w(TAG, "Engine initialization failed: see EngineState.Failed for the reason")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing engine: ${e.message}", e)
-                inferenceEngine.shutdown()
+                inferenceEngine.reportUnavailable("Engine initialization error: ${e.message ?: "unknown"}")
             }
         }
     }

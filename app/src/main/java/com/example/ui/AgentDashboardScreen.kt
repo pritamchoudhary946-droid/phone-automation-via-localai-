@@ -1,6 +1,12 @@
 package com.example.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -99,7 +105,7 @@ fun AgentDashboardScreen(
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak goal for OmniAgent...")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak goal for Jarvis...")
             }
 
             recognizer.setRecognitionListener(object : RecognitionListener {
@@ -247,24 +253,53 @@ fun AgentDashboardScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 8.4: pulsing status orb - the Jarvis signature. Its halo/ring color
+                    // mirrors the live engine state (ready / loading / failed).
+                    val orbPulse by rememberInfiniteTransition(label = "jarvis_orb").animateFloat(
+                        initialValue = 0.35f,
+                        targetValue = 0.95f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "jarvis_orb_pulse"
+                    )
+                    val orbStatusColor = when (engineState) {
+                        is EngineState.Ready -> MintSuccess
+                        is EngineState.Loading -> AmberWarning
+                        is EngineState.Failed -> CrimsonDanger
+                        else -> CyanPrimary
+                    }
                     Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(Brush.linearGradient(listOf(CyanPrimary, IndigoAccent))),
+                        modifier = Modifier.size(46.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome,
-                            contentDescription = "OmniAgent",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(orbStatusColor.copy(alpha = 0.10f + 0.22f * orbPulse))
                         )
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(CyanPrimary, IndigoAccent)))
+                                .border(1.5.dp, orbStatusColor.copy(alpha = orbPulse), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // 8.5: the in-app brand mark mirrors the launcher icon.
+                            androidx.compose.foundation.Image(
+                                painter = androidx.compose.ui.res.painterResource(com.example.R.drawable.ic_jarvis_logo),
+                                contentDescription = "Jarvis",
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "OmniAgent",
+                            text = "Jarvis",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -273,13 +308,14 @@ fun AgentDashboardScreen(
                             text = when (engineState) {
                                 is EngineState.Ready -> "Gemma 4 E2B • LiteRT-LM (${(engineState as EngineState.Ready).backend})"
                                 is EngineState.Loading -> "Loading local Gemma engine…"
-                                is EngineState.Failed -> "Local AI unavailable • Basic mode"
-                                EngineState.NotInitialized -> "Model not loaded • Basic mode"
+                                is EngineState.Failed -> "Model load failed"
+                                EngineState.NotInitialized -> "Model not loaded"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = when (engineState) {
                                 is EngineState.Ready -> CyanPrimary
                                 is EngineState.Loading -> AmberWarning
+                                is EngineState.Failed -> CrimsonDanger
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             }
                         )
@@ -314,6 +350,18 @@ fun AgentDashboardScreen(
         // Active State Banner
         StateBanner(state = orchestratorState, onPause = { orchestrator.pauseCurrentTask() }, onStop = { orchestrator.cancelCurrentTask() })
 
+        // 8.2: if the model failed to load, show the real reason and a retry - never a
+        // silent "not loaded".
+        (engineState as? EngineState.Failed)?.let { failed ->
+            ModelLoadErrorCard(
+                reason = failed.message,
+                onRetry = {
+                    (context.applicationContext as? com.example.OmniAgentApplication)
+                        ?.initializeEngineIfModelReady()
+                }
+            )
+        }
+
         // Main Content Area
         LazyColumn(
             modifier = Modifier
@@ -322,6 +370,11 @@ fun AgentDashboardScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                // 8.6: prominent "what Jarvis is doing right now" line while a task runs.
+                NowDoingCard(orchestratorState)
+            }
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 // Gol Dot (Floating Controller) Card
@@ -888,3 +941,117 @@ fun StepTimelineItem(step: TaskStepEntity) {
 }
 
 private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
+/**
+ * 8.6: the live "what Jarvis is doing now" line, derived from the orchestrator state.
+ */
+@Composable
+private fun NowDoingCard(state: OrchestratorState) {
+    val active = state is OrchestratorState.Planning ||
+        state is OrchestratorState.Executing ||
+        state is OrchestratorState.Replanning ||
+        state is OrchestratorState.Paused
+    if (!active) return
+
+    val (accent, headline, detail) = when (state) {
+        is OrchestratorState.Planning -> Triple(
+            CyanPrimary,
+            "Thinking about the next step",
+            buildString {
+                append("Using ")
+                append(if (state.fromModel) "the on-device model" else "the basic rule engine")
+                state.activeSubGoal?.takeIf { it.isNotBlank() }?.let { append(" • $it") }
+            }
+        )
+        is OrchestratorState.Executing -> Triple(
+            ElectricBlue,
+            state.action.getDisplayName(),
+            state.reasoning.takeIf { it.isNotBlank() } ?: "Letting the device settle…"
+        )
+        is OrchestratorState.Replanning -> Triple(AmberWarning, "Recovering", state.reason)
+        is OrchestratorState.Paused -> Triple(AmberWarning, "Paused", "Task paused at step ${state.stepIndex}")
+        else -> Triple(CyanPrimary, "Working", "")
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("now_doing_card"),
+        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.12f)),
+        shape = RoundedCornerShape(16.dp),
+        border = CardDefaults.outlinedCardBorder()
+    ) {
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = accent,
+                strokeWidth = 2.5.dp
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = headline,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = accent
+                )
+                if (detail.isNotBlank()) {
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelLoadErrorCard(reason: String, onRetry: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .testTag("model_load_error_card"),
+        colors = CardDefaults.cardColors(containerColor = CrimsonDanger.copy(alpha = 0.10f)),
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonDanger.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint = CrimsonDanger,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Jarvis could not load the model",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = CrimsonDanger
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = reason,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Button(
+                onClick = onRetry,
+                modifier = Modifier.testTag("model_load_retry_button"),
+                colors = ButtonDefaults.buttonColors(containerColor = CrimsonDanger)
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Retry load")
+            }
+        }
+    }
+}
