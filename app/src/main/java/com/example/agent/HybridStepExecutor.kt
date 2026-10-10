@@ -56,8 +56,8 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
             }
 
             is AgentAction.OpenSearch -> {
-                if (editableFieldVisible(observation)) {
-                    FastPathDecision.Satisfied("an editable field is already on screen")
+                if (observation.hasSearchInputField()) {
+                    FastPathDecision.Satisfied("a search-specific input field is already on screen")
                 } else if (observation.packageName != null) {
                     FastPathDecision.Execute(
                         AgentAction.OpenSearch(action.query ?: query),
