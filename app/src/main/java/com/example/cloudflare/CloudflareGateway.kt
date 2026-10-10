@@ -52,32 +52,33 @@ class CloudflareGateway {
                 .header("User-Agent", "OmniAgent-WebWorker/1.0")
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return@withContext CloudflareTaskResult.Error("Web Search HTTP error ${response.code}")
-            }
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext CloudflareTaskResult.Error("Web Search HTTP error ${response.code}")
+                }
 
-            val body = response.body?.string().orEmpty()
-            val sourceUrl = "https://duckduckgo.com/?q=$cleanQuery"
+                val body = response.body?.string().orEmpty()
+                val sourceUrl = "https://duckduckgo.com/?q=$cleanQuery"
 
-            // Parse with a real JSON parser. Substring scraping broke on any abstract
-            // containing an escaped quote or a newline, and could not tell an empty
-            // "AbstractText":"" from a missing field.
-            val abstractText = extractAbstractText(body)
+                // Parse with a real JSON parser. Substring scraping broke on any abstract
+                // containing an escaped quote or a newline, and could not tell an empty
+                // "AbstractText":"" from a missing field.
+                val abstractText = extractAbstractText(body)
 
-            if (abstractText.isNotBlank()) {
+                if (abstractText.isNotBlank()) {
+                    return@withContext CloudflareTaskResult.Success(
+                        title = "Search Results for '$query'",
+                        content = abstractText,
+                        sourceUrl = sourceUrl
+                    )
+                }
+
                 return@withContext CloudflareTaskResult.Success(
                     title = "Search Results for '$query'",
-                    content = abstractText,
+                    content = "Found relevant topics for '$query'. Web summary ready.",
                     sourceUrl = sourceUrl
                 )
             }
-
-            return@withContext CloudflareTaskResult.Success(
-                title = "Search Results for '$query'",
-                content = "Found relevant topics for '$query'. Web summary ready.",
-                sourceUrl = sourceUrl
-            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -93,18 +94,19 @@ class CloudflareGateway {
                 .head()
                 .build()
 
-            val response = client.newCall(request).execute()
-            val contentType = response.header("Content-Type").orEmpty()
-            val contentLength = response.header("Content-Length")?.toLongOrNull() ?: 0L
+            client.newCall(request).execute().use { response ->
+                val contentType = response.header("Content-Type").orEmpty()
+                val contentLength = response.header("Content-Length")?.toLongOrNull() ?: 0L
 
-            if (contentType.contains("pdf", ignoreCase = true) || pdfUrl.endsWith(".pdf", ignoreCase = true)) {
-                return@withContext CloudflareTaskResult.Success(
-                    title = "PDF Document: ${pdfUrl.substringAfterLast('/')}",
-                    content = "Verified PDF document (${contentLength / 1024} KB). Structured text extraction ready.",
-                    sourceUrl = pdfUrl
-                )
-            } else {
-                return@withContext CloudflareTaskResult.Error("Target URL does not appear to be a PDF (Content-Type: $contentType).")
+                if (contentType.contains("pdf", ignoreCase = true) || pdfUrl.endsWith(".pdf", ignoreCase = true)) {
+                    return@withContext CloudflareTaskResult.Success(
+                        title = "PDF Document: ${pdfUrl.substringAfterLast('/')}",
+                        content = "Verified PDF document (${contentLength / 1024} KB). Structured text extraction ready.",
+                        sourceUrl = pdfUrl
+                    )
+                } else {
+                    return@withContext CloudflareTaskResult.Error("Target URL does not appear to be a PDF (Content-Type: $contentType).")
+                }
             }
         } catch (e: CancellationException) {
             throw e
@@ -121,16 +123,17 @@ class CloudflareGateway {
                 .post(jsonPayload.toRequestBody(mediaType))
                 .build()
 
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string().orEmpty()
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
 
-            if (response.isSuccessful) {
-                return@withContext CloudflareTaskResult.Success(
-                    title = "Cloudflare Worker Response",
-                    content = responseBody.take(1000)
-                )
-            } else {
-                return@withContext CloudflareTaskResult.Error("Cloudflare Worker error: HTTP ${response.code}")
+                if (response.isSuccessful) {
+                    return@withContext CloudflareTaskResult.Success(
+                        title = "Cloudflare Worker Response",
+                        content = responseBody.take(1000)
+                    )
+                } else {
+                    return@withContext CloudflareTaskResult.Error("Cloudflare Worker error: HTTP ${response.code}")
+                }
             }
         } catch (e: CancellationException) {
             throw e
