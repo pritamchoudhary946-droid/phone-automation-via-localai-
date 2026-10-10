@@ -1,24 +1,26 @@
 # 1. OBJECTIVE
 
-Upgrade the OmniAgent from a "plan once, run a short fixed action list, stop"
-automator into something much closer to a Jarvis-style assistant: continuous
-screen awareness, open-ended multi-step task execution across many apps, and
-memory of the user and past tasks.
+Upgrade the app (currently branded "OmniAgent", to be renamed "Jarvis") from a
+"plan once, run a short fixed action list, stop" automator into something much
+closer to a Jarvis-style assistant: continuous screen awareness, open-ended
+multi-step task execution across many apps, memory of the user and past tasks, a
+premium Jarvis-like UI, and a model that actually loads.
 
 Scope for this work: Phases 0, 1, 2, 3, 4 (all items 4.1 - 4.17), Phase 5
 (Autonomy & Self-Healing, items 5.1 - 5.10), Phase 6 (Reasoning & Reliability
 Rescue, items 6.1 - 6.24), Phase 7 (Completion & Hardening, items 7.1 - 7.17) AND
-Phase 8 (Jarvis rebrand, working model load, premium UI - items 8.1 - 8.6).
+Phase 8 (Jarvis rebrand, working model load, premium UI - items 8.1 - 8.7).
 Phase 6 is landed; Phase 7 finishes the seams; Phase 8 fixes the live device
-blockers and rebrands the app to "Jarvis". The code audit shows several Phase
-4/5 features are interfaces with "Unavailable"/disabled defaults (vision, OCR,
-voice input, Shizuku, cloud, automations), and the pinned model artifact needs
-verifying before anything else can be trusted. Real reported failures ("open
-WhatsApp, message Prateek" -> app
-opens then scrolls forever; "search for X" -> text not verified in the field;
-unclear whether the local AI is even used) trace to concrete defects, listed in
-section 4 under "Observed defects". Phase 6 fixed those; Phase 7 closes the rest
-of the gap, and Phase 8 fixes the live "won't load" bug and rebrands to Jarvis.
+blockers, fixes every confirmed "written but not working" defect (section 2.3),
+and rebrands the app to "Jarvis". The code audit (section 2.1) shows the tree has
+advanced - OCR, voice, automations and the Settings surface are now really wired -
+while a few seams (vision grounding beyond OCR, Shizuku, cloud fallback, wake-word)
+and several "defined but never called" defects (section 2.3) still remain. Real
+reported failures ("open WhatsApp, message Prateek" -> app opens then scrolls
+forever; "search for X" -> text not verified in the field; the model "downloads but
+won't load") trace to concrete defects, listed in section 4 under "Observed
+defects". Phase 6 fixed those; Phase 7 closes the rest of the gap, and Phase 8
+fixes the live "won't load" bug, the dead wiring, and rebrands to Jarvis.
 
 Confirmed decisions (locked):
 - Model-not-loaded behavior: BLOCK. The app requires a healthy local model
@@ -73,11 +75,12 @@ Full scope at a glance (everything in this plan):
   Hindi/Roman-Hindi end-to-end, and reliability hardening from real device runs.
   All Phase 7 items are built together in one pass.
 - Phase 8 (TOP PRIORITY, user-requested) - Jarvis rebrand + working load + premium
-  UI (8.1 - 8.6): make the model actually load after a verified download and show
-  the real failure reason (never a silent "not loaded"); rebrand all user-visible
-  text to "Jarvis"; redesign the UI into a cool, premium, Jarvis-like interface; a
-  new launcher/in-app icon; and a polish pass so task progress is always visible.
-  Built together with Phase 7 in the same pass.
+  UI (8.1 - 8.7): make the model actually load after a verified download and show
+  the real failure reason (never a silent "not loaded"); fix every confirmed
+  "written-but-not-working" defect (section 2.3, BS1 - BS10); rebrand all
+  user-visible text to "Jarvis"; redesign the UI into a cool, premium, Jarvis-like
+  interface; a new launcher/in-app icon; and a polish pass so task progress is
+  always visible. Built together with Phase 7 in the same pass.
 
 Honest framing: a phone cannot be literal Jarvis. But the gap between today and
 that feel is a concrete, ordered set of capability upgrades, not one magic
@@ -207,6 +210,50 @@ D) High-risk item to verify while building (not a gate, part of the same pass):
   and SHA-256. The repo/filename are confirmed real; the exact hash still must be
   verified, because a wrong hash deletes the file and (with 6.1) the app blocks.
   -> handled in 7.1; the load failure itself is handled in Phase 8 (8.1).
+
+## 2.3 BUG SWEEP - WRITTEN BUT NOT WORKING (verified in the current tree)
+
+Each item below was confirmed by reading the code as it stands now. These are the
+"code likha hai par kaam nahi kar raha" defects. All MUST be fixed in the same pass
+as Phase 7 and Phase 8 (tracked as 8.7 sub-items).
+
+- BS1 (worst) `ui/SetupScreen.kt` defines `EngineLoadStatusCard(app)` (lines ~303-364)
+  that reads `app.engineState` and shows the REAL load failure text + a Retry - but
+  it is NEVER CALLED anywhere. So the one screen the user goes to after a download
+  shows download progress only and NO engine/load status. `SetupScreen` does not even
+  receive the application/engine, so the helper is currently uncallable. This is the
+  direct cause of "download hua par load nahi ho raha, kuch dikhta hi nahi".
+- BS2 `OmniAgentApplication.privilegedActions` (Shizuku bridge, 4.5/7.7) is built but
+  referenced by NOTHING else - no action path calls it. Shizuku is dead wiring.
+- BS3 `voice/WakeWord.kt` (`OptInWakeWordDetector`, 4.10) is referenced by NOTHING -
+  no listener service, no wiring - so wake-word is dead code (the manual voice button
+  in the dashboard is the only live voice input).
+- BS4 Cloud fallback (7.6) can never be turned on end to end: `HttpCloudPlannerProvider`
+  reads `KEY_ENDPOINT` / `KEY_API_KEY` from `cloud_planner_prefs`, but NO UI anywhere
+  writes them, and `SettingsScreen` only toggles `cloudFallbackEnabled`. The path is
+  unreachable in practice.
+- BS5 `MAX_CONTEXT_TOKENS` is inconsistent: `model/LiteRtEngine.kt` says 2048 while
+  `model/LiteRtLmRuntime.kt` (the real runtime) uses 3072, and a test pins 3072.
+  Two contradictory constants for the same engine.
+- BS6 Rebrand is incomplete: `strings.xml` `app_name` is now "Jarvis", but
+  user-visible "OmniAgent" text still remains in `ui/AgentDashboardScreen.kt` (the
+  header title + icon contentDescription), `notifications/CompletionNotifier.kt`
+  (notification title), `overlay/FloatingAgentDotService.kt` (overlay label), and
+  other spots (e.g. the assistant name in prompts). These must read "Jarvis".
+- BS7 Launcher icon (8.5) is NOT done: `res/mipmap-*/ic_launcher.png` are still the
+  default/generic icons; there is no Jarvis brand mark. A new adaptive icon is still
+  required.
+- BS8 Misleading label: the dashboard shows "... • Basic mode" for
+  `EngineState.Failed` / `NotInitialized`, but with 6.1 the app BLOCKS in those states
+  instead of running a basic mode. The wording is wrong and must be corrected.
+- BS9 `model/LiteRtEngine.kt` `reasonAndPlan(...)` hardcodes `remainingStepBudget = 10`
+  and `foregroundPackage = null` on the legacy diagnostic path; confirm it is not on
+  the live loop (it is a test/back-compat path) and otherwise remove the stale claim.
+- BS10 Dead defaults: verify `DisabledCloudPlannerProvider` and
+  `UnavailableVisionGrounder` / `UnavailableOcrReader` / `UnavailableNanoSummarizer`
+  are no longer used by the live wiring (the app wires real OCR, OCR-grounder, and the
+  E2B summarizer). Remove any leftover references so no "Unavailable" seam remains
+  reachable at runtime.
 
 Note: the seam map, the "working today" list, and the full Phase 7 detail also
 appear in section 4 (Observed defects) and section 5. They are repeated here so
@@ -1040,9 +1087,10 @@ at runtime - it is not a gate you must finish before starting the rest; build it
 alongside the others in the same pass.
 
 Phase 8 - Jarvis rebrand, working load, and premium UI (TOP PRIORITY, user-requested
-8.1 - 8.6). Do all together with Phase 7 in the same build pass. This phase fixes
+8.1 - 8.7). Do all together with Phase 7 in the same build pass. This phase fixes
 the exact complaints: the model downloads but will not load, no error is ever
-shown, the app is still called "OmniAgent", and the UI is generic.
+shown, many features are written but not actually wired, the app is still called
+"OmniAgent", and the UI is generic.
 
 - 8.1 MAKE THE MODEL ACTUALLY LOAD (the headline bug). Goal: after a verified
   download, `EngineState` reaches `Ready` and planning uses the real model.
@@ -1093,9 +1141,36 @@ shown, the app is still called "OmniAgent", and the UI is generic.
   each task; wire these to the orchestrator's existing observables. Reference:
   `ui/AgentDashboardScreen.kt`, `ui/AgentLiveMonitorScreen.kt`,
   `agent/TaskOrchestrator.kt`.
+- 8.7 FIX EVERY "WRITTEN BUT NOT WORKING" DEFECT from section 2.3 (BS1 - BS10).
+  These are confirmed defects, not new features - make each one actually work:
+  * BS1: CALL `EngineLoadStatusCard` in `SetupScreen` (pass the application/engine
+    in) so the load status + real failure + Retry is actually visible on the Setup
+    screen. This is the headline "download hua, load nahi hua, kuch dikha nahi" fix.
+  * BS2: wire `privilegedActions` into a real action path (or, if it stays opt-in
+    only, stop advertising it as working) so Shizuku is not dead wiring.
+  * BS3: wire `WakeWordDetector` into the hands-free flow, or remove it from the
+    capability list so it is not advertised-but-dead.
+  * BS4: add endpoint/key entry to `SettingsScreen` so cloud fallback is actually
+    reachable end to end (still opt-in, still off by default).
+  * BS5: make `MAX_CONTEXT_TOKENS` a single source of truth used by both
+    `LiteRtEngine` and `LiteRtLmRuntime`.
+  * BS6: replace every user-visible "OmniAgent" with "Jarvis" (dashboard header,
+    notifications, overlay, prompts).
+  * BS7: replace the launcher icon with the new Jarvis adaptive icon.
+  * BS8: correct the misleading "Basic mode" dashboard label to state the truth
+    (blocked / model required).
+  * BS9: reconcile or remove the stale legacy `reasonAndPlan` claims.
+  * BS10: remove/neutralize any leftover reachable "Unavailable*" seam so no dead
+    default ships in the live graph.
+  Reference: `ui/SetupScreen.kt`, `ui/AgentDashboardScreen.kt`,
+  `ui/SettingsScreen.kt`, `OmniAgentApplication.kt`, `voice/WakeWord.kt`,
+  `privileged/PrivilegedActions.kt`, `planning/CloudPlannerProvider.kt`,
+  `model/LiteRtEngine.kt`, `model/LiteRtLmRuntime.kt`,
+  `notifications/CompletionNotifier.kt`, `overlay/FloatingAgentDotService.kt`,
+  `res/mipmap-anydpi-v26/*`.
 
-Phase 8 scope note: do ALL of 8.1 - 8.6 together. 8.1 and 8.2 are the functional
-fix; 8.3 - 8.6 are the rebrand and UI. They ship in the same pass.
+Phase 8 scope note: do ALL of 8.1 - 8.7 together. 8.1, 8.2 and 8.7 are the
+functional fixes; 8.3 - 8.6 are the rebrand and UI. They ship in the same pass.
 
 # 5. TESTING AND VALIDATION
 
@@ -1103,8 +1178,8 @@ Success is defined per phase; each phase must keep the existing behaviour
 honest (no step may be marked COMPLETED unless a fresh observation proves it).
 Phases implemented: 0, 1, 2, 3, 4 (all items 4.1 - 4.17; 4.9 documented and
 deferred), 5 (items 5.1 - 5.10), 6 (items 6.1 - 6.24), and 7 (items 7.1 - 7.17).
-Phase 8 (8.1 - 8.6) is the rebrand + working-load + UI phase and is done next,
-together with any remaining Phase 7 seams.
+Phase 8 (8.1 - 8.7) is the rebrand + working-load + bug-sweep + UI phase and is
+done next, together with any remaining Phase 7 seams.
 
 Phase 0 (must pass first):
 - A simulated "Open ChatGPT, say hi, then press Enter" task reaches
@@ -1255,6 +1330,25 @@ Phase 8 (Jarvis rebrand, working load, premium UI):
   mark; no default/generic icon remains.
 - 8.6: while a task runs, the UI shows the current step ("Opening app", "Typing",
   "Pressing Enter", "Verifying") and a clear final success/failure summary.
+- 8.7 (bug sweep): for every BS item in section 2.3 there is a test or a device
+  check proving it is now live - e.g. `EngineLoadStatusCard` is reachable in
+  `SetupScreen` (BS1), Shizuku/wake-word are either wired or no longer advertised
+  (BS2/BS3), cloud fallback can be configured end to end (BS4), one
+  `MAX_CONTEXT_TOKENS` (BS5), no user-visible "OmniAgent" remains (BS6), the new
+  icon ships (BS7), no misleading "Basic mode" label (BS8), and no reachable
+  "Unavailable*" default remains (BS10). No dead code left advertising a capability.
+
+STATUS (Phase 8.7, done): BS1 `EngineLoadStatusCard(app)` is called in
+`SetupScreen`; BS2 `privilegedActions` is surfaced in the Settings self-test and
+refuses by default; BS3 `OptInWakeWordDetector` fronts the hands-free flow,
+gated by opt-in + mic permission; BS4 `SettingsScreen` writes endpoint/key/model
+via `HttpCloudPlannerProvider.saveConfiguration`, with one shared provider on the
+application; BS5 single `MAX_CONTEXT_TOKENS`; BS6 no visible "OmniAgent"; BS7
+`arc reactor` adaptive icon plus matching legacy PNG mipmaps for API 24/25; BS8
+`canStartTask(...)` gates the Run button and the banner states "Model required •
+tasks are blocked"; BS9 `reasonAndPlan` documented as diagnostic-only; BS10 the
+`Unavailable*`/`Disabled*` seams are inert and a test asserts it. Regression
+coverage: `Phase8BugSweepTest` (BS4/BS8/BS10/BS2). Suite: 190 tests, 0 failures.
 
 Global:
 - `./gradlew :app:testDebugUnitTest` passes (Robolectric, sdk 34, JDK 21,
@@ -1266,6 +1360,7 @@ Global:
   open an app, search, read a page, return home) completes with each step proven
   by a fresh, settled observation.
 - Manual device check (Phase 8): the app installs as "Jarvis" with the new icon,
-  the model loads to Ready after download (or shows the real failure + Retry), and
-  the premium UI shows live step progress during a run.
+  the model loads to Ready after download (or shows the real failure + Retry), the
+  premium UI shows live step progress during a run, and the Setup screen actually
+  displays the engine load status card (BS1) instead of nothing.
 

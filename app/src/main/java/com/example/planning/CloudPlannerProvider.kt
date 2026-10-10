@@ -113,6 +113,20 @@ class HttpCloudPlannerProvider(
         null
     }
 
+    /** 8.7/BS4: persists the user-supplied endpoint/key/model from the Settings surface. */
+    fun saveConfiguration(endpoint: String, apiKey: String, model: String) {
+        prefs.edit()
+            .putString(KEY_ENDPOINT, endpoint.trim())
+            .putString(KEY_API_KEY, apiKey.trim())
+            .putString(KEY_MODEL, model.trim())
+            .apply()
+    }
+
+    /** 8.7/BS4: current values, so the Settings fields can prefill what is stored. */
+    fun currentEndpoint(): String = prefs.getString(KEY_ENDPOINT, "").orEmpty()
+    fun currentApiKey(): String = prefs.getString(KEY_API_KEY, "").orEmpty()
+    fun currentModel(): String = prefs.getString(KEY_MODEL, DEFAULT_MODEL)?.takeIf { it.isNotBlank() } ?: DEFAULT_MODEL
+
     companion object {
         private const val PREFS = "cloud_planner_prefs"
         const val KEY_ENABLED = "cloud_enabled"
