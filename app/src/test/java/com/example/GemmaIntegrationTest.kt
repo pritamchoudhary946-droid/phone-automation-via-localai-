@@ -145,6 +145,20 @@ class GemmaIntegrationTest {
         assertFalse(engine.isReady())
         assertTrue(engine.engineState() is EngineState.NotInitialized)
 
+        // 6.1: with the model not loaded, the default is to BLOCK — never silently run
+        // the keyword planner.
+        val blocked = engine.planTask(
+            goal = "Open YouTube",
+            screenSummary = "Active Package: com.android.launcher",
+            foregroundPackage = "com.android.launcher",
+            historySummary = "",
+            lastActionVerification = null,
+            remainingStepBudget = 10
+        )
+        assertTrue("must not silently plan with keywords", blocked is PlanOutcome.Unavailable)
+
+        // Only the explicit, user-visible degraded mode may use the labelled fallback.
+        engine.setFallbackExplicit(true)
         val outcome = engine.planTask(
             goal = "Open YouTube",
             screenSummary = "Active Package: com.android.launcher",

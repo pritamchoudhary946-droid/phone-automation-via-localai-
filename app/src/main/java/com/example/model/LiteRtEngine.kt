@@ -61,6 +61,14 @@ class LiteRtEngine(
 
     fun isReady(): Boolean = inferenceEngine.isReady()
 
+    /**
+     * Explicit, user-visible degraded mode (plan 6.1). When false (default) a task
+     * blocks while the local model is not loaded instead of silently running keywords.
+     */
+    fun setFallbackExplicit(enabled: Boolean) {
+        planner.fallbackExplicit = enabled
+    }
+
     fun engineState(): EngineState = inferenceEngine.state.value
 
     /** Observable engine lifecycle state for the UI. */
