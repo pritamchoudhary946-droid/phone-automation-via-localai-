@@ -26,6 +26,9 @@ class AgentPlanner(
 
     private val availableActions = PlannerPromptBuilder.availableActions(toolRegistry)
 
+    /** Hierarchical reflection-on-demand (plan 5.4), shared by the orchestrator. */
+    private val reflector = Reflector(inferenceEngine)
+
     /**
      * Produces a plan for [command]. Tries the real model with one bounded repair
      * attempt, then falls back to the clearly labelled basic planner.
@@ -126,6 +129,67 @@ class AgentPlanner(
     fun fallbackPlan(command: String): TaskPlan = heuristicPlanner.toFallbackPlan(command)
 
     fun availableActions(): List<String> = availableActions
+
+    /**
+     * Reflection-on-demand (plan 5.4): a short, bounded second opinion on the last
+     * action and the current screen, asked only when the loop has hit a failure or a
+     * stall. Delegates to the shared [Reflector]; never blank, never fabricating a
+     * decision.
+     */
+    suspend fun reflect(request: ReflectionRequest): String = reflector.reflect(request)
+
+    /**
+     * Asks the model for ONE safe exploration probe (plan 5.6). Falls back to a plain
+     * bounded scroll when the model is unavailable, so exploration still makes progress
+     * without a model but never wanders. Only non-terminal actions are ever returned.
+     */
+    suspend fun exploreNextAction(request: ExplorationRequest): AgentAction {
+        if (inferenceEngine.isReady()) {
+            val raw = try {
+                inferenceEngine.generate(
+                    PlannerPromptBuilder.buildExplorationPrompt(request),
+                    PlannerPromptBuilder.SYSTEM_INSTRUCTION,
+                    maxOutputTokens = 256
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Exploration generate threw: ${e.message}")
+                null
+            }
+            val action = parseSingleAction(raw, request.goal)
+            if (action != null && action !is AgentAction.FinishTask && action !is AgentAction.FailTask) {
+                return action
+            }
+        }
+        return AgentAction.Scroll("down")
+    }
+
+    /** Parses a single action out of a model decision object, or null when unusable. */
+    private fun parseSingleAction(raw: String?, goal: String): AgentAction? {
+        if (raw.isNullOrBlank()) return null
+        val json = extractFirstJson(raw) ?: return null
+        val obj = try {
+            JSONObject(json)
+        } catch (e: Exception) {
+            return null
+        }
+        val rawAction = obj.optString("action", "").trim().lowercase()
+        if (rawAction.isBlank()) return null
+        val wrapped = JSONObject().apply {
+            put("steps", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("id", 1)
+                    put("seq", 1)
+                    put("desc", "probe")
+                    put("action", rawAction)
+                    put("params", obj.optJSONObject("params") ?: JSONObject())
+                })
+            })
+        }.toString()
+        return when (val parsed = parser.parse(wrapped, goal)) {
+            is PlanParseResult.Success -> parsed.plan.steps.firstOrNull()?.action
+            is PlanParseResult.Invalid -> null
+        }
+    }
 
     private fun extractFirstJson(text: String): String? {
         val start = text.indexOf('{')

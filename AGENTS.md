@@ -122,3 +122,34 @@ An action the native layer cannot execute must not appear in the catalogue
   `read_notifications` follows the same rule as every other tool — catalogue,
   `ToolRegistry` definition/validation, `DeviceAutomation.execute`, and
   `TaskPlanParser.mapAction` must all know it.
+
+## Jarvis Phase 5 autonomy & self-healing (do not regress)
+- The execution loop replaces "retry the same action N times then fail" with a
+  bounded Detect -> Diagnose -> Backtrack -> Re-plan -> Explore -> Learn cycle.
+  The *taxonomy and loop* are engine-level; the *recoveries* are model-chosen
+  against the live screen. Never reintroduce a blind, unclassified retry.
+- `agent/FailureClassifier` maps observed signals to a `FailureType` and a
+  suggested `RecoveryStrategy`; it is deterministic (no model) and unit-tested.
+  A timeout/loop/validation signal must always win over a generic no-change.
+- `agent/ProgressBudget` is the single degradation order — re-plan, then explore,
+  then escalate, then stop. `MAX_REPLANS` stays 1 and `MAX_EXPLORES` stays 2 so a
+  hard task cannot wander; the budget is recreated at the top of `runAgentLoop`.
+- `report_status`/finish is still never trusted on its own: every required step
+  must be COMPLETED AND a fresh goal-level postcondition must hold. Phase 5 only
+  changes *how a failed step recovers*, never the completion gate.
+- Reflection (`planning/Reflector`, via `AgentPlanner.reflect`) runs ONLY on a
+  failure/stall (reflection-on-demand), never on a healthy step. Exploration
+  (`AgentPlanner.exploreNextAction`) returns one non-terminal action and is only
+  used for a TARGET_NOT_FOUND / NO_SCREEN_CHANGE diagnosis.
+- Honest escalation (5.8): when recovery is exhausted the terminal state is
+  `OrchestratorState.Failed(escalated = true, blockedOn, suggestion)`, surfaced by
+  the dashboard/monitor/overlay. It is still a `Failed`, never a `Completed`, so
+  a stuck run can never fake success.
+- Episodic memory (5.9): `EpisodeEntity` (DB v4) records goal/outcome/failure/
+  lesson; `loadLessons` injects a bounded digest (`MAX_LESSONS_CHARS`) into the
+  planning prompt. Keep the destructive migration and bump the DB version when
+  entities change.
+- Optional, OFF-by-default seams: `model/NanoSummarizer` (4.7) and
+  `planning/CloudPlannerProvider` (4.8, consulted only after a local failure).
+  Disabled/unconfigured providers must return null and never touch the network;
+  a cloud plan is re-validated through the same `TaskPlanParser` as local output.

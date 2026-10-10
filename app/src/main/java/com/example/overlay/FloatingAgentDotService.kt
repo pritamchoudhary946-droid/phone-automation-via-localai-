@@ -801,7 +801,8 @@ class FloatingAgentDotService : Service() {
             is OrchestratorState.WaitingConfirmation -> Color.parseColor("#F43F5E") to "Waiting Confirmation for ${state.riskType}!"
             is OrchestratorState.Paused -> Color.parseColor("#F59E0B") to "Agent Task Paused"
             is OrchestratorState.Completed -> Color.parseColor("#12B886") to "Task Completed: ${state.summary}"
-            is OrchestratorState.Failed -> Color.parseColor("#F43F5E") to "Task Failed: ${state.reason}"
+            is OrchestratorState.Failed -> Color.parseColor("#F43F5E") to
+                if (state.escalated) "Need help: ${state.blockedOn ?: state.reason}" else "Task Failed: ${state.reason}"
         }
 
         badge?.background = GradientDrawable().apply {

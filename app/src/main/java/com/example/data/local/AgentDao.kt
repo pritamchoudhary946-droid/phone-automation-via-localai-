@@ -138,3 +138,19 @@ interface AutomationDao {
     @Query("DELETE FROM automations WHERE id = :id")
     suspend fun deleteAutomation(id: Long)
 }
+
+@Dao
+interface EpisodeDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEpisode(episode: EpisodeEntity)
+
+    /** Most relevant episodes for a goal: same goal first, then most recent (plan 5.9). */
+    @Query("SELECT * FROM episodes WHERE goal = :goal ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getEpisodesForGoal(goal: String, limit: Int): List<EpisodeEntity>
+
+    @Query("SELECT * FROM episodes ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentEpisodes(limit: Int): List<EpisodeEntity>
+
+    @Query("DELETE FROM episodes")
+    suspend fun clearEpisodes()
+}

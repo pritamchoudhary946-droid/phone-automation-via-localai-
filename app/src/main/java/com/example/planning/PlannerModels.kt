@@ -15,7 +15,9 @@ data class PlanningRequest(
     /** Bounded digest of learned user preferences / past outcomes, or blank. */
     val memorySummary: String = "",
     /** Bounded retrieved context from the user's own notes/history (RAG), or blank. */
-    val retrievedContext: String = ""
+    val retrievedContext: String = "",
+    /** Bounded lessons from past episodes relevant to this goal (plan 5.9), or blank. */
+    val lessonsSummary: String = ""
 )
 
 /** Everything the model needs to pick the single next action during execution. */
@@ -43,3 +45,23 @@ sealed class StepDecision {
     data class Act(val action: AgentAction, val thought: String, val fromModel: Boolean) : StepDecision()
     data class None(val reason: String) : StepDecision()
 }
+
+/** Everything the model needs for a bounded reflection-on-demand (plan 5.4). */
+data class ReflectionRequest(
+    val goal: String,
+    val activeSubGoal: String,
+    val lastAction: String,
+    val failureReason: String,
+    val screenSummary: String,
+    val foregroundPackage: String?
+)
+
+/** Everything the model needs to propose ONE safe exploration probe (plan 5.6). */
+data class ExplorationRequest(
+    val goal: String,
+    val missingTarget: String,
+    val probesUsed: Int,
+    val screenSummary: String,
+    val foregroundPackage: String?,
+    val availableActions: List<String>
+)
