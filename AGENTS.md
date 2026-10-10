@@ -62,3 +62,17 @@ An action the native layer cannot execute must not appear in the catalogue
   `PlannerPromptBuilder.sanitizeUntrusted(...)` before embedding in prompts.
 - Keep the model's JSON wrapper construction in `JSONObject`/`JSONArray`, never
   string interpolation.
+
+## Audit invariants (do not regress)
+- `LiteRtModelManager`: a `.part` file at exactly the pinned byte count is
+  verified and finalized in place (`finalizeVerifiedPart`) — never re-downloaded.
+  Free-space is checked only when new bytes are needed, so a complete part file
+  finalizes without demanding 3.2 GB. Oversized part files are discarded.
+- OkHttp responses are always read through `response.use { }` (CloudflareGateway,
+  model download) so the body/connection is closed on every path.
+- `FloatingAgentDotService` owns a `SupervisorJob` scope cancelled in `onDestroy`;
+  never reintroduce a Job-less scope there.
+- `HybridStepExecutor` must not `Execute` an action that `validateAction` rejects
+  (e.g. a targetless `LongPress`); defer to the model instead.
+- `RiskEvaluator` also scans `FinishTask` summaries, not just Tap/TypeText, so a
+  report_status claiming a payment/delete/send still needs confirmation.
