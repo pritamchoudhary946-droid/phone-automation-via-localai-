@@ -83,6 +83,7 @@ sealed class AgentAction {
      * slow-loading surfaces where a fixed [Wait] is either too short or wasteful.
      */
     data class WaitForText(val targetText: String, val timeoutMs: Long = 5_000L) : AgentAction()
+    object ReadNotifications : AgentAction()
     object OpenNotifications : AgentAction()
     object OpenQuickSettings : AgentAction()
     object PressRecents : AgentAction()
@@ -121,6 +122,7 @@ sealed class AgentAction {
             is ScrollUntilFound -> "Scroll $direction until '$targetText' (max $maxSwipes)"
             is ReadText -> "Read screen text"
             is WaitForText -> "Wait for text '$targetText' (up to ${timeoutMs}ms)"
+            is ReadNotifications -> "Read notifications"
             is OpenNotifications -> "Open notification shade"
             is OpenQuickSettings -> "Open quick settings"
             is PressRecents -> "Open recents"

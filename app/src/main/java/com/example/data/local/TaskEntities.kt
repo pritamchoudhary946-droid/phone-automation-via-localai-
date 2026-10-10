@@ -70,3 +70,41 @@ data class TaskOutcomeEntity(
     val stepsUsed: Int,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+/**
+ * A saved, re-runnable task ("skill"/routine): the goal plus its successful plan,
+ * so it can be replayed through the normal verified resume path by name (plan 4.13).
+ */
+@Entity(tableName = "saved_skills")
+data class SavedSkillEntity(
+    @PrimaryKey
+    val name: String,
+    val goal: String,
+    val planJson: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val runCount: Int = 0,
+    val lastRunAt: Long = 0
+)
+
+/** A simple, on-device retrieved-context note for local RAG (plan 4.15). */
+@Entity(tableName = "knowledge_notes")
+data class KnowledgeNoteEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val source: String,
+    val content: String,
+    val tokens: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+/** A saved automation that runs a skill on a schedule or on a system condition (plan 4.14). */
+@Entity(tableName = "automations")
+data class AutomationEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val skillName: String,
+    val triggerType: String, // INTERVAL, WIFI_CONNECTED
+    val triggerValue: String, // interval minutes, or an SSID (blank = any wifi)
+    val enabled: Boolean = true,
+    val createdAt: Long = System.currentTimeMillis()
+)

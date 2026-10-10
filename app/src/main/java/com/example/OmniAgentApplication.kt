@@ -74,7 +74,17 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         cloudflareGateway = CloudflareGateway()
         // The gateway is exposed to the loop as an explicit web tool (web_search /
         // read_url); the on-device model remains the primary planner.
-        orchestrator = TaskOrchestrator(this, liteRtEngine, appDirectory, webGateway = cloudflareGateway)
+        orchestrator = TaskOrchestrator(
+            context = this,
+            liteRtEngine = liteRtEngine,
+            appDirectory = appDirectory,
+            webGateway = cloudflareGateway,
+            screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
+            retriever = com.example.memory.rag.TokenOverlapRetriever(database.knowledgeDao()),
+            completionNotifier = com.example.notifications.CompletionNotifier(this),
+            // A clean, fully-verified run is saved as a re-runnable local skill.
+            autoSaveSkills = true
+        )
 
         createNotificationChannels()
     }

@@ -62,4 +62,17 @@ object PostconditionVerifier {
     }
 
     fun availableActions(registry: ToolRegistry): List<String> = registry.getRegisteredTools().map { it.name }
+
+    /**
+     * Vision-diff verification (plan 4.3): when the accessibility fingerprint did not
+     * change but a coarse before/after screenshot diff shows a real change, treat that
+     * as verification evidence. Never upgrades a satisfied verdict's wording, and a
+     * missing screenshot (visionChanged=false) never fabricates a change.
+     */
+    fun applyVisionDiffEvidence(verdict: Verdict, visionChanged: Boolean): Verdict =
+        if (!verdict.satisfied && visionChanged) {
+            Verdict(true, "${verdict.detail} (vision diff confirmed a real screen change)")
+        } else {
+            verdict
+        }
 }
