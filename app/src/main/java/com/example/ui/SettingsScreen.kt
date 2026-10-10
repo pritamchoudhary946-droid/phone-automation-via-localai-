@@ -36,6 +36,11 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var automations by remember { mutableStateOf(settings?.automationsEnabled == true) }
     var basicFallback by remember { mutableStateOf(settings?.basicFallbackExplicit == true) }
     var cloudFallback by remember { mutableStateOf(settings?.cloudFallbackEnabled == true) }
+    // Phase 9 opt-in capabilities; all default OFF.
+    var proactive by remember { mutableStateOf(settings?.proactiveAwarenessEnabled == true) }
+    var locationTriggers by remember { mutableStateOf(settings?.locationTriggersEnabled == true) }
+    var briefing by remember { mutableStateOf(settings?.briefingEnabled == true) }
+    var triage by remember { mutableStateOf(settings?.notificationTriageEnabled == true) }
     // 8.7/BS4: cloud endpoint/key/model entry, so the opt-in fallback is reachable.
     val cloudProvider = app?.cloudPlannerProvider
     var cloudEndpoint by remember { mutableStateOf(cloudProvider?.currentEndpoint() ?: "") }
@@ -204,6 +209,60 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     }
                 }
             }
+        }
+
+        Spacer(Modifier.height(4.dp))
+        // --- Phase 9: proactive, hands-free capabilities. All OFF by default. ---
+        Card(shape = RoundedCornerShape(12.dp)) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Proactive & ambient (Phase 9)", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "These can watch context and act on your behalf. They stay off until you enable them.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        ToggleRow(
+            title = "Proactive awareness",
+            subtitle = "Notice context (foreground app, notifications, time) and offer help. No screen capture.",
+            checked = proactive,
+            testTag = "toggle_proactive_awareness"
+        ) {
+            proactive = it
+            settings?.proactiveAwarenessEnabled = it
+        }
+        ToggleRow(
+            title = "Location triggers",
+            subtitle = "Run automations when you arrive at or leave a place (needs location permission)",
+            checked = locationTriggers,
+            testTag = "toggle_location_triggers"
+        ) {
+            locationTriggers = it
+            settings?.locationTriggersEnabled = it
+        }
+        ToggleRow(
+            title = "Daily briefing",
+            subtitle = "Speak a short summary of your notifications at a set time each day",
+            checked = briefing,
+            testTag = "toggle_briefing"
+        ) {
+            briefing = it
+            settings?.let { s -> s.briefingEnabled = it }
+            app?.let { a ->
+                scope.launch {
+                    com.example.notifications.BriefingScheduler.sync(a)
+                }
+            }
+        }
+        ToggleRow(
+            title = "Smart notification triage",
+            subtitle = "Summarise notifications on-device and offer one-tap actions. Never auto-sends.",
+            checked = triage,
+            testTag = "toggle_notification_triage"
+        ) {
+            triage = it
+            settings?.notificationTriageEnabled = it
         }
 
         Spacer(Modifier.height(4.dp))

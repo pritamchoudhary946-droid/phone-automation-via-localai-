@@ -592,6 +592,7 @@ class FloatingAgentDotService : Service() {
                 override fun onReadyForSpeech(params: Bundle?) {
                     isListeningVoice = true
                     updateMicVisual(true)
+                    setPanelStatus("Listening… bolna shuru kijiye")
                     Toast.makeText(applicationContext, "Listening... Bolna shuru kijiye", Toast.LENGTH_SHORT).show()
                 }
                 override fun onResults(results: Bundle?) {
@@ -623,7 +624,13 @@ class FloatingAgentDotService : Service() {
                 override fun onEndOfSpeech() {
                     updateMicVisual(false)
                 }
-                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onPartialResults(partialResults: Bundle?) {
+                    // 9.10: live transcript in the HUD while the user is still speaking.
+                    val partial = partialResults
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                    if (!partial.isNullOrBlank()) setPanelStatus("Heard: \"$partial\"…")
+                }
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
 
@@ -632,6 +639,16 @@ class FloatingAgentDotService : Service() {
             isListeningVoice = false
             updateMicVisual(false)
             Toast.makeText(this, "Failed to start microphone: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * 9.10: single, main-thread-safe way to update the HUD status line, so voice
+     * partials, listening state and agent state never mutate the view off-thread.
+     */
+    private fun setPanelStatus(text: String) {
+        mainHandler.post {
+            panelView?.findViewWithTag<TextView>("panel_status_text")?.text = text
         }
     }
 

@@ -434,6 +434,61 @@ class OrchestratorLoopTest {
         assertEquals(null, orchestrator.saveWatchedSkill("empty", "nothing"))
     }
 
+    // ---- Phase 9: orchestrator-integrated seams (9.3, 9.5, 9.12) ----
+
+    @Test
+    fun followUpResolvesAgainstPreviousCommand() = kotlinx.coroutines.runBlocking {
+        val orchestrator = newOrchestrator(basicEngine(), FakeDeviceAutomation())
+        orchestrator.startTask("Open YouTube")
+        val resolved = orchestrator.submitCommand("and open Settings")
+        org.junit.Assert.assertNotNull("a follow-up should resolve, not ask", resolved)
+        org.junit.Assert.assertTrue(resolved!!.contains("Open YouTube"))
+        org.junit.Assert.assertTrue(resolved.contains("open Settings"))
+        awaitTerminal(orchestrator)
+        Unit
+    }
+
+    @Test
+    fun followUpWithNoContextAsksInsteadOfGuessing() = kotlinx.coroutines.runBlocking {
+        val orchestrator = newOrchestrator(basicEngine(), FakeDeviceAutomation())
+        val result = orchestrator.submitCommand("and send it")
+        org.junit.Assert.assertNull("no context must ask, not guess", result)
+        org.junit.Assert.assertNotNull(orchestrator.pendingClarification.value)
+    }
+
+    @Test
+    fun rememberCommandPersistsAFactOnDevice() = kotlinx.coroutines.runBlocking {
+        val orchestrator = newOrchestrator(basicEngine(), FakeDeviceAutomation())
+        val result = orchestrator.submitCommand("remember that my wifi password is hunter2")
+        org.junit.Assert.assertNull("memory commands do not start a device task", result)
+        // The write is launched asynchronously; poll briefly for persistence.
+        val dao = com.example.data.local.AgentDatabase.getInstance(context).memoryDao()
+        var stored: String? = null
+        val deadline = System.currentTimeMillis() + 2_000
+        while (System.currentTimeMillis() < deadline && stored == null) {
+            stored = dao.getRecentMemories(10).firstOrNull { it.value.contains("hunter2") }?.value
+            if (stored == null) delay(50)
+        }
+        org.junit.Assert.assertTrue("the fact is stored on-device", stored?.contains("hunter2") == true)
+    }
+
+    @Test
+    fun unresolvableBlockerFailsHonestlyWithoutGuessing() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            // A full-screen ad with no safe dismiss control: the agent must stop, not tap blindly.
+            defaultObservation = observationText(
+                "com.game", "Advertisement sponsored content", 5, labels = listOf("Advertisement")
+            )
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Tap Play","action":"tap","params":{"targetText":"Play"},"expect":"game","verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("Play the game", maxSteps = 3)
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("expected an honest failure, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // ---- helpers ----
 
     private class AlwaysRejectRegistry : ToolRegistry() {

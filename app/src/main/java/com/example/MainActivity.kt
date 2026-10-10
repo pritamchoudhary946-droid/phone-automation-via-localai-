@@ -26,6 +26,7 @@ enum class AgentTab(val title: String, val icon: ImageVector) {
     MONITOR("Live Monitor", Icons.Default.Visibility),
     SETUP("Setup & Model", Icons.Default.Download),
     SETTINGS("Capabilities", Icons.Default.Tune),
+    LIBRARY("Library", Icons.Default.Bookmarks),
     HISTORY("History", Icons.Default.History)
 }
 
@@ -100,6 +101,9 @@ class MainActivity : ComponentActivity() {
                             }
                             AgentTab.SETTINGS -> {
                                 com.example.ui.SettingsScreen()
+                            }
+                            AgentTab.LIBRARY -> {
+                                com.example.ui.LibraryScreen()
                             }
                             AgentTab.HISTORY -> {
                                 TaskHistoryScreen(

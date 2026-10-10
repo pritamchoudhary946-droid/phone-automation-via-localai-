@@ -9,7 +9,9 @@ premium Jarvis-like UI, and a model that actually loads.
 Scope for this work: Phases 0, 1, 2, 3, 4 (all items 4.1 - 4.17), Phase 5
 (Autonomy & Self-Healing, items 5.1 - 5.10), Phase 6 (Reasoning & Reliability
 Rescue, items 6.1 - 6.24), Phase 7 (Completion & Hardening, items 7.1 - 7.17) AND
-Phase 8 (Jarvis rebrand, working model load, premium UI - items 8.1 - 8.7).
+Phase 8 (Jarvis rebrand, working model load, premium UI - items 8.1 - 8.7) AND
+Phase 9 (fully-automated Jarvis capability upgrades - items 9.1 - 9.14), followed by
+a FINAL BUG SWEEP (section 4A) that finds and fixes every remaining bug.
 Phase 6 is landed; Phase 7 finishes the seams; Phase 8 fixes the live device
 blockers, fixes every confirmed "written but not working" defect (section 2.3),
 and rebrands the app to "Jarvis". The code audit (section 2.1) shows the tree has
@@ -81,6 +83,17 @@ Full scope at a glance (everything in this plan):
   user-visible text to "Jarvis"; redesign the UI into a cool, premium, Jarvis-like
   interface; a new launcher/in-app icon; and a polish pass so task progress is
   always visible. Built together with Phase 7 in the same pass.
+- Phase 9 (NEW, user-requested) - Fully-automated "Jarvis" capability upgrades
+  (9.1 - 9.14): proactive awareness, context/event automation triggers, multi-turn
+  conversational memory, cross-app data passing, personal memory commands + UI,
+  skill library UI, full hands-free voice loop, daily briefing, notification
+  triage, a conversational HUD overlay, smarter element understanding, proactive
+  obstacle self-healing, Hindi-first language, and a battery/thermal guard. NO new
+  model (reuse the single E2B engine); every always-on/privacy feature is opt-in
+  and OFF by default. Built on top of Phase 7/8.
+- FINAL BUG SWEEP (section 4A, end of the pass): find and FIX every remaining bug -
+  build/tests green, no reachable dead seams, no dead wiring, lint issues resolved,
+  no crash on edge cases, and all honest-behaviour rules intact.
 
 Honest framing: a phone cannot be literal Jarvis. But the gap between today and
 that feel is a concrete, ordered set of capability upgrades, not one magic
@@ -1188,6 +1201,120 @@ shown, many features are written but not actually wired, the app is still called
 Phase 8 scope note: do ALL of 8.1 - 8.7 together. 8.1, 8.2 and 8.7 are the
 functional fixes; 8.3 - 8.6 are the rebrand and UI. They ship in the same pass.
 
+Phase 9 - Fully-automated "Jarvis" capability upgrades (items 9.1 - 9.14, NEW
+features the user asked for). Goal: move from "responds to a typed command" to a
+genuinely proactive, conversational, hands-free, cross-app assistant - the closest
+honest thing to Jarvis on one 8 GB phone. Two hard constraints kept throughout:
+(a) NO second/larger model - everything reuses the single E2B engine already
+loaded; (b) every always-on or privacy-sensitive feature is OPT-IN and OFF by
+default. Build these on top of the Phase 7/8 work (they assume the seams are now
+real). Grounded in the files we verified exist.
+
+- 9.1 Proactive awareness mode (opt-in). Goal: Jarvis notices context and *offers*
+  help without being asked. Method: a bounded foreground awareness loop that reads
+  the current foreground app + recent notifications + time, and surfaces a
+  suggestion ("You usually message Prateek now - want to?"). Reuse the real
+  `AgentNotificationListenerService` and `ScreenAwareness`; no continuous screen
+  capture (poll-bounded, battery-aware). Reference: `perception/ScreenAwareness.kt`,
+  `notifications/NotificationBus.kt`, `service/AgentExecutionService.kt`,
+  new `agent/ProactiveEngine.kt`.
+- 9.2 Context/event triggers for automations (extends 7.8 / 4.14). Goal: automate a
+  routine on an event, not just a clock time. Method: add triggers - time/interval,
+  battery level, charging, network/Wi-Fi change, app-foreground, notification-from-
+  app, and (opt-in) location arrive/leave. Reuse `AutomationGate` + `AutomationScheduler`.
+  Reference: `automation/AutomationGate.kt`, `automation/AutomationScheduler.kt`,
+  `data/local/AgentDao.kt`.
+- 9.3 Multi-turn conversational memory. Goal: follow-ups resolve ("and send it",
+  "do the same for Ravi"). Method: keep a short conversational context (last
+  command, last target, last app) and feed it into planning next to the existing
+  memory summary. Reference: `agent/TaskOrchestrator.kt`, `planning/AgentPlanner.kt`,
+  `planning/PlannerModels.kt`.
+- 9.4 Cross-app data passing (task variables/slots). Goal: carry a value across
+  steps/apps ("copy that price, open Notes, paste it"). Method: add a small typed
+  variable store on the plan (last-read text, clipboard, search result) usable by a
+  later step; expose via `AgentAction` + plan serialization. Reference:
+  `agent/AgentAction.kt`, `planning/TaskPlan.kt`,
+  `planning/TaskPlanSerializer.kt`.
+- 9.5 Explicit personal memory commands + Memory UI. Goal: the user can teach Jarvis
+  facts and see them. Method: implement "remember that ...", "forget ...", "what do
+  you know about ...", store in the existing Room-backed store, always inject the
+  user profile/preferences into planning, and add a Memory list screen. Reference:
+  `memory/rag/LocalRag.kt`, `data/local/*`, `ui/*`.
+- 9.6 Skill library UI (view / edit / replay / delete). Goal: learned routines are
+  first-class and reusable. Method: surface the skills produced by 7.10
+  (`autoSaveSkills` / episodes) in a screen, let the user rename/trigger/delete, and
+  allow a skill to be voice-triggered. Reference: `planning/EpisodeDeriver.kt`,
+  `data/local/*`, `ui/*`, `agent/TaskOrchestrator.kt`.
+- 9.7 Full hands-free voice loop. Goal: "Jarvis" wake -> listen -> confirm ->
+  execute -> spoken result, interruptible. Method: on-device wake-word + ASR behind
+  the existing opt-in + mic permission, a short spoken confirmation for risky
+  actions, and a spoken completion via the existing TTS; a hard stop phrase. No
+  cloud audio, ever. Reference: `voice/WakeWord.kt`, `voice/SpeechOutput.kt`,
+  `ui/AgentDashboardScreen.kt`, `overlay/FloatingAgentDotService.kt`.
+- 9.8 Daily briefing / digest. Goal: a scheduled spoken briefing. Method: a
+  WorkManager job at a user-set time composes a bounded summary (your notifications
+  + optional web) and speaks it; shown as a notification too. Reference:
+  `automation/AutomationScheduler.kt`, `voice/SpeechOutput.kt`,
+  `cloudflare/CloudflareGateway.kt`, `notifications/*`.
+- 9.9 Smart notification triage. Goal: Jarvis summarises and offers actions on
+  notifications. Method: group/summarise posted notifications on-device and offer
+  one-tap "reply / open / dismiss" (opt-in), never auto-sending without confirm.
+  Reference: `notifications/NotificationBus.kt`, `agent/TaskOrchestrator.kt`.
+- 9.10 Conversational HUD overlay. Goal: the floating dot becomes a real voice/text
+  HUD. Method: upgrade `AgentOrbView`/`FloatingAgentDotService` into a compact HUD
+  with live transcript, current-step status, and a stop button, sharing the premium
+  theme from 8.4. Reference: `overlay/AgentOrbView.kt`,
+  `overlay/FloatingAgentDotService.kt`, `ui/theme/*`.
+- 9.11 Smarter element understanding (tree-miss upgrade). Goal: fewer wrong targets.
+  Method: rank candidate elements (text, id, editable, clickable, position/bounds)
+  into a compact ranked list for the model, and cache the settled tree; builds on
+  6.15 + the real vision/OCR from 7.2/7.3. Reference: `accessibility/UiNode.kt`,
+  `perception/*`, `agent/HybridStepExecutor.kt`.
+- 9.12 Proactive obstacle self-healing. Goal: recover from dialogs/ads/permission
+  walls mid-task without asking. Method: detect common blockers on the live tree
+  (rate-limit 6.17) and dismiss/handle them with a bounded, logged recovery, then
+  resume - never invent success. Reference: `agent/FailureClassifier.kt`,
+  `agent/TaskOrchestrator.kt`, `planning/PostconditionVerifier.kt`.
+- 9.13 Language expansion (Hindi-first) end-to-end. Goal: understand and reply in
+  Hindi/Roman-Hindi for commands, status, TTS, and voice. Method: extend 7.17 to the
+  new voice loop and memory commands; keep it bounded (no full i18n framework).
+  Reference: `voice/LanguageDetector.kt`, `voice/SpeechOutput.kt`, `ui/*`,
+  `planning/PlannerPromptBuilder.kt`.
+- 9.14 Battery / thermal / cost guard for always-on mode. Goal: proactive features
+  never drain the phone. Method: gate awareness/triggers on Doze, battery level, and
+  charging state; degrade gracefully and tell the user when a feature is paused.
+  Reference: `automation/AutomationGate.kt`, `perception/ScreenAwareness.kt`,
+  `OmniAgentApplication.kt`.
+
+Phase 9 defaults (locked): all of 9.1, 9.2 (location), 9.7, 9.8, 9.9 are OPT-IN and
+OFF by default; nothing auto-sends a message or auto-spends money; NO new model is
+introduced; the single E2B engine is reused for every AI step.
+
+## 4A. FINAL BUG SWEEP - FIND AND FIX EVERY BUG (compulsory, end of the pass)
+
+The user asked, explicitly, to find and fix ALL bugs/errors at the end. After
+Phases 7, 8 and 9 are implemented, run a full audit and fix every finding (do not
+just report them):
+
+- Build + tests: make `./gradlew :app:assembleDebug` and
+  `./gradlew :app:testDebugUnitTest` pass with zero failures; fix compile errors,
+  `androidTest` failures, and any Robolectric breakages caused by the new code.
+- Static sweep: search the whole tree for leftover `Unavailable*` seams, `= null` /
+  `return null` default backends that are still reachable in the live graph, unused
+  classes (e.g. anything referenced only by itself), and dead branches; wire or
+  delete each one so no advertised capability is inert.
+- Dead-wiring sweep: confirm every public entry point is reachable - re-check
+  BS1 - BS10 from section 2.3 AND every Phase 9 feature is actually called from the
+  app graph (not just defined).
+- Lint / warnings: resolve Android lint errors and Kotlin warnings that indicate
+  real defects (unused, deprecation that breaks behaviour, resource mismatches,
+  unresolved manifest references).
+- Runtime-error sweep: no crash on: fresh install, denied permission, no network,
+  model missing, model failing to load, empty/clipboard-empty, and rotate/kill.
+- Regression: every honest-behaviour rule still holds - no fake success, no silent
+  cloud egress, risky actions still confirm, and the model-not-loaded path still
+  blocks (6.1) with the real reason shown (8.2).
+
 # 5. TESTING AND VALIDATION
 
 Success is defined per phase; each phase must keep the existing behaviour
@@ -1385,6 +1512,46 @@ was implemented in the orchestrator but had no reachable UI; it is now wired to 
 (`OrchestratorLoopTest.watchingARunSavesAReusableSkill`). Same "written but not
 reachable" defect class as the BS sweep. Suite: 194 tests, 0 failures.
 
+Phase 9 (fully-automated Jarvis capability upgrades):
+- 9.1: proactive suggestions fire ONLY when the awareness mode is opted in; with it
+  off, no awareness loop runs and no screen data is read (assert no capture).
+- 9.2: each new trigger (time/interval, battery, charging, network, app-foreground,
+  notification, location) fires its automation only when its gate passes and the
+  master switch is on; with the master off nothing is scheduled.
+- 9.3: a follow-up command ("and send it", "same for Ravi") resolves against the
+  previous command/target and reaches completion; a follow-up with no context fails
+  honestly (asks), not by guessing.
+- 9.4: a value read in one app (price/text/result) is usable by a later step in
+  another app (assert the copied variable reaches the paste/type step).
+- 9.5: "remember that ..." persists and appears in the next planning prompt;
+  "forget ..." removes it; "what do you know about X" answers from the store only.
+- 9.6: a saved skill is listed, can be renamed/replayed/deleted, and replay goes
+  through the normal verified executor (no bypass of verification).
+- 9.7: opt-in + mic permission -> wake word -> recognised text -> confirm -> run ->
+  spoken result; the stop phrase halts it; with opt-in off no audio is captured.
+- 9.8: the scheduled briefing fires at the set time, composes a bounded summary,
+  and speaks it; off by default.
+- 9.9: notification triage summarises on-device and a reply never auto-sends
+  without confirmation.
+- 9.10: the overlay HUD shows live transcript + current step + a stop control and
+  shares the premium theme.
+- 9.11: on a tree-miss screen, ranked candidate elements (or the vision/OCR path)
+  locate the intended target; a genuinely absent target is refused, not blind-tapped.
+- 9.12: a scripted dialog/ad/permission wall is detected and dismissed with a
+  bounded recovery, then the task resumes and is verified - never a fake success.
+- 9.13: Hindi/Roman-Hindi works for commands, status, TTS and the new voice loop.
+- 9.14: with the battery low / Doze / not charging, always-on features pause and
+  say so; they resume when conditions allow.
+- All Phase 9 always-on/privacy features are OFF by default and require an
+  explicit, visible opt-in (assert the default state for each).
+
+Final bug sweep (section 4A):
+- `./gradlew :app:testDebugUnitTest` and `:app:assembleDebug` are green; the whole
+  app graph has no unreachable/dead capability; lint errors are resolved; the
+  no-crash edge cases pass; and every honest-behaviour rule (no fake success, no
+  silent egress, risky actions confirm, model-not-loaded blocks with the reason) is
+  re-asserted.
+
 Global:
 - `./gradlew :app:testDebugUnitTest` passes (Robolectric, sdk 34, JDK 21,
   Android platform 36.1; `--no-daemon` in a sandbox).
@@ -1398,4 +1565,9 @@ Global:
   the model loads to Ready after download (or shows the real failure + Retry), the
   premium UI shows live step progress during a run, and the Setup screen actually
   displays the engine load status card (BS1) instead of nothing.
+- Manual device check (Phase 9): with voice opt-in, saying "Jarvis" + a command
+  runs hands-free and speaks the result; a follow-up ("and send it") resolves; a
+  "remember that ..." fact is used in a later task; a scheduled briefing fires; and
+  every always-on feature stays OFF until explicitly enabled and pauses on low
+  battery.
 
