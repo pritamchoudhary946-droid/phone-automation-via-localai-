@@ -84,6 +84,9 @@ class AgentAccessibilityService : AccessibilityService() {
         /** Bound on how long to wait for a screenshot callback before giving up. */
         private const val SCREENSHOT_CALLBACK_TIMEOUT_MS = 5_000L
 
+        /** Bound on nodes scanned when extracting visible text or searching for a label. */
+        private const val MAX_TEXT_SCAN_NODES = 400
+
         var instance: AgentAccessibilityService? = null
             private set
 
@@ -840,6 +843,114 @@ class AgentAccessibilityService : AccessibilityService() {
     suspend fun tapTargetDirectly(targetText: String): Boolean {
         val res = performTap(targetText, null, null) { true }
         return res.success
+    }
+
+    // ==========================================
+    // 3c. Extended interaction primitives
+    // ==========================================
+
+    /**
+     * Presses and holds an observed control for [durationMs].
+     *
+     * The gesture is dispatched at the bounds of the node whose visible label matches
+     * [targetText]; it never uses blind fixed coordinates. Returns the same [TapResult]
+     * shape as [performTap] so callers get a precise method/failure reason.
+     */
+    suspend fun performLongPress(targetText: String, durationMs: Long = 700L): TapResult {
+        val root = rootInActiveWindow
+            ?: return TapResult(false, "FAILED", "Active window is null for long press.", nodeFound = false)
+
+        try {
+            val node = findNodeByText(root, targetText)
+                ?: return TapResult(false, "FAILED", "No visible node matches '$targetText' to long press.", nodeFound = false)
+
+            val bounds = Rect()
+            node.getBoundsInScreen(bounds)
+            if (bounds.width() <= 0 || bounds.height() <= 0) {
+                return TapResult(false, "FAILED", "Matched node for '$targetText' has empty bounds.", bounds = bounds, nodeFound = true)
+            }
+
+            val x = bounds.centerX().toFloat()
+            val y = bounds.centerY().toFloat()
+            val path = Path().apply { moveTo(x, y) }
+            val stroke = GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(300L, 5_000L))
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+
+            val (completed, reason) = dispatchGestureBounded(
+                gesture, x, y, timeoutMs = durationMs.coerceIn(300L, 5_000L) + GESTURE_CALLBACK_TIMEOUT_MS
+            )
+            return if (completed) {
+                Log.i(TAG, "[LONG_PRESS_SUCCESS] Long-pressed '$targetText' for ${durationMs}ms at ($x, $y)")
+                TapResult(true, "DISPATCH_LONG_PRESS", null, bounds, nodeFound = true)
+            } else {
+                TapResult(false, "FAILED", reason ?: "Long press gesture was not completed.", bounds = bounds, nodeFound = true)
+            }
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /**
+     * Returns a bounded, de-duplicated digest of the visible text on screen.
+     * Used by [com.example.agent.AgentAction.ReadText] so the agent can read what is
+     * actually shown (a message body, a price, an error) without a screenshot.
+     */
+    fun readVisibleText(maxChars: Int = 1_500): String {
+        val root = rootInActiveWindow ?: return ""
+        val seen = LinkedHashSet<String>()
+        try {
+            val stack = ArrayDeque<AccessibilityNodeInfo>()
+            stack.addLast(root)
+            var visited = 0
+            while (stack.isNotEmpty() && visited < MAX_TEXT_SCAN_NODES) {
+                val node = stack.removeLast()
+                visited++
+                val text = node.text?.toString()?.trim()
+                val desc = node.contentDescription?.toString()?.trim()
+                listOfNotNull(text, desc).forEach { value ->
+                    if (value.isNotBlank()) seen.add(value)
+                }
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { stack.addLast(it) }
+                }
+            }
+        } finally {
+            root.recycle()
+        }
+        return seen.joinToString("\n").take(maxChars)
+    }
+
+    /** True when the live tree exposes a node whose text/description contains [targetText]. */
+    fun isTextVisible(targetText: String): Boolean {
+        if (targetText.isBlank()) return false
+        val root = rootInActiveWindow ?: return false
+        return try {
+            findNodeByText(root, targetText) != null
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /** Depth-first lookup of the first node whose text or description contains [targetText]. */
+    private fun findNodeByText(root: AccessibilityNodeInfo, targetText: String): AccessibilityNodeInfo? {
+        val needle = targetText.trim().lowercase()
+        if (needle.isEmpty()) return null
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        stack.addLast(root)
+        var visited = 0
+        while (stack.isNotEmpty() && visited < MAX_TEXT_SCAN_NODES) {
+            val node = stack.removeLast()
+            visited++
+            val text = node.text?.toString()?.lowercase()
+            val desc = node.contentDescription?.toString()?.lowercase()
+            if (text?.contains(needle) == true || desc?.contains(needle) == true) {
+                return AccessibilityNodeInfo.obtain(node)
+            }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { stack.addLast(it) }
+            }
+        }
+        return null
     }
 
     suspend fun takeScreenshotFallback(): Bitmap? {

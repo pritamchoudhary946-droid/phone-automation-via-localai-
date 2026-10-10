@@ -102,6 +102,9 @@ class TaskOrchestrator(
 
     private var executionJob: Job? = null
 
+    /** Bounded mid-task replans, so a stalled plan can be rebuilt without looping. */
+    private var replanCount = 0
+
     private var pendingRiskAction: AgentAction? = null
     private var pendingRiskTaskId: String? = null
 
@@ -120,6 +123,7 @@ class TaskOrchestrator(
         _activePlan.value = null
         _modelCalls.value = 0
         _fastPathSteps.value = 0
+        replanCount = 0
         stuckDetector.reset()
         // Promote to a foreground service so a long automation survives the user
         // leaving the app; the notification is removed when the task ends.
@@ -175,6 +179,7 @@ class TaskOrchestrator(
                     )
                     _usesModelPlanning.value = plan.fromModel
                     stuckDetector.reset()
+                    replanCount = 0
                     Log.i(TAG, "[RESUME] Continuing existing plan at step ${plan.completedCount()} of ${plan.size}")
                 } else {
                     val planOutcome = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
@@ -224,16 +229,28 @@ class TaskOrchestrator(
                 while (completedCount < maxSteps) {
                     val step = plan.nextPending()
                     if (step == null) {
-                        // All planned steps are done; still require a fresh goal-level
-                        // postcondition before declaring success.
+                        // Every planned step has been consumed. Require a fresh goal-level
+                        // postcondition; if it does not hold, the plan is exhausted without
+                        // reaching the goal, so give the model a bounded chance to rebuild
+                        // the remaining work from the current screen.
                         val fresh = deviceAutomation.observe()
                         val goalVerdict = verifyGoalPostcondition(plan, observation, fresh)
                         if (goalVerdict.satisfied) {
                             val summary = "Goal achieved: completed ${plan.completedCount()} of ${plan.size} planned steps."
                             complete(task, summary, completedCount)
-                        } else {
-                            fail(task, "All planned steps completed but the goal postcondition was not verified: ${goalVerdict.detail}", completedCount)
+                            return@launch
                         }
+                        val replanned = attemptReplan(task, plan, fresh, completedCount, goalVerdict.detail)
+                        if (replanned != null && replanned.nextPending() != null) {
+                            plan = replanned
+                            completedCount = plan.completedCount()
+                            observation = fresh
+                            consecutiveFailures = 0
+                            stuckDetector.reset()
+                            delay(300)
+                            continue
+                        }
+                        fail(task, "All planned steps completed but the goal postcondition was not verified: ${goalVerdict.detail}", completedCount)
                         return@launch
                     }
                     if (step.attempts > step.maxRetries) {
@@ -437,7 +454,17 @@ class TaskOrchestrator(
 
                         if (allRequiredCompleted) {
                             // Every step claims success yet the screen does not prove the
-                            // goal: fail honestly rather than looping.
+                            // goal. Give the model one bounded chance to rebuild the plan
+                            // from the current screen before failing.
+                            val replanned = attemptReplan(task, plan, observation, completedCount, reason)
+                            if (replanned != null) {
+                                plan = replanned
+                                completedCount = plan.completedCount()
+                                consecutiveFailures = 0
+                                stuckDetector.reset()
+                                delay(300)
+                                continue
+                            }
                             fail(task, "Model claimed completion but the goal postcondition was not verified: $reason", completedCount)
                             return@launch
                         }
@@ -497,6 +524,19 @@ class TaskOrchestrator(
                         // controls when we give up, and Gemma sees the failure next round.
                         consecutiveFailures++
                         if (attempted.attempts > attempted.maxRetries) {
+                            // The step exhausted its retries. Before giving up, let the model
+                            // rebuild the remaining plan from the current screen: the action
+                            // may simply be wrong for this screen state.
+                            val replanned = attemptReplan(task, plan, postObservation, completedCount, verdict.detail)
+                            if (replanned != null && replanned.nextPending() != null) {
+                                plan = replanned
+                                completedCount = plan.completedCount()
+                                observation = postObservation
+                                consecutiveFailures = 0
+                                stuckDetector.reset()
+                                delay(300)
+                                continue
+                            }
                             taskDao.updateTask(task.copy(currentStep = completedCount))
                             fail(task, "Step ${attempted.id} (${attempted.rawActionName}) did not satisfy its postcondition: ${verdict.detail}", completedCount)
                             return@launch
@@ -573,6 +613,70 @@ class TaskOrchestrator(
                 PostconditionVerdict(verdict.satisfied, verdict.detail)
             }
         }
+    }
+
+    /**
+     * Rebuilds the plan for the part of the goal that is not yet done. Used when the
+     * current plan has stalled (all steps consumed, or repeated failures) so the run
+     * can recover with a fresh approach instead of failing outright. Bounded by
+     * [MAX_REPLANS]; returns null when no further replan is allowed, in which case the
+     * caller reports the failure.
+     */
+    private suspend fun attemptReplan(
+        task: TaskEntity,
+        currentPlan: TaskPlan,
+        observation: UiObservation,
+        completedCount: Int,
+        failureDetail: String
+    ): TaskPlan? {
+        if (replanCount >= MAX_REPLANS) {
+            Log.w(TAG, "[REPLAN] Budget exhausted ($replanCount/$MAX_REPLANS)")
+            return null
+        }
+        replanCount++
+        _orchestratorState.value = OrchestratorState.Replanning(
+            "Rebuilding plan after: $failureDetail",
+            RecoveryStrategy.REPLAN_NEW_APPROACH
+        )
+        val outcome = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
+            liteRtEngine.planTask(
+                goal = task.userGoal,
+                screenSummary = observation.summary,
+                foregroundPackage = observation.packageName,
+                historySummary = historySummary(),
+                lastActionVerification = failureDetail,
+                remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1)
+            )
+        }
+        val newPlan = when (outcome) {
+            is PlanOutcome.Planned -> {
+                _usesModelPlanning.value = outcome.source == PlanSource.GEMMA_MODEL
+                outcome.plan
+            }
+            is PlanOutcome.Unavailable -> liteRtEngine.fallbackPlan(task.userGoal)
+            is PlanOutcome.Rejected -> liteRtEngine.fallbackPlan(task.userGoal)
+            null -> liteRtEngine.fallbackPlan(task.userGoal)
+        }
+        val merged = mergeReplan(currentPlan, newPlan)
+        _activePlan.value = merged
+        Log.i(TAG, "[REPLAN] #$replanCount rebuilt plan with ${merged.size} steps (${merged.completedCount()} already done)")
+        return merged
+    }
+
+    /**
+     * Keeps already-completed subgoals from [current] and takes the remaining work from
+     * [replanned]. Re-running a completed step would replay side effects the user has
+     * already approved, so completed steps are carried over rather than replaced.
+     */
+    private fun mergeReplan(current: TaskPlan, replanned: TaskPlan): TaskPlan {
+        val done = current.steps.filter { it.status == PlanStepStatus.COMPLETED }
+        val doneActions = done.map { it.action }.toSet()
+        val remaining = replanned.steps.filter { it.action !in doneActions }
+        val carried = done.mapIndexed { index, step -> step.copy(id = index, sequence = index) }
+        val fresh = remaining.mapIndexed { index, step ->
+            step.copy(id = carried.size + index, sequence = carried.size + index)
+        }
+        return TaskPlan(goal = current.goal, steps = carried + fresh, fromModel = replanned.fromModel)
     }
 
     private fun verifyAction(
@@ -766,5 +870,12 @@ class TaskOrchestrator(
         const val PLAN_TIMEOUT_MS = 60_000L
         const val STEP_DECISION_TIMEOUT_MS = 30_000L
         const val MAX_CONSECUTIVE_FAILURES = 4
+
+        /**
+         * Bounded rebuilds of a stalled plan; each replan costs one model round-trip and
+         * re-runs the step's retry budget, so this stays at one to keep total actions
+         * bounded (see OrchestratorLoopTest.failedActionTriggersBoundedRecoveryThenStops).
+         */
+        const val MAX_REPLANS = 1
     }
 }

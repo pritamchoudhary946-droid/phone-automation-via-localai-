@@ -152,6 +152,39 @@ class AndroidDeviceAutomation(
                 }
             }
             is AgentAction.Scroll -> ActionResult(service.scroll(action.direction), "SCROLL", "Scrolled ${action.direction}")
+            is AgentAction.LongPress -> {
+                val r = service.performLongPress(action.targetText.orEmpty(), action.durationMs)
+                ActionResult(
+                    success = r.success,
+                    method = r.method,
+                    message = if (r.success) "Long-pressed '${action.targetText}' via ${r.method}" else (r.failureReason ?: "Long press failed")
+                )
+            }
+            is AgentAction.ScrollUntilFound -> executeScrollUntilFound(action, service)
+            is AgentAction.ReadText -> {
+                val text = service.readVisibleText()
+                ActionResult(
+                    success = text.isNotBlank(),
+                    method = "READ_TEXT",
+                    message = if (text.isNotBlank()) "Read ${text.length} chars of visible text" else "No visible text found on screen"
+                )
+            }
+            is AgentAction.WaitForText -> {
+                val deadline = System.currentTimeMillis() + action.timeoutMs
+                var found = service.isTextVisible(action.targetText)
+                while (!found && System.currentTimeMillis() < deadline) {
+                    delay(250)
+                    found = service.isTextVisible(action.targetText)
+                }
+                ActionResult(
+                    success = found,
+                    method = "WAIT_FOR_TEXT",
+                    message = if (found) "Text '${action.targetText}' appeared" else "Text '${action.targetText}' did not appear within ${action.timeoutMs}ms"
+                )
+            }
+            is AgentAction.OpenNotifications -> ActionResult(service.openNotifications(), "GLOBAL_NOTIFICATIONS", "Opened notification shade")
+            is AgentAction.OpenQuickSettings -> ActionResult(service.openQuickSettings(), "GLOBAL_QUICK_SETTINGS", "Opened quick settings")
+            is AgentAction.PressRecents -> ActionResult(service.pressRecents(), "GLOBAL_RECENTS", "Opened recents")
             is AgentAction.Back -> ActionResult(service.pressBack(), "GLOBAL_BACK", "Pressed Back")
             is AgentAction.Home -> ActionResult(service.pressHome(), "GLOBAL_HOME", "Pressed Home")
             is AgentAction.Wait -> {
@@ -165,6 +198,36 @@ class AndroidDeviceAutomation(
             }
             else -> ActionResult(false, "UNKNOWN", "Unsupported action for execution layer")
         }
+    }
+
+    /**
+     * Scrolls the current surface until [AgentAction.ScrollUntilFound.targetText]
+     * becomes visible. Bounded by `maxSwipes` so a missing label cannot loop forever.
+     * Stops early when a swipe no longer changes the screen (end of list reached).
+     */
+    private suspend fun executeScrollUntilFound(
+        action: AgentAction.ScrollUntilFound,
+        service: AgentAccessibilityService
+    ): ActionResult {
+        if (service.isTextVisible(action.targetText)) {
+            return ActionResult(true, "ALREADY_VISIBLE", "'${action.targetText}' is already visible")
+        }
+        var swipes = 0
+        while (swipes < action.maxSwipes) {
+            val before = service.dumpHierarchy().getFingerprint()
+            service.scroll(action.direction)
+            delay(350)
+            if (service.isTextVisible(action.targetText)) {
+                return ActionResult(true, "SCROLL_UNTIL_FOUND", "Found '${action.targetText}' after ${swipes + 1} swipe(s)")
+            }
+            val after = service.dumpHierarchy().getFingerprint()
+            swipes++
+            if (before == after) {
+                // The list did not move: further swipes in this direction are pointless.
+                return ActionResult(false, "SCROLL_EXHAUSTED", "Reached the end of the list without finding '${action.targetText}'")
+            }
+        }
+        return ActionResult(false, "SCROLL_EXHAUSTED", "'${action.targetText}' not found after ${action.maxSwipes} swipes")
     }
 
     private suspend fun executeOpenApp(

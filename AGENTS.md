@@ -37,6 +37,23 @@ Notes:
   `Execute`, `Satisfied`, or `ModelReason`.
 - `ForegroundPackageVerifier.isHomePackage(...)` is the single source of truth
   for "are we home?".
+- `TaskOrchestrator.attemptReplan(...)` rebuilds a stalled plan (terminal path or
+  exhausted step retries), bounded by `MAX_REPLANS`. Completed steps are carried
+  over by `mergeReplan(...)` so approved side effects are not replayed.
+
+## Action vocabulary
+`AgentAction` is the only executable surface. Beyond launch/tap/type/scroll:
+`LongPress`, `ScrollUntilFound` (bounded swipe-to-find), `ReadText` (visible-text
+digest), `WaitForText` (bounded wait), `OpenNotifications`, `OpenQuickSettings`,
+`PressRecents`. When adding an action you must update, together:
+1. `AgentAction` (+ `getDisplayName`, and `RiskEvaluator` if it can be Risky),
+2. `ToolRegistry` (const, `ToolDefinition`, `validateAction`),
+3. `TaskPlanParser` (tool name -> action mapping),
+4. `HybridStepExecutor.decide(...)` (deterministic case when no model is needed),
+5. `PlannerPromptBuilder.ACTION_CATALOG` (the schema the model sees),
+6. `AndroidDeviceAutomation.execute(...)` (+ accessibility primitive if new).
+An action the native layer cannot execute must not appear in the catalogue
+(see the `ask_confirmation` exclusion in `PlannerPromptBuilder.availableActions`).
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
