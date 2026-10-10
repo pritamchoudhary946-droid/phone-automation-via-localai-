@@ -267,3 +267,18 @@ An action the native layer cannot execute must not appear in the catalogue
 - Always run the full gate locally before pushing:
   `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug`.
 
+## Loader invariants (8.9/8.10) - do not regress the phone hang
+- ONE load path: `GemmaInferenceEngine` takes a single CPU-first `runtimeFactory`.
+  Do not reintroduce a GPU-primary + CPU two-attempt scheme (`cpuRuntimeFactory`):
+  a failed GPU delegate doubles the ~2.6 GB init work and thrashes memory.
+- `initialize()` is single-flight: the Ready check is repeated INSIDE
+  `mutex.withLock`, and any previous runtime is closed before it is replaced. Two
+  concurrent initializers must never leave two runtimes alive.
+- `USE_GPU_BACKEND` is `false` (CPU-first). GPU is strictly opt-in.
+- Smoke probe runs once: call `ensureReady()` (load + one probe + remember), not
+  `initialize()` + a manual probe on every re-open. `reportUnavailable()`/`shutdown()`
+  clear the probe flag so a genuine reload re-verifies.
+- Memory trims must not thrash the engine: `MemoryTrimPolicy.shouldReleaseEngine`
+  releases only at `TRIM_MEMORY_COMPLETE`; `onLowMemory()` is advisory and keeps the
+  engine. A release bumps `trimGeneration`; the next explicit use reloads.
+
