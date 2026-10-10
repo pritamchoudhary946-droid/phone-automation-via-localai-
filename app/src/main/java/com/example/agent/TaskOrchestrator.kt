@@ -389,9 +389,15 @@ class TaskOrchestrator(
                         }
                         is PlanOutcome.Rejected -> {
                             _usesModelPlanning.value = false
-                            val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
-                            Log.w(TAG, "Using fallback planner due to: ${planOutcome.reason}")
-                            fallbackPlan
+                            if (liteRtEngine.isFallbackExplicit()) {
+                                Log.w(TAG, "Using explicitly enabled fallback planner due to: ${planOutcome.reason}")
+                                liteRtEngine.fallbackPlan(task.userGoal)
+                            } else {
+                                val reason = "Model plan rejected and basic fallback is disabled: ${planOutcome.reason}"
+                                Log.w(TAG, reason)
+                                fail(task, reason, 0)
+                                return@launch
+                            }
                         }
                         null -> {
                             _usesModelPlanning.value = false
