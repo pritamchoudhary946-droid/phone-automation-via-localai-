@@ -728,7 +728,11 @@ fun StateBanner(
         is OrchestratorState.Failed -> Quad(
             MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
             MaterialTheme.colorScheme.error,
-            "Task Failed: ${state.reason}",
+            if (state.escalated) {
+                "Need your help: ${state.blockedOn ?: state.reason}\n${state.suggestion ?: ""}".trim()
+            } else {
+                "Task Failed: ${state.reason}"
+            },
             Icons.Default.Error
         )
     }

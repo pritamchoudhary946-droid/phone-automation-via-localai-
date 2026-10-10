@@ -189,7 +189,9 @@ fun AgentLiveMonitorScreen(
                     is OrchestratorState.WaitingConfirmation -> "Waiting for safety approval for: ${state.riskType}"
                     is OrchestratorState.Paused -> "Task paused at step ${state.stepIndex}."
                     is OrchestratorState.Completed -> "Task completed successfully: ${state.summary}"
-                    is OrchestratorState.Failed -> "Task halted: ${state.reason}"
+                    is OrchestratorState.Failed ->
+                        if (state.escalated) "Blocked: ${state.blockedOn ?: state.reason} — ${state.suggestion ?: "tell me how to proceed"}"
+                        else "Task halted: ${state.reason}"
                 }
 
                 Text(

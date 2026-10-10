@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.data.local.AgentDatabase
 import com.example.data.local.CheckpointEntity
+import com.example.data.local.EpisodeEntity
 import com.example.data.local.SavedSkillEntity
 import com.example.data.local.TaskEntity
 import com.example.data.local.TaskOutcomeEntity
@@ -17,11 +18,16 @@ import com.example.perception.ScreenAwareness
 import com.example.perception.UnavailableOcrReader
 import com.example.perception.UnavailableVisionGrounder
 import com.example.perception.VisionGrounder
+import com.example.planning.CloudPlannerProvider
+import com.example.planning.DisabledCloudPlannerProvider
+import com.example.planning.EpisodeDeriver
+import com.example.planning.ExplorationRequest
 import com.example.planning.PlanOutcome
 import com.example.planning.PlanSource
 import com.example.planning.PlanStep
 import com.example.planning.PlanStepStatus
 import com.example.planning.PlannerPromptBuilder
+import com.example.planning.ReflectionRequest
 import com.example.planning.TaskPlanSerializer
 import com.example.planning.PostconditionVerifier
 import com.example.planning.TaskPlan
@@ -54,7 +60,18 @@ sealed class OrchestratorState {
     data class Replanning(val reason: String, val recoveryStrategy: RecoveryStrategy) : OrchestratorState()
     data class Paused(val taskId: String, val stepIndex: Int) : OrchestratorState()
     data class Completed(val taskId: String, val summary: String) : OrchestratorState()
-    data class Failed(val taskId: String, val reason: String) : OrchestratorState()
+    /**
+     * A terminal failure. When [escalated] is true the bounded recovery cycle was
+     * exhausted and the run stopped honestly (plan 5.8) with a clear [blockedOn] reason
+     * and a [suggestion] instead of a bare error; it never fakes success.
+     */
+    data class Failed(
+        val taskId: String,
+        val reason: String,
+        val escalated: Boolean = false,
+        val blockedOn: String? = null,
+        val suggestion: String? = null
+    ) : OrchestratorState()
 }
 
 /**
@@ -79,7 +96,9 @@ class TaskOrchestrator(
     private val ocrReader: OcrReader = UnavailableOcrReader,
     private val retriever: Retriever? = null,
     private val completionNotifier: com.example.notifications.CompletionNotifier? = null,
-    private val autoSaveSkills: Boolean = false
+    private val autoSaveSkills: Boolean = false,
+    private val cloudPlannerProvider: CloudPlannerProvider = DisabledCloudPlannerProvider,
+    private val nanoSummarizer: com.example.model.NanoSummarizer = com.example.model.UnavailableNanoSummarizer
 ) {
     private val TAG = "TaskOrchestrator"
     private val database = AgentDatabase.getInstance(context)
@@ -87,6 +106,7 @@ class TaskOrchestrator(
     private val taskStepDao = database.taskStepDao()
     private val checkpointDao = database.checkpointDao()
     private val memoryDao = database.memoryDao()
+    private val episodeDao = database.episodeDao()
 
     private val hybridStepExecutor = HybridStepExecutor(appDirectory)
 
@@ -134,6 +154,19 @@ class TaskOrchestrator(
     /** Bounded RAG context from the user's own notes/history; loaded once per task. */
     private var retrievedContext: String = ""
 
+    /** Bounded lessons from past episodes; loaded once per task (plan 5.9). */
+    private var lessonsDigest: String = ""
+
+    /** Progress meter for the current run (plan 5.10); (re)created at the top of each run. */
+    private lateinit var progressBudget: ProgressBudget
+
+    /** Human-readable record of recoveries this run took, for the episode record (5.9). */
+    private val recoveryNotes = mutableListOf<String>()
+
+    /** The last failure that drove a recovery, so the episode lesson can name it. */
+    private var lastFailureType: FailureType = FailureType.NONE
+    private var lastFailureDetail: String = ""
+
     /** An action the user just approved: skip re-prompting when the loop reconsiders it. */
     private var userConfirmedAction: AgentAction? = null
 
@@ -151,6 +184,9 @@ class TaskOrchestrator(
         _fastPathSteps.value = 0
         replanCount = 0
         stuckDetector.reset()
+        recoveryNotes.clear()
+        lastFailureType = FailureType.NONE
+        lastFailureDetail = ""
         // Promote to a foreground service so a long automation survives the user
         // leaving the app; the notification is removed when the task ends.
         try {
@@ -178,6 +214,9 @@ class TaskOrchestrator(
         executionJob = scope.launch {
             memoryDigest = loadMemoryDigest(task.userGoal)
             retrievedContext = loadRetrievedContext(task.userGoal)
+            lessonsDigest = loadLessons(task.userGoal)
+            progressBudget = ProgressBudget(task.maxSteps, MAX_REPLANS, MAX_EXPLORES)
+            recoveryNotes.clear()
             val maxSteps = task.maxSteps
             var lastActionResult: String? = null
             var consecutiveFailures = 0
@@ -229,7 +268,8 @@ class TaskOrchestrator(
                             lastActionVerification = null,
                             remainingStepBudget = maxSteps,
                             memorySummary = memoryDigest,
-                            retrievedContext = retrievedContext
+                            retrievedContext = retrievedContext,
+                            lessonsSummary = lessonsDigest
                         )
                     }
 
@@ -312,11 +352,9 @@ class TaskOrchestrator(
                     if (stuck.isStuck) {
                         Log.w(TAG, "[STUCK] ${stuck.reason}")
                         _orchestratorState.value = OrchestratorState.Replanning(stuck.reason, stuck.suggestedRecovery)
+                        // Immediate cheap unblock first: nudge the screen so the next
+                        // observe sees a fresh state, then run the full recovery cycle.
                         when (stuck.suggestedRecovery) {
-                            RecoveryStrategy.ASK_USER_HELP -> {
-                                fail(task, "Stuck in repeating loop: ${stuck.reason}", completedCount)
-                                return@launch
-                            }
                             RecoveryStrategy.PRESS_BACK_TO_UNBLOCK -> {
                                 deviceAutomation.execute(AgentAction.Back); delay(500)
                             }
@@ -325,10 +363,37 @@ class TaskOrchestrator(
                             }
                             else -> delay(400)
                         }
-                        // The recovery action changed the screen; re-observe so the
-                        // re-decided action (fast path or model) is chosen against the
-                        // recovered screen instead of the stale pre-recovery one.
                         observation = deviceAutomation.observe()
+                        // 5.7: a detected loop is a failure signal too — run the bounded
+                        // Detect->Diagnose->Replan cycle instead of retrying the same action.
+                        val recovered = recoverFromFailure(
+                            task = task,
+                            plan = plan,
+                            failedStep = step,
+                            observation = observation,
+                            completedCount = completedCount,
+                            screenChanged = true,
+                            resultMessage = "no progress",
+                            resultMethod = "LOOP",
+                            verdictDetail = stuck.reason,
+                            loopReason = stuck.reason
+                        )
+                        if (recovered != null) {
+                            plan = recovered
+                            completedCount = plan.completedCount()
+                            consecutiveFailures = 0
+                            stuckDetector.reset()
+                            delay(300)
+                            continue
+                        }
+                        fail(
+                            task,
+                            "Stuck in a repeating loop and recovery was exhausted: ${stuck.reason}",
+                            completedCount,
+                            escalated = true,
+                            blockedOn = lastFailureDetail
+                        )
+                        return@launch
                     }
                     val effectiveStep = step
 
@@ -599,34 +664,41 @@ class TaskOrchestrator(
                         stuckDetector.reset()
                         taskDao.updateTask(task.copy(currentStep = completedCount))
                     } else {
-                        // Keep the step pending; the bounded retry policy in the plan
-                        // controls when we give up, and Gemma sees the failure next round.
+                        // Detect -> Diagnose -> Recover (plan 5): classify the failure,
+                        // reflect, then rebuild via re-plan/exploration. The step is only
+                        // abandoned or retried through that bounded cycle — never blindly
+                        // re-executed and never left to spin.
                         consecutiveFailures++
-                        if (attempted.attempts > attempted.maxRetries) {
-                            // The step exhausted its retries. Before giving up, let the model
-                            // rebuild the remaining plan from the current screen: the action
-                            // may simply be wrong for this screen state.
-                            val replanned = attemptReplan(task, plan, postObservation, completedCount, verdict.detail)
-                            if (replanned != null && replanned.nextPending() != null) {
-                                plan = replanned
-                                completedCount = plan.completedCount()
-                                observation = postObservation
-                                consecutiveFailures = 0
-                                stuckDetector.reset()
-                                delay(300)
-                                continue
-                            }
-                            taskDao.updateTask(task.copy(currentStep = completedCount))
-                            fail(task, "Step ${attempted.id} (${attempted.rawActionName}) did not satisfy its postcondition: ${verdict.detail}", completedCount)
-                            return@launch
+                        val recovered = recoverFromFailure(
+                            task = task,
+                            plan = plan,
+                            failedStep = effectiveStep,
+                            observation = postObservation,
+                            completedCount = completedCount,
+                            screenChanged = previousObservation.fingerprint != postObservation.fingerprint,
+                            resultMessage = execResult.message,
+                            resultMethod = execResult.method,
+                            verdictDetail = verdict.detail
+                        )
+                        if (recovered != null) {
+                            plan = recovered
+                            completedCount = plan.completedCount()
+                            observation = postObservation
+                            consecutiveFailures = 0
+                            stuckDetector.reset()
+                            delay(300)
+                            continue
                         }
-                        if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
-                            fail(task, "No progress after $MAX_CONSECUTIVE_FAILURES attempts; stopping. Last: ${verdict.detail}", completedCount)
-                            return@launch
-                        }
-                        // Replan signal: allow Gemma to choose a different action next round.
-                        _orchestratorState.value = OrchestratorState.Replanning(verdict.detail, RecoveryStrategy.REPLAN_NEW_APPROACH)
-                        delay(300)
+                        // Recovery exhausted: escalate honestly (5.8) instead of a bare fail.
+                        taskDao.updateTask(task.copy(currentStep = completedCount))
+                        fail(
+                            task,
+                            "Step ${attempted.id} (${attempted.rawActionName}) did not satisfy its postcondition and recovery was exhausted: ${verdict.detail}",
+                            completedCount,
+                            escalated = true,
+                            blockedOn = lastFailureDetail
+                        )
+                        return@launch
                     }
                 }
 
@@ -753,7 +825,8 @@ class TaskOrchestrator(
                 lastActionVerification = failureDetail,
                 remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1),
                 memorySummary = memoryDigest,
-                retrievedContext = retrievedContext
+                retrievedContext = retrievedContext,
+                lessonsSummary = lessonsDigest
             )
         }
         val newPlan = when (outcome) {
@@ -761,9 +834,15 @@ class TaskOrchestrator(
                 _usesModelPlanning.value = outcome.source == PlanSource.GEMMA_MODEL
                 outcome.plan
             }
-            is PlanOutcome.Unavailable -> liteRtEngine.fallbackPlan(task.userGoal)
-            is PlanOutcome.Rejected -> liteRtEngine.fallbackPlan(task.userGoal)
-            null -> liteRtEngine.fallbackPlan(task.userGoal)
+            is PlanOutcome.Unavailable ->
+                cloudReplan(task, observation, completedCount, failureDetail)
+                    ?: liteRtEngine.fallbackPlan(task.userGoal)
+            is PlanOutcome.Rejected ->
+                cloudReplan(task, observation, completedCount, failureDetail)
+                    ?: liteRtEngine.fallbackPlan(task.userGoal)
+            null ->
+                cloudReplan(task, observation, completedCount, failureDetail)
+                    ?: liteRtEngine.fallbackPlan(task.userGoal)
         }
         val merged = mergeReplan(currentPlan, newPlan)
         _activePlan.value = merged
@@ -958,6 +1037,7 @@ class TaskOrchestrator(
     private suspend fun complete(task: TaskEntity, summary: String, completedCount: Int) {
         Log.i(TAG, "[COMPLETE] $summary")
         recordOutcome(task, "COMPLETED", summary, completedCount)
+        recordEpisode(task, "COMPLETED")
         taskDao.updateTask(task.copy(status = "COMPLETED", currentStep = completedCount, resultSummary = summary))
         _orchestratorState.value = OrchestratorState.Completed(task.id, summary)
         notifyFinished("Task complete", summary)
@@ -966,12 +1046,37 @@ class TaskOrchestrator(
         stopExecutionService()
     }
 
-    private suspend fun fail(task: TaskEntity, reason: String, step: Int) {
+    private suspend fun fail(
+        task: TaskEntity,
+        reason: String,
+        step: Int,
+        escalated: Boolean = false,
+        blockedOn: String? = null
+    ) {
         Log.e(TAG, "[FAIL] $reason")
         recordOutcome(task, "FAILED", reason, step)
+        recordEpisode(task, "FAILED")
         taskDao.updateTask(task.copy(status = "FAILED", currentStep = step, resultSummary = reason))
-        _orchestratorState.value = OrchestratorState.Failed(task.id, reason)
-        notifyFinished("Task failed", reason)
+        _orchestratorState.value = if (escalated) {
+            OrchestratorState.Failed(
+                task.id,
+                reason,
+                escalated = true,
+                blockedOn = blockedOn,
+                suggestion = escalationSuggestion()
+            )
+        } else {
+            OrchestratorState.Failed(task.id, reason)
+        }
+        if (escalated) {
+            // 5.8: ask the user for help with a clear reason, rather than a silent stop.
+            notifyFinished(
+                "Task needs your help",
+                "${blockedOn ?: reason}\nSuggested: ${escalationSuggestion()}"
+            )
+        } else {
+            notifyFinished("Task failed", reason)
+        }
         stopExecutionService()
     }
 
@@ -1091,9 +1196,218 @@ class TaskOrchestrator(
         .replace(Regex("(?i)pin[=:\\s]+[\\d]{4,6}"), "pin=****")
         .replace(Regex("\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"), "CARD_NUMBER_REDACTED")
 
+    // --- Phase 5: autonomy & self-healing helpers -------------------------------
+
+    /**
+     * Runs the Detect -> Diagnose -> Backtrack -> Re-plan -> Explore -> Learn recovery
+     * cycle for a failed step (plans 5.2-5.10). Returns a rebuilt plan to continue with,
+     * or null when the bounded cycle is exhausted — in which case the caller stops
+     * honestly (never retrying the same action, never faking success).
+     *
+     * The failure is *classified* first so the cheapest fitting recovery is chosen; a
+     * re-plan (5.5) and bounded exploration (5.6) each consume one budget slot. The
+     * abandoned steps are marked SKIPPED rather than re-run (5.5).
+     */
+    private suspend fun recoverFromFailure(
+        task: TaskEntity,
+        plan: TaskPlan,
+        failedStep: PlanStep,
+        observation: UiObservation,
+        completedCount: Int,
+        screenChanged: Boolean,
+        resultMessage: String,
+        resultMethod: String,
+        verdictDetail: String,
+        validationRejected: Boolean = false,
+        loopReason: String? = null
+    ): TaskPlan? {
+        val stepsRemaining = progressBudget.stepsRemaining(completedCount)
+        if (stepsRemaining <= 0) {
+            lastFailureDetail = "Step budget exhausted"
+            return null
+        }
+
+        val diagnosis = FailureClassifier.classify(
+            success = false,
+            resultMessage = resultMessage,
+            resultMethod = resultMethod,
+            verificationDetail = verdictDetail,
+            screenChanged = screenChanged,
+            expectedPackage = packageForAction(failedStep.action),
+            observedPackage = observation.packageName,
+            screenText = observation.summary,
+            validationRejected = validationRejected,
+            loopDetected = loopReason != null
+        )
+        lastFailureType = diagnosis.type
+        lastFailureDetail = "Step '${failedStep.rawActionName}' failed (${diagnosis.type}): ${diagnosis.reason}"
+        Log.w(TAG, "[RECOVERY] ${diagnosis.type} -> ${diagnosis.suggestedRecovery}")
+
+        // 5.4: reflection-on-demand — only here (failure/stall), never on a clean run.
+        val reflection = withTimeoutOrNull(REFLECTION_TIMEOUT_MS) {
+            liteRtEngine.reflect(
+                ReflectionRequest(
+                    goal = task.userGoal,
+                    activeSubGoal = failedStep.description,
+                    lastAction = "${failedStep.rawActionName} (${failedStep.action.getDisplayName()})",
+                    failureReason = diagnosis.reason,
+                    screenSummary = observation.summary,
+                    foregroundPackage = observation.packageName
+                )
+            )
+        } ?: diagnosis.reason
+        recoveryNotes += "reflected on ${diagnosis.type}: ${reflection.take(120)}"
+
+        // 5.3: backtrack to the last known-good surface before retrying.
+        if (diagnosis.suggestedRecovery == RecoveryStrategy.PRESS_BACK_TO_UNBLOCK) {
+            runCatching { deviceAutomation.execute(AgentAction.Back) }
+            delay(400)
+        }
+
+        // 5.5: the failed step is abandoned, not re-run, when a new approach is built.
+        val abandoned = plan.replace(failedStep.withStatus(PlanStepStatus.SKIPPED))
+
+        // 5.10: degrade in order — re-plan, then explore, then escalate (handled by the
+        // caller when this returns null). Exploration is only for a missing target
+        // (5.6): a wrong package or a validation rejection is not a discovery problem.
+        if (progressBudget.canReplan()) {
+            val replanned = attemptReplan(task, abandoned, observation, completedCount, diagnosis.reason)
+            if (replanned != null && replanned.nextPending() != null) {
+                progressBudget.recordReplan()
+                recoveryNotes += "re-planned after ${diagnosis.type}"
+                return replanned
+            }
+        }
+        val explorationFits = diagnosis.type == FailureType.TARGET_NOT_FOUND ||
+            diagnosis.type == FailureType.NO_SCREEN_CHANGE
+        if (explorationFits && progressBudget.canExplore()) {
+            progressBudget.recordExplore()
+            val probe = withTimeoutOrNull(EXPLORATION_TIMEOUT_MS) {
+                liteRtEngine.exploreNextAction(
+                    ExplorationRequest(
+                        goal = task.userGoal,
+                        missingTarget = failedStep.description,
+                        probesUsed = progressBudget.exploresUsed,
+                        screenSummary = observation.summary,
+                        foregroundPackage = observation.packageName,
+                        availableActions = toolRegistry.getRegisteredTools().map { it.name }
+                    )
+                )
+            }
+            if (probe != null && toolRegistry.validateAction(probe) is ToolValidationResult.Valid) {
+                runCatching { deviceAutomation.execute(probe) }
+                delay(400)
+                recoveryNotes += "explored with ${probe.getDisplayName()}"
+                // Continue the plan from the (now-SKIPPED-free) step after the probe.
+                return abandoned.replace(failedStep.withStatus(PlanStepStatus.PENDING))
+            }
+        }
+        return null
+    }
+
+    /** The package a launch step targets, so WRONG_PACKAGE failures can be classified. */
+    private fun packageForAction(action: AgentAction): String? =
+        if (action is AgentAction.OpenApp) action.packageName ?: appDirectory.resolvePackage(action.appQuery) else null
+
+    /**
+     * Optional cloud fallback (plan 4.8): consulted ONLY when the local planner failed,
+     * the user explicitly enabled it, and the app is not in local-only mode. It is
+     * parsed through the same strict validator as local output, so a cloud response can
+     * never introduce an action the local planner would have rejected. Returns null when
+     * disabled/unconfigured/unreachable, keeping the honest local fallback in place.
+     */
+    private suspend fun cloudReplan(
+        task: TaskEntity,
+        observation: UiObservation,
+        completedCount: Int,
+        failureDetail: String
+    ): TaskPlan? {
+        if (!cloudPlannerProvider.isEnabled()) return null
+        return try {
+            val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+                com.example.planning.PlanningRequest(
+                    userCommand = task.userGoal,
+                    desiredOutcome = task.userGoal,
+                    foregroundPackage = observation.packageName,
+                    screenSummary = observation.summary,
+                    completedStepsSummary = historySummary(),
+                    lastActionResult = failureDetail,
+                    remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1),
+                    availableActions = toolRegistry.getRegisteredTools().map { it.name },
+                    memorySummary = memoryDigest,
+                    retrievedContext = retrievedContext,
+                    lessonsSummary = lessonsDigest
+                )
+            )
+            val raw = cloudPlannerProvider.complete(prompt, PlannerPromptBuilder.SYSTEM_INSTRUCTION)
+            if (raw.isNullOrBlank()) return null
+            when (val parsed = com.example.planning.TaskPlanParser(toolRegistry).parse(raw, task.userGoal)) {
+                is com.example.planning.PlanParseResult.Success -> {
+                    _usesModelPlanning.value = true
+                    Log.i(TAG, "[CLOUD_FALLBACK] cloud planner produced a validated plan")
+                    parsed.plan
+                }
+                is com.example.planning.PlanParseResult.Invalid -> {
+                    Log.w(TAG, "[CLOUD_FALLBACK] cloud plan rejected: ${parsed.reason}")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "[CLOUD_FALLBACK] failed: ${e.message}")
+            null
+        }
+    }
+
+    /** The best "what should I try next" hint for an honest escalation (plan 5.8). */
+    private fun escalationSuggestion(): String = when (lastFailureType) {
+        FailureType.PERMISSION_DIALOG -> "Grant the permission dialog that is blocking the screen, then retry."
+        FailureType.TARGET_NOT_FOUND -> "The control I need is not on screen; open the relevant screen manually and retry."
+        FailureType.NETWORK_ERROR -> "Check your connection, then retry."
+        FailureType.WRONG_PACKAGE -> "A different app is in the foreground; bring the right app forward and retry."
+        FailureType.LOGIN_REQUIRED -> "Sign in to the app, then retry."
+        FailureType.TIMEOUT -> "The last action was slow; retry, or perform it manually."
+        else -> "Perform the step manually, or rephrase the task and retry."
+    }
+
+    /** Records a compact episode lesson for the run (plan 5.9). */
+    private suspend fun recordEpisode(task: TaskEntity, outcome: String) {
+        try {
+            val lesson = EpisodeDeriver.lesson(
+                outcome = outcome,
+                failureDetail = lastFailureDetail,
+                recoveriesUsed = progressBudget.replansUsed + progressBudget.exploresUsed,
+                finalApproach = recoveryNotes.lastOrNull()
+            )
+            episodeDao.insertEpisode(
+                EpisodeEntity(
+                    goal = task.userGoal,
+                    outcome = outcome,
+                    failureSummary = lastFailureDetail.take(300),
+                    lesson = lesson.take(300),
+                    recoveriesUsed = progressBudget.replansUsed + progressBudget.exploresUsed
+                )
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Episode write failed: ${e.message}")
+        }
+    }
+
+    /** Bounded digest of lessons from past episodes relevant to [goal] (plan 5.9). */
+    private suspend fun loadLessons(goal: String): String = try {
+        val episodes = episodeDao.getEpisodesForGoal(goal, EPISODE_LIMIT)
+            .ifEmpty { episodeDao.getRecentEpisodes(EPISODE_LIMIT) }
+            .filter { it.lesson.isNotBlank() }
+        EpisodeDeriver.toPromptBlock(episodes.map { it.goal to it.lesson }, PlannerPromptBuilder.MAX_LESSONS_CHARS)
+    } catch (e: Exception) {
+        Log.w(TAG, "Lesson load failed: ${e.message}")
+        ""
+    }
+
     companion object {
         const val PLAN_TIMEOUT_MS = 60_000L
         const val STEP_DECISION_TIMEOUT_MS = 30_000L
+        const val REFLECTION_TIMEOUT_MS = 20_000L
+        const val EXPLORATION_TIMEOUT_MS = 20_000L
         const val MAX_CONSECUTIVE_FAILURES = 4
 
         /**
@@ -1103,7 +1417,11 @@ class TaskOrchestrator(
          */
         const val MAX_REPLANS = 1
 
+        /** Bounded exploration probes (plan 5.6): enough to test a couple of routes, not wander. */
+        const val MAX_EXPLORES = 2
+
         const val MEMORY_LIMIT = 8
         const val MEMORY_OUTCOME_LIMIT = 3
+        const val EPISODE_LIMIT = 3
     }
 }

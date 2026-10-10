@@ -14,9 +14,10 @@ import androidx.room.RoomDatabase
         TaskOutcomeEntity::class,
         SavedSkillEntity::class,
         KnowledgeNoteEntity::class,
-        AutomationEntity::class
+        AutomationEntity::class,
+        EpisodeEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AgentDatabase : RoomDatabase() {
@@ -27,6 +28,7 @@ abstract class AgentDatabase : RoomDatabase() {
     abstract fun skillDao(): SkillDao
     abstract fun knowledgeDao(): KnowledgeDao
     abstract fun automationDao(): AutomationDao
+    abstract fun episodeDao(): EpisodeDao
 
     companion object {
         @Volatile

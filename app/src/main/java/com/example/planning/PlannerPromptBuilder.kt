@@ -84,6 +84,10 @@ object PlannerPromptBuilder {
             appendLine("Relevant notes from this user's own data (may be incomplete):")
             appendLine(sanitizeUntrusted(request.retrievedContext).take(MAX_RETRIEVED_CHARS))
         }
+        if (request.lessonsSummary.isNotBlank()) {
+            appendLine("Lessons from similar past tasks (avoid repeating these mistakes):")
+            appendLine(sanitizeUntrusted(request.lessonsSummary).take(MAX_LESSONS_CHARS))
+        }
         appendLine("Current screen (bounded summary, may be truncated):")
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
         appendLine()
@@ -130,6 +134,42 @@ object PlannerPromptBuilder {
         }
     }
 
+    /**
+     * Bounded reflection prompt (plan 5.4). Asks for a single short diagnostic line,
+     * not a plan, so reflection stays cheap on an 8 GB device and cannot inject an
+     * executable action into the loop.
+     */
+    fun buildReflectionPrompt(request: ReflectionRequest): String = buildString {
+        appendLine("Task: in ONE short sentence, diagnose why the last action failed and what to change. Do not output JSON.")
+        appendLine("User command: \"${request.goal}\"")
+        appendLine("Active subgoal: ${request.activeSubGoal}")
+        appendLine("Last action: ${request.lastAction}")
+        appendLine("Failure: ${request.failureReason.take(300)}")
+        appendLine("Foreground package now: ${request.foregroundPackage ?: "unknown"}")
+        appendLine("Current screen (bounded summary, may be truncated):")
+        appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
+        appendLine()
+        appendLine("Reply with ONLY one plain sentence, no markdown.")
+    }
+
+    /**
+     * Bounded exploration prompt (plan 5.6). Asks for ONE safe, non-destructive probe
+     * action that could reveal the missing target; the caller re-validates and risk-
+     * checks whatever comes back through the normal gates.
+     */
+    fun buildExplorationPrompt(request: ExplorationRequest): String = buildString {
+        appendLine("Task: choose ONE safe exploratory action (scroll, open a likely entry point, or expand a menu) that may reveal the target. Never send/pay/delete.")
+        appendLine("User command: \"${request.goal}\"")
+        appendLine("Missing target: ${request.missingTarget}")
+        appendLine("Probes used so far: ${request.probesUsed}")
+        appendLine("Foreground package now: ${request.foregroundPackage ?: "unknown"}")
+        appendLine("Allowed actions: ${request.availableActions.joinToString(", ")}")
+        appendLine("Current screen (bounded summary, may be truncated):")
+        appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
+        appendLine()
+        appendLine("Reply with ONLY this JSON: {\"thought\":\"...\",\"action\":\"<allowed action>\",\"params\":{...}}")
+    }
+
     /** Short catalogue handed to the model. Never exposes free-form Android APIs. */
     fun availableActions(registry: ToolRegistry): List<String> =
         registry.getRegisteredTools()
@@ -154,4 +194,5 @@ object PlannerPromptBuilder {
     const val MAX_SCREEN_CHARS = 1200
     const val MAX_MEMORY_CHARS = 600
     const val MAX_RETRIEVED_CHARS = 400
+    const val MAX_LESSONS_CHARS = 400
 }

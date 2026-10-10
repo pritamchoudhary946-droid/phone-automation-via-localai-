@@ -108,3 +108,20 @@ data class AutomationEntity(
     val enabled: Boolean = true,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+/**
+ * One compact episode record (plan 5.9): the goal, what went wrong, and what finally
+ * worked. Written at task end (and after a recovery) so the most relevant lessons can
+ * be injected into future planning prompts and the same mistake is not repeated.
+ */
+@Entity(tableName = "episodes")
+data class EpisodeEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val goal: String,
+    val outcome: String, // COMPLETED, FAILED
+    val failureSummary: String,
+    val lesson: String,
+    val recoveriesUsed: Int,
+    val timestamp: Long = System.currentTimeMillis()
+)

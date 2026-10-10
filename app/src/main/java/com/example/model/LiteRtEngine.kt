@@ -96,7 +96,8 @@ class LiteRtEngine(
         lastActionVerification: String?,
         remainingStepBudget: Int,
         memorySummary: String = "",
-        retrievedContext: String = ""
+        retrievedContext: String = "",
+        lessonsSummary: String = ""
     ): PlanOutcome {
         val request = PlanningRequest(
             userCommand = goal,
@@ -108,7 +109,8 @@ class LiteRtEngine(
             remainingStepBudget = remainingStepBudget,
             availableActions = planner.availableActions(),
             memorySummary = memorySummary,
-            retrievedContext = retrievedContext
+            retrievedContext = retrievedContext,
+            lessonsSummary = lessonsSummary
         )
         return planner.plan(request)
     }
@@ -137,6 +139,14 @@ class LiteRtEngine(
     }
 
     fun fallbackPlan(goal: String): TaskPlan = planner.fallbackPlan(goal)
+
+    /** Reflection-on-demand (plan 5.4), surfaced for the orchestrator's recovery cycle. */
+    suspend fun reflect(request: com.example.planning.ReflectionRequest): String =
+        planner.reflect(request)
+
+    /** One bounded exploration probe (plan 5.6), surfaced for the orchestrator. */
+    suspend fun exploreNextAction(request: com.example.planning.ExplorationRequest): AgentAction =
+        planner.exploreNextAction(request)
 
     /**
      * Backward-compatible decision path used by the legacy diagnostic tests. When the

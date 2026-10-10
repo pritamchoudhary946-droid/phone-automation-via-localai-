@@ -23,7 +23,17 @@ class StuckLoopDetector {
     private var consecutiveIdenticalScreens = 0
     private var identicalActionStreak = 0
 
+    /** Repeat count of each (screen-state, action) pair across the whole cycle (5.7). */
+    private val pairCounts = mutableMapOf<String, Int>()
+
     fun recordStep(fingerprint: String, actionName: String): StuckStatus {
+        // Count repeated (state, action) pairs: this catches longer cycles such as
+        // A-B-C-A-B-C that neither the identical-action streak nor the A-B-A-B
+        // ping-pong check would see, so the loop can never quietly spin.
+        val pairKey = "$fingerprint|$actionName"
+        val pairCount = (pairCounts[pairKey] ?: 0) + 1
+        pairCounts[pairKey] = pairCount
+
         // Track duplicate actions
         if (actionHistory.isNotEmpty() && actionHistory.last() == actionName) {
             identicalActionStreak++
@@ -84,6 +94,17 @@ class StuckLoopDetector {
             }
         }
 
+        // Stuck Condition 4: same (state, action) pair repeated too often across the
+        // whole cycle — a longer oscillation or a repetitious dead end (5.7).
+        if (pairCount >= MAX_PAIR_REPEATS) {
+            return StuckStatus(
+                isStuck = true,
+                consecutiveStuckCount = pairCount,
+                reason = "Action '$actionName' has been tried $pairCount times in the same screen state.",
+                suggestedRecovery = RecoveryStrategy.REPLAN_NEW_APPROACH
+            )
+        }
+
         return StuckStatus(
             isStuck = false,
             consecutiveStuckCount = 0,
@@ -95,7 +116,13 @@ class StuckLoopDetector {
     fun reset() {
         screenFingerprints.clear()
         actionHistory.clear()
+        pairCounts.clear()
         consecutiveIdenticalScreens = 0
         identicalActionStreak = 0
+    }
+
+    private companion object {
+        /** Repetitions of one (state, action) pair before a run counts as stuck. */
+        const val MAX_PAIR_REPEATS = 3
     }
 }
