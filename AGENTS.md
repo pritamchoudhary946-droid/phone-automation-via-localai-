@@ -177,3 +177,31 @@ An action the native layer cannot execute must not appear in the catalogue
 - Public API surface is often asserted in `app/src/test/**`: before changing a
   signature used by tests, grep the tests. `GatedPrivilegedBridge`'s `optIn` is a
   `() -> Boolean` supplier (live toggle), not a captured Boolean.
+
+## Phase 8 (Jarvis rebrand, working load, premium UI) invariants
+- The app is now branded "Jarvis" in every *user-visible* string (`strings.xml`
+  `app_name`, dashboard/setup/settings copy, notifications, overlay toasts, the
+  agent prompt identity). Internal class names (`OmniAgentApplication`) and the
+  package stay `com.example` on purpose — do NOT rename them.
+- Model load (8.1): `GemmaInferenceEngine.initialize` makes the primary attempt
+  with the GPU flag from `OmniAgentApplication.USE_GPU_BACKEND`, then ONE bounded
+  retry on a fresh CPU-only runtime (`cpuRuntimeFactory`) before reporting
+  `EngineState.Failed`. A runtime that never reports ready is closed and is not
+  kept as the active engine. `LiteRtEngine.MAX_CONTEXT_TOKENS` now delegates to
+  `LiteRtLmRuntime.MAX_CONTEXT_TOKENS` — keep the single source of truth; do not
+  re-introduce a literal.
+- Honest failure (8.2): never a silent "not loaded". `GemmaInferenceEngine`
+  records the real init/ smoke-test reason via `EngineState.Failed(message)` and
+  `reportUnavailable(reason)`; both `AgentDashboardScreen` and `SetupScreen` show
+  that message plus a Retry (`initializeEngineIfModelReady()` re-attempts). The
+  old "Basic mode" claim on the header is gone.
+- Theme (8.4): `MyApplicationTheme` defaults to the dark Jarvis HUD (cyan/violet,
+  near-black surfaces). If you add a screen, use the `ui/theme` tokens and the
+  `CrimsonDanger` (not a nonexistent color) for errors.
+- Brand mark (8.5): the launcher foreground and the in-app logo are the same
+  vector `arc reactor` (`drawable/ic_launcher_foreground.xml`,
+  `drawable/ic_jarvis_logo.xml`); keep them in sync if either changes.
+- Live progress (8.6): the dashboard shows a `now_doing_card` derived from
+  `OrchestratorState` (Planning/Executing/Replanning/Paused) so the user always
+  sees the current action and its reasoning.
+

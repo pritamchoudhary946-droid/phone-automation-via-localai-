@@ -12,7 +12,7 @@ import com.example.agent.ToolRegistry
 object PlannerPromptBuilder {
 
     const val SYSTEM_INSTRUCTION =
-        "You are OmniAgent, an on-device Android automation planner. " +
+        "You are Jarvis, an on-device Android automation planner. " +
             "You convert a natural-language command into a short ordered list of safe UI steps. " +
             "Accept commands in English, Hindi, or Roman-Hindi (Hinglish) and plan them the same way. " +
             "Respond with ONLY a single JSON object. Never include prose, markdown or code fences. " +
