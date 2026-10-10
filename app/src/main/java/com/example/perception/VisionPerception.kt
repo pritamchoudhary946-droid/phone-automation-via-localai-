@@ -159,7 +159,8 @@ class OcrVisionGrounder(
         }.maxByOrNull { it.confidence } ?: return null
 
         val bounds = candidate.bounds
-        if (bounds.isEmpty || bounds.centerX() !in 0 until screenshot.width ||
+        if (bounds.width() <= 0 || bounds.height() <= 0 ||
+            bounds.centerX() !in 0 until screenshot.width ||
             bounds.centerY() !in 0 until screenshot.height
         ) return null
         return VisionPoint(bounds.centerX(), bounds.centerY(), candidate.confidence)
