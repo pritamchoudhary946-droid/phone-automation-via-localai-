@@ -82,6 +82,81 @@ fun AgentDashboardScreen(
     val appSettings = remember(context) {
         (context.applicationContext as? com.example.OmniAgentApplication)?.settings
     }
+    // 9.7: one on-demand listen, resolved via a continuation. Returns the recognised
+    // text so the hands-free loop can parse a wake word; times out to null.
+    suspend fun awaitSpeech(timeoutMs: Long): String? =
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+        kotlinx.coroutines.suspendCancellableCoroutine { cont: kotlinx.coroutines.CancellableContinuation<String?> ->
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                cont.resumeWith(Result.success(null)); return@suspendCancellableCoroutine
+            }
+            try {
+                speechRecognizer?.destroy()
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+                speechRecognizer = recognizer
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                }
+                var delivered = false
+                fun deliver(value: String?) {
+                    if (delivered) return
+                    delivered = true
+                    if (cont.isActive) cont.resumeWith(Result.success(value))
+                }
+                recognizer.setRecognitionListener(object : RecognitionListener {
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        deliver(matches?.firstOrNull())
+                    }
+                    override fun onError(error: Int) { deliver(null) }
+                    override fun onReadyForSpeech(params: Bundle?) { isListeningVoice = true }
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() { isListeningVoice = false }
+                    override fun onPartialResults(partialResults: Bundle?) {}
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+                recognizer.startListening(intent)
+            } catch (e: Exception) {
+                isListeningVoice = false
+                if (cont.isActive) cont.resumeWith(Result.success(null))
+            }
+        }
+        }
+
+    // 9.7: full hands-free loop state (wake -> listen -> confirm -> run -> speak).
+    val voiceLoop = remember(orchestrator) {
+        com.example.voice.VoiceLoopController(
+            optIn = { appSettings?.handsFreeEnabled == true },
+            micPermission = {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                    PackageManager.PERMISSION_GRANTED
+            },
+            recognizer = object : com.example.voice.SpeechRecognizer {
+                override fun isAvailable(): Boolean =
+                    SpeechRecognizer.isRecognitionAvailable(context)
+                override suspend fun listenOnce(timeoutMs: Long): String? =
+                    awaitSpeech(timeoutMs)
+            },
+            speak = { text, lang ->
+                val app = context.applicationContext as? com.example.OmniAgentApplication
+                if (lang.isNotBlank()) app?.speechOutput?.speak(text, lang)
+                else app?.speechOutput?.speak(text)
+            },
+            runCommand = { command -> orchestrator.submitCommand(command) != null },
+            stopCurrent = { orchestrator.cancelCurrentTask() }
+        )
+    }
+    var voiceStatus by remember { mutableStateOf("") }
+    var handsFreeBusy by remember { mutableStateOf(false) }
+
+    // 9.3: when a command is ambiguous, Jarvis asks instead of guessing.
+    val clarification by orchestrator.pendingClarification.collectAsState()
+    LaunchedEffect(clarification) {
+        clarification?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+    }
 
     // 8.7/BS8: with 6.1 the app BLOCKS when the model is not loaded unless the user
     // explicitly opted into the labelled degraded (keyword) mode. Reflect that truth
@@ -202,12 +277,31 @@ fun AgentDashboardScreen(
             resourceStats = liteRtEngine.getResourceStats()
             isDotEnabled = FloatingAgentDotService.isRunning
             val handsFreeNow = appSettings?.handsFreeEnabled == true
-            // Arm/disarm the wake-word seam with the live toggle, then start listening
-            // once when hands-free is switched on (the listeners re-arm themselves).
+            // Arm/disarm the opt-in wake-word seam with the live toggle; the dedicated
+            // effect below runs the actual hands-free dialogue loop.
             if (handsFreeNow) wakeWordDetector.start() else wakeWordDetector.stop()
-            if (handsFreeNow && !handsFreeEnabled) startListening()
             handsFreeEnabled = handsFreeNow
             kotlinx.coroutines.delay(2000)
+        }
+    }
+
+    // 9.7: while hands-free is on, keep the wake -> listen -> confirm -> run -> speak
+    // loop going. Re-armed by the recogniser and gated by the live toggle, so turning
+    // the switch off stops capture immediately.
+    LaunchedEffect(handsFreeEnabled) {
+        if (!handsFreeEnabled) return@LaunchedEffect
+        while (appSettings?.handsFreeEnabled == true) {
+            val result = voiceLoop.cycle()
+            voiceStatus = when (result.action) {
+                "ran" -> "Running: ${result.detail}"
+                "stopped" -> "Stopped the current task"
+                "ignored" -> "Say \"Jarvis\" followed by your command"
+                "wake_only" -> "Listening for your command after \"Jarvis\""
+                "no_permission" -> "Microphone permission needed"
+                "off" -> "Hands-free is off"
+                else -> ""
+            }
+            kotlinx.coroutines.delay(250)
         }
     }
 
@@ -523,6 +617,16 @@ fun AgentDashboardScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
+                        if (voiceStatus.isNotBlank()) {
+                            Text(
+                                text = voiceStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = CyanPrimary,
+                                modifier = Modifier.testTag("voice_status_text")
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+
                         OutlinedTextField(
                             value = goalInput,
                             onValueChange = { goalInput = it },
@@ -609,7 +713,10 @@ fun AgentDashboardScreen(
                             Button(
                                 onClick = {
                                     if (goalInput.isNotBlank() && canPlan) {
-                                        orchestrator.startTask(goalInput)
+                                        // 9.3/9.5: route through the command entry point so
+                                        // memory commands and conversational follow-ups work.
+                                        orchestrator.submitCommand(goalInput)
+                                        goalInput = ""
                                     } else if (!canPlan) {
                                         onNavigateToSetup()
                                     }

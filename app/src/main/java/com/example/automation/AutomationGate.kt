@@ -19,4 +19,12 @@ object AutomationGate {
 object AutomationTrigger {
     const val INTERVAL = "INTERVAL"
     const val WIFI_CONNECTED = "WIFI_CONNECTED"
+    // Phase 9.2 additions - event-driven triggers, evaluated by TriggerMatcher.
+    const val BATTERY_BELOW = "BATTERY_BELOW"
+    const val BATTERY_ABOVE = "BATTERY_ABOVE"
+    const val CHARGING_STARTED = "CHARGING_STARTED"
+    const val NETWORK_TYPE = "NETWORK_TYPE"
+    const val APP_FOREGROUND = "APP_FOREGROUND"
+    const val NOTIFICATION_FROM_APP = "NOTIFICATION_FROM_APP"
+    const val LOCATION_ARRIVE = "LOCATION_ARRIVE"
 }

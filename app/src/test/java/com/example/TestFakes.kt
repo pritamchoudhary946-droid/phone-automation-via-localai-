@@ -189,3 +189,33 @@ fun observation(
     )
     return UiObservation.fromSnapshot(UiTreeSnapshot(pkg, nodes, timestamp = fingerprintSeed.toLong()))
 }
+
+/**
+ * An observation whose visible labels are set explicitly, for exercising the
+ * obstacle detector (plan 9.12) and other label-driven seams in tests.
+ */
+fun observationText(
+    pkg: String?,
+    summary: String,
+    fingerprintSeed: Int,
+    labels: List<String>
+): UiObservation {
+    val nodes = labels.mapIndexed { i, label ->
+        UiNode(
+            id = "node_${fingerprintSeed}_$i",
+            text = label,
+            contentDescription = null,
+            className = "android.widget.TextView",
+            packageName = pkg,
+            bounds = android.graphics.Rect(0, i * 20, 100, i * 20 + 20),
+            isClickable = true,
+            isScrollable = false,
+            isEditable = false,
+            isCheckable = false,
+            isChecked = false,
+            isFocused = false
+        )
+    }
+    return UiObservation.fromSnapshot(UiTreeSnapshot(pkg, nodes, timestamp = fingerprintSeed.toLong()))
+        .copy(summary = summary)
+}

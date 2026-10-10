@@ -63,6 +63,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
     /** On-device speech output (plan 7.5/7.17); gated live by the Settings toggle. */
     lateinit var speechOutput: com.example.voice.SpeechOutput
         private set
+    /** 9.8/9.9: posts the daily briefing and shares the task-result channel. */
+    lateinit var completionNotifier: com.example.notifications.CompletionNotifier
+        private set
+    /** 9.1: the opt-in, battery-aware proactive awareness loop (lazily observed by Settings). */
+    var proactiveRunner: com.example.agent.ProactiveEngine.Runner? = null
+        private set
 
     /**
      * 8.2: the engine's live lifecycle state, exposed so SetupScreen can show the real
@@ -123,6 +129,7 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         val ocrReader = com.example.perception.MlKitOcrReader()
         val visionGrounder = com.example.perception.OcrVisionGrounder(ocrReader)
         speechOutput = com.example.voice.AndroidTextToSpeechOutput(this) { settings.voiceOutputEnabled }
+        completionNotifier = com.example.notifications.CompletionNotifier(this)
         planner.fallbackExplicit = settings.basicFallbackExplicit
 
         // The gateway is exposed to the loop as an explicit web tool (web_search /
@@ -141,7 +148,7 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             visionGrounder = visionGrounder,
             ocrReader = ocrReader,
             retriever = com.example.memory.rag.TokenOverlapRetriever(database.knowledgeDao()),
-            completionNotifier = com.example.notifications.CompletionNotifier(this),
+            completionNotifier = completionNotifier,
             // A clean, fully-verified run is saved as a re-runnable local skill.
             autoSaveSkills = true,
             cloudPlannerProvider = cloudPlannerProvider,
@@ -154,9 +161,42 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
 
         // 7.8: re-arm (or cancel) any persisted automations according to the current
         // master switch, so a previously scheduled job cannot outlive the user's choice.
+        // 9.8: also (re)arm the opt-in daily briefing.
         appScope.launch { syncAutomations() }
+        appScope.launch { runCatching { com.example.notifications.BriefingScheduler.sync(this@OmniAgentApplication) } }
+        startProactiveAwareness()
 
         createNotificationChannels()
+    }
+
+    /**
+     * 9.1: a bounded, opt-in, battery-aware proactive loop. It only reads the
+     * foreground package and the recent notifications already on-device, only
+     * *offers* help (never acts), and pauses entirely when the toggle is off or the
+     * battery guard says so.
+     */
+    private fun startProactiveAwareness() {
+        val runner = com.example.agent.ProactiveEngine.Runner(
+            shouldRun = { settings.proactiveAwarenessEnabled },
+            battery = { com.example.perception.BatteryGuard.check(this) },
+            sampleContext = {
+                val foreground = com.example.accessibility.AgentAccessibilityService.instance
+                    ?.screenEvents?.value?.activePackageName
+                com.example.agent.ProactiveEngine.Context(
+                    foregroundPackage = foreground,
+                    notifications = com.example.notifications.NotificationBus.recent(5),
+                    minuteOfDay = java.util.Calendar.getInstance().let {
+                        it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE)
+                    }
+                )
+            },
+            onSuggestion = { s ->
+                completionNotifier.notifySuggestion(s.text)
+                if (settings.voiceOutputEnabled) runCatching { speechOutput.speak(s.text) }
+            }
+        )
+        proactiveRunner = runner
+        runner.start(appScope)
     }
 
     /**

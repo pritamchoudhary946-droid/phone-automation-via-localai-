@@ -43,6 +43,34 @@ class CapabilitySettings(context: Context) {
         get() = prefs.getBoolean(KEY_CLOUD_FALLBACK, false)
         set(v) = prefs.edit().putBoolean(KEY_CLOUD_FALLBACK, v).apply()
 
+    // --- Phase 9 opt-in capabilities. Every one defaults OFF and must be enabled
+    // explicitly by the user; nothing always-on runs without it. ---
+
+    /** 9.1 Proactive awareness: bounded context polling that *offers* help. */
+    var proactiveAwarenessEnabled: Boolean
+        get() = prefs.getBoolean(KEY_PROACTIVE_AWARENESS, false)
+        set(v) = prefs.edit().putBoolean(KEY_PROACTIVE_AWARENESS, v).apply()
+
+    /** 9.2 Location-based automation triggers (arrive/leave). Off by default. */
+    var locationTriggersEnabled: Boolean
+        get() = prefs.getBoolean(KEY_LOCATION_TRIGGERS, false)
+        set(v) = prefs.edit().putBoolean(KEY_LOCATION_TRIGGERS, v).apply()
+
+    /** 9.8 Daily briefing/digest. Off by default; fires once at the set time. */
+    var briefingEnabled: Boolean
+        get() = prefs.getBoolean(KEY_BRIEFING, false)
+        set(v) = prefs.edit().putBoolean(KEY_BRIEFING, v).apply()
+
+    /** 9.8 Minute-of-day (0..1439) at which the briefing fires. Default 08:00. */
+    var briefingMinuteOfDay: Int
+        get() = prefs.getInt(KEY_BRIEFING_MINUTE, 8 * 60)
+        set(v) = prefs.edit().putInt(KEY_BRIEFING_MINUTE, v.coerceIn(0, 1439)).apply()
+
+    /** 9.9 Smart notification triage (summarise + offer actions). Off by default. */
+    var notificationTriageEnabled: Boolean
+        get() = prefs.getBoolean(KEY_NOTIFICATION_TRIAGE, false)
+        set(v) = prefs.edit().putBoolean(KEY_NOTIFICATION_TRIAGE, v).apply()
+
     companion object {
         const val PREFS = "capability_prefs"
         const val KEY_VOICE_OUTPUT = "voice_output_enabled"
@@ -51,5 +79,10 @@ class CapabilitySettings(context: Context) {
         const val KEY_AUTOMATIONS = "automations_enabled"
         const val KEY_BASIC_FALLBACK = "basic_fallback_explicit"
         const val KEY_CLOUD_FALLBACK = "cloud_fallback_enabled"
+        const val KEY_PROACTIVE_AWARENESS = "proactive_awareness_enabled"
+        const val KEY_LOCATION_TRIGGERS = "location_triggers_enabled"
+        const val KEY_BRIEFING = "briefing_enabled"
+        const val KEY_BRIEFING_MINUTE = "briefing_minute_of_day"
+        const val KEY_NOTIFICATION_TRIAGE = "notification_triage_enabled"
     }
 }

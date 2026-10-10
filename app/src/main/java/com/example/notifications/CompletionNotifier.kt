@@ -35,6 +35,40 @@ class CompletionNotifier(private val context: Context) {
         }
     }
 
+    /** Posts the daily briefing (plan 9.8) on its own channel/id, so it never clobbers task results. */
+    fun notifyBriefing(summary: String) {
+        if (!canPost()) return
+        ensureChannel()
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("Daily briefing")
+            .setContentText(summary.take(120))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(summary.take(400)))
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(BRIEFING_ID, notification)
+        } catch (_: SecurityException) {
+        }
+    }
+
+    /** Posts a proactive, opt-in suggestion (plan 9.1); a separate id so nothing is clobbered. */
+    fun notifySuggestion(summary: String) {
+        if (!canPost()) return
+        ensureChannel()
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setContentTitle("Jarvis suggests")
+            .setContentText(summary.take(120))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(summary.take(400)))
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(SUGGESTION_ID, notification)
+        } catch (_: SecurityException) {
+        }
+    }
+
     private fun canPost(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             return ContextCompat.checkSelfPermission(
@@ -56,5 +90,7 @@ class CompletionNotifier(private val context: Context) {
     private companion object {
         const val CHANNEL_ID = "omniagent_results"
         const val NOTIFICATION_ID = 4210
+        const val BRIEFING_ID = 4211
+        const val SUGGESTION_ID = 4212
     }
 }

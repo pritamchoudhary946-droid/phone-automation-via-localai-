@@ -159,6 +159,19 @@ class TaskOrchestrator(
     /** Bounded lessons from past episodes; loaded once per task (plan 5.9). */
     private var lessonsDigest: String = ""
 
+    /** 9.3 bounded conversational context, so follow-ups ("and send it") resolve. */
+    private val conversationMemory = ConversationMemory()
+
+    /** 9.4 per-run variable store: a value read in one app is reusable by a later step. */
+    private val planVariables = com.example.planning.PlanVariableStore()
+
+    private val _pendingClarification = MutableStateFlow<String?>(null)
+    /** A question Jarvis must ask before it can act (9.3): a follow-up with no context. */
+    val pendingClarification: StateFlow<String?> = _pendingClarification.asStateFlow()
+
+    /** 9.12 bounded count of obstacle dismissals per run, so recovery cannot loop. */
+    private var obstacleRecoveries = 0
+
     /** Progress meter for the current run (plan 5.10); (re)created at the top of each run. */
     private lateinit var progressBudget: ProgressBudget
 
@@ -172,13 +185,93 @@ class TaskOrchestrator(
     /** An action the user just approved: skip re-prompting when the loop reconsiders it. */
     private var userConfirmedAction: AgentAction? = null
 
-    var stepTimeoutMs: Long = 15_000L
+    val stepTimeoutMs: Long = 15_000L
     var defaultMaxSteps: Int = 25
+
+    /**
+     * The single user-facing entry point for a typed/spoken command (plan 9.3/9.5).
+     * Handles explicit memory commands inline, expands a conversational follow-up
+     * against the previous turn, and otherwise starts the goal as-is. Returns the
+     * goal actually run, or null when Jarvis asked a clarifying question instead.
+     */
+    fun submitCommand(command: String): String? {
+        _pendingClarification.value = null
+        when (val mem = com.example.memory.MemoryCommands.parse(command)) {
+            is com.example.memory.MemoryCommands.Command.Remember -> {
+                scope.launch { rememberPreference(mem.key, mem.value, kind = "FACT") }
+                _orchestratorState.value = OrchestratorState.Completed(
+                    taskId = "memory", summary = "Got it - I'll remember that."
+                )
+                return null
+            }
+            is com.example.memory.MemoryCommands.Command.Forget -> {
+                scope.launch { runCatching { memoryDao.clearMemories() } }
+                _orchestratorState.value = OrchestratorState.Completed(
+                    taskId = "memory", summary = "Okay, I've forgotten that."
+                )
+                return null
+            }
+            is com.example.memory.MemoryCommands.Command.Recall -> {
+                val query = mem.query
+                scope.launch {
+                    val answer = recallAnswer(query)
+                    _orchestratorState.value = OrchestratorState.Completed(taskId = "memory", summary = answer)
+                }
+                return null
+            }
+            is com.example.memory.MemoryCommands.Command.NotAMemoryCommand -> Unit
+        }
+
+        when (val resolution = conversationMemory.resolve(command)) {
+            is ConversationMemory.Resolution.NeedsContext -> {
+                _pendingClarification.value = resolution.reason
+                return null
+            }
+            is ConversationMemory.Resolution.Resolved -> {
+                startTask(resolution.goal)
+                return resolution.goal
+            }
+            is ConversationMemory.Resolution.Standalone -> {
+                startTask(resolution.goal)
+                return resolution.goal
+            }
+        }
+    }
+
+    /**
+     * 9.11: when the tree has real elements, hand the model a ranked candidate list
+     * (most likely target first) instead of the raw position-ordered dump. Falls back
+     * to the original summary when ranking yields nothing, so behavior never regresses.
+     */
+    private fun decisionScreenSummary(observation: UiObservation, hint: String): String {
+        val ranked = com.example.perception.ElementRanker.rankedSummary(
+            observation.nodes, hint, observation.packageName
+        )
+        return ranked.ifBlank { observation.summary }
+    }
+
+    /** Answers a "what do you know about X" command from the on-device store only (9.5). */
+    private suspend fun recallAnswer(query: String): String {
+        val key = com.example.memory.MemoryCommands.keyOf(query)
+        val exact = runCatching { memoryDao.getMemory(key) }.getOrNull()
+        if (exact != null) return "You told me: ${exact.value}"
+        val recent = runCatching { memoryDao.getRecentMemories(50) }.getOrDefault(emptyList())
+        val needle = query.lowercase()
+        val hit = recent.firstOrNull { it.value.lowercase().contains(needle) || it.key.contains(needle) }
+        return hit?.value?.let { "You told me: $it" } ?: "I don't have anything stored about that yet."
+    }
 
     fun startTask(goal: String, maxSteps: Int = defaultMaxSteps) {
         if (executionJob?.isActive == true) cancelCurrentTask()
+        // 9.3: expand a follow-up ("and send it") into a self-contained goal before it
+        // is persisted, so the plan and the history both read correctly.
+        val effectiveGoal = when (val r = conversationMemory.resolve(goal)) {
+            is ConversationMemory.Resolution.Resolved -> r.goal
+            else -> goal
+        }
+        conversationMemory.remember(effectiveGoal, null)
         val taskId = UUID.randomUUID().toString()
-        val newTask = TaskEntity(id = taskId, userGoal = goal, status = "RUNNING", currentStep = 0, maxSteps = maxSteps)
+        val newTask = TaskEntity(id = taskId, userGoal = effectiveGoal, status = "RUNNING", currentStep = 0, maxSteps = maxSteps)
         _currentTask.value = newTask
         _currentSteps.value = emptyList()
         _activePlan.value = null
@@ -189,6 +282,10 @@ class TaskOrchestrator(
         recoveryNotes.clear()
         lastFailureType = FailureType.NONE
         lastFailureDetail = ""
+        // 9.3/9.4/9.12: each run starts with a clean variable store and obstacle budget.
+        planVariables.clear()
+        obstacleRecoveries = 0
+        _pendingClarification.value = null
         // Promote to a foreground service so a long automation survives the user
         // leaving the app; the notification is removed when the task ends.
         try {
@@ -354,6 +451,34 @@ class TaskOrchestrator(
                     observation = deviceAutomation.observe()
                     _orchestratorState.value = OrchestratorState.Planning(completedCount, task.userGoal, step.description, _usesModelPlanning.value)
 
+                    // 9.12: clear a common blocker (a dialog, ad, rate-limit or consent
+                    // wall) before executing, so it is handled without asking. A blocker we
+                    // cannot dismiss safely stops the run honestly rather than guessing.
+                    if (obstacleRecoveries < MAX_OBSTACLE_RECOVERIES) {
+                        val labels = observation.nodes.map { it.bestLabel() }
+                        val blocker = ObstacleDetector.detect(
+                            ObstacleDetector.ScreenSignals(observation.packageName, labels)
+                        )
+                        if (blocker != null) {
+                            val label = blocker.dismissLabel
+                            if (blocker.unresolvable || label == null || !ObstacleDetector.isSafeDismiss(label)) {
+                                fail(
+                                    task,
+                                    "Blocked by ${blocker.kind} (${blocker.explanation}). I won't guess at dismissing it.",
+                                    completedCount
+                                )
+                                return@launch
+                            }
+                            obstacleRecoveries++
+                            recoveryNotes.add("Dismissed ${blocker.kind} via '$label'")
+                            Log.i(TAG, "[OBSTACLE] ${blocker.kind} -> tapping '$label'")
+                            deviceAutomation.execute(AgentAction.Tap(label, null, null))
+                            delay(500)
+                            observation = deviceAutomation.observe()
+                            stuckDetector.reset()
+                        }
+                    }
+
                     val stuck = stuckDetector.recordStep(observation.fingerprint, step.rawActionName)
                     if (stuck.isStuck) {
                         Log.w(TAG, "[STUCK] ${stuck.reason}")
@@ -425,7 +550,7 @@ class TaskOrchestrator(
                             liteRtEngine.decideNextAction(
                                 goal = task.userGoal,
                                 activeSubGoal = effectiveStep.description,
-                                screenSummary = observation.summary,
+                                screenSummary = decisionScreenSummary(observation, effectiveStep.description),
                                 foregroundPackage = observation.packageName,
                                 historySummary = historySummary(),
                                 lastActionVerification = lastActionResult,
@@ -530,6 +655,10 @@ class TaskOrchestrator(
                         delay(150)
                         continue
                     }
+
+                    // 9.4: resolve `{{name}}` placeholders from values captured earlier in
+                    // this run, so a value read in one app reaches the step that uses it.
+                    action = planVariables.substitute(action)
 
                     when (val validation = toolRegistry.validateAction(action)) {
                         is ToolValidationResult.Invalid -> {
@@ -1530,5 +1659,8 @@ class TaskOrchestrator(
         const val MEMORY_LIMIT = 8
         const val MEMORY_OUTCOME_LIMIT = 3
         const val EPISODE_LIMIT = 3
+
+        /** Bounded obstacle dismissals per run (plan 9.12), so recovery cannot loop. */
+        const val MAX_OBSTACLE_RECOVERIES = 3
     }
 }
