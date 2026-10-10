@@ -210,6 +210,7 @@ class GemmaIntegrationTest {
         val modelManager = LiteRtModelManager(context).also { fakeModelFileAt(it.getModelFile()) }
         val engine = buildTestEngine(context, runtimeFactory = { _, _ -> fake }, modelManager = modelManager)
         assertTrue(engine.initialize())
+        engine.setFallbackExplicit(true)
 
         val outcome = engine.planTask(
             goal = "Open YouTube",
