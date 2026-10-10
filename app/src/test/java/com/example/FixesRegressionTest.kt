@@ -251,7 +251,7 @@ class FixesRegressionTest {
         assertTrue(verdict.satisfied)
     }
 
-    /** Bug: a submitted search with no literal "results" text must still count as advanced. */
+    /** A result surface can omit the literal word "results" when item evidence is present. */
     @Test
     fun resultsPresentAcceptsAdvancedScreenWithoutLiteralResults() {
         val verdict = com.example.planning.PostconditionVerifier.verify(
@@ -260,9 +260,23 @@ class FixesRegressionTest {
             targetPackage = null,
             observationPackage = "com.google.android.youtube",
             screenChanged = true,
-            screenText = "lo-fi beats 12 views"
+            screenText = "lo-fi beats 12 views video"
         )
         assertTrue(verdict.satisfied)
+    }
+
+    /** A fingerprint change by itself must never satisfy a search postcondition. */
+    @Test
+    fun resultsPresentRejectsChangedScreenWithoutResultEvidence() {
+        val verdict = com.example.planning.PostconditionVerifier.verify(
+            method = com.example.planning.VerificationMethod.RESULTS_PRESENT,
+            expectedPostcondition = "results",
+            targetPackage = null,
+            observationPackage = "com.google.android.youtube",
+            screenChanged = true,
+            screenText = "YouTube home screen"
+        )
+        assertFalse(verdict.satisfied)
     }
 
     /**
