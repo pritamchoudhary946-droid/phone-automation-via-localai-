@@ -25,6 +25,15 @@ open class ToolRegistry {
         const val TOOL_READ_SCREEN = "read_screen"
         const val TOOL_TAP_ELEMENT = "tap_element"
         const val TOOL_ENTER_TEXT = "enter_text"
+        const val TOOL_SUBMIT = "submit"
+        const val TOOL_OPEN_URL = "open_url"
+        const val TOOL_COPY_TEXT = "copy_text"
+        const val TOOL_PASTE_TEXT = "paste_text"
+        const val TOOL_DRAG = "drag"
+        const val TOOL_DEEP_LINK = "deep_link"
+        const val TOOL_READ_PAGE_CONTENT = "read_page_content"
+        const val TOOL_WEB_SEARCH = "web_search"
+        const val TOOL_READ_URL = "read_url"
         const val TOOL_OPEN_SEARCH = "open_search"
         const val TOOL_OPEN_ITEM = "open_item"
         const val TOOL_SCROLL = "scroll"
@@ -66,6 +75,54 @@ open class ToolRegistry {
             description = "Injects text into an editable focused input field via ACTION_SET_TEXT",
             requiredParameters = listOf("text"),
             optionalParameters = listOf("targetNodeId")
+        ),
+        TOOL_SUBMIT to ToolDefinition(
+            name = TOOL_SUBMIT,
+            description = "Submits the current text entry by pressing Enter/Send or activating a visible Send control",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("targetText")
+        ),
+        TOOL_OPEN_URL to ToolDefinition(
+            name = TOOL_OPEN_URL,
+            description = "Opens a web URL in the default browser via an ACTION_VIEW https intent",
+            requiredParameters = listOf("url")
+        ),
+        TOOL_COPY_TEXT to ToolDefinition(
+            name = TOOL_COPY_TEXT,
+            description = "Copies the focused field's text, or a labelled element's text, to the clipboard",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("targetText")
+        ),
+        TOOL_PASTE_TEXT to ToolDefinition(
+            name = TOOL_PASTE_TEXT,
+            description = "Pastes the clipboard into the focused editable field",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("targetText")
+        ),
+        TOOL_DRAG to ToolDefinition(
+            name = TOOL_DRAG,
+            description = "Drags from one visible element to another (e.g. to reorder or swipe a card), between label centres",
+            requiredParameters = listOf("fromText", "toText")
+        ),
+        TOOL_DEEP_LINK to ToolDefinition(
+            name = TOOL_DEEP_LINK,
+            description = "Opens an app-specific URI (deep link) via an ACTION_VIEW intent",
+            requiredParameters = listOf("uri")
+        ),
+        TOOL_READ_PAGE_CONTENT to ToolDefinition(
+            name = TOOL_READ_PAGE_CONTENT,
+            description = "Extracts the visible text of the current (scrollable) page into the observation",
+            requiredParameters = emptyList()
+        ),
+        TOOL_WEB_SEARCH to ToolDefinition(
+            name = TOOL_WEB_SEARCH,
+            description = "Performs a web search through the configured gateway and returns a bounded digest",
+            requiredParameters = listOf("query")
+        ),
+        TOOL_READ_URL to ToolDefinition(
+            name = TOOL_READ_URL,
+            description = "Fetches a web page's text content through the configured gateway and returns a bounded digest",
+            requiredParameters = listOf("url")
         ),
         TOOL_OPEN_SEARCH to ToolDefinition(
             name = TOOL_OPEN_SEARCH,
@@ -184,6 +241,48 @@ open class ToolRegistry {
             is AgentAction.TypeText -> {
                 if (action.text.isEmpty()) {
                     ToolValidationResult.Invalid("Text to input cannot be empty")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.Submit -> ToolValidationResult.Valid
+            is AgentAction.OpenUrl -> {
+                if (action.url.isBlank()) {
+                    ToolValidationResult.Invalid("open_url requires a non-blank url")
+                } else if (!action.url.trim().lowercase().startsWith("http")) {
+                    ToolValidationResult.Invalid("open_url only supports http(s) URLs: '${action.url}'")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.DeepLink -> {
+                if (action.uri.isBlank()) {
+                    ToolValidationResult.Invalid("deep_link requires a non-blank uri")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.Drag -> {
+                when {
+                    action.fromText.isBlank() || action.toText.isBlank() ->
+                        ToolValidationResult.Invalid("drag requires non-blank fromText and toText")
+                    else -> ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.CopyText, is AgentAction.PasteText -> ToolValidationResult.Valid
+            is AgentAction.ReadPageContent -> ToolValidationResult.Valid
+            is AgentAction.WebSearch -> {
+                if (action.query.isBlank()) {
+                    ToolValidationResult.Invalid("web_search requires a non-blank query")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.ReadUrl -> {
+                if (action.url.isBlank()) {
+                    ToolValidationResult.Invalid("read_url requires a non-blank url")
+                } else if (!action.url.trim().lowercase().startsWith("http")) {
+                    ToolValidationResult.Invalid("read_url only supports http(s) URLs: '${action.url}'")
                 } else {
                     ToolValidationResult.Valid
                 }

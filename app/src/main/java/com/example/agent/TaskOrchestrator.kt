@@ -60,7 +60,8 @@ class TaskOrchestrator(
     private val appDirectory: AppDirectory,
     private val deviceAutomation: DeviceAutomation = AndroidDeviceAutomation(appDirectory),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-    toolRegistry: ToolRegistry = ToolRegistry()
+    toolRegistry: ToolRegistry = ToolRegistry(),
+    private val webGateway: com.example.cloudflare.CloudflareGateway? = null
 ) {
     private val TAG = "TaskOrchestrator"
     private val database = AgentDatabase.getInstance(context)
@@ -382,6 +383,34 @@ class TaskOrchestrator(
                         action = AgentAction.OpenSearch(action.text)
                     }
 
+                    // In-loop web tool: an explicit web search / read-url is not a UI
+                    // action. It runs through the gateway and its digest is fed back to the
+                    // model, then the step is marked done. It never bypasses risk checks —
+                    // it performs no device side effect and cannot send/pay/delete.
+                    if (action is AgentAction.WebSearch || action is AgentAction.ReadUrl) {
+                        val digest = runWebTool(action)
+                        recordStep(
+                            task = task,
+                            index = completedCount,
+                            reasoning = "In-loop ${action.getDisplayName()}",
+                            action = action,
+                            observation = observation,
+                            verification = digest,
+                            status = "SUCCESS"
+                        )
+                        // Mark the step completed in the plan, otherwise nextPending() keeps
+                        // returning it and the loop would repeat the web call forever.
+                        plan = plan.replace(effectiveStep.withAttempt().withStatus(PlanStepStatus.COMPLETED))
+                        lastActionResult = digest
+                        completedCount++
+                        consecutiveFailures = 0
+                        stuckDetector.reset()
+                        taskDao.updateTask(task.copy(currentStep = completedCount))
+                        _activePlan.value = plan
+                        delay(150)
+                        continue
+                    }
+
                     when (val validation = toolRegistry.validateAction(action)) {
                         is ToolValidationResult.Invalid -> {
                             recordStep(task, completedCount, "Rejected by validation", action, observation, "Failed: ${validation.reason}", "FAILED")
@@ -566,6 +595,33 @@ class TaskOrchestrator(
     }
 
     /**
+     * Runs an explicit web tool through the gateway and returns a bounded digest
+     * suitable for the next prompt. When no gateway is configured (offline build or
+     * tests), it returns an honest "unavailable" digest instead of inventing a result.
+     */
+    private suspend fun runWebTool(action: AgentAction): String {
+        val gateway = webGateway
+            ?: return "Web tool unavailable: no gateway configured. Cannot complete '${action.getDisplayName()}'."
+        return try {
+            val result = when (action) {
+                is AgentAction.WebSearch -> gateway.searchWeb(action.query)
+                is AgentAction.ReadUrl -> gateway.parsePdfDocument(action.url)
+                else -> null
+            }
+            when (result) {
+                is com.example.cloudflare.CloudflareTaskResult.Success ->
+                    "${result.title}: ${result.content}".take(1_200)
+                is com.example.cloudflare.CloudflareTaskResult.Error ->
+                    "Web tool failed: ${result.errorMessage}".take(400)
+                null -> "Web tool produced no result."
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Web tool '${action.getDisplayName()}' failed", e)
+            "Web tool error: ${e.localizedMessage}".take(400)
+        }
+    }
+
+    /**
      * Fresh, goal-level postcondition check used to gate a `FinishTask` claim.
      * It is intentionally independent of the per-step verdicts: even if the plan
      * says every step is done, the current screen must still prove the goal.
@@ -734,7 +790,7 @@ class TaskOrchestrator(
 
     /** True when the fresh observation exposes an editable/input control. */
     private fun observationHasEditableField(observation: UiObservation): Boolean =
-        observation.nodes.any { it.isEditable }
+        observation.hasTextInputField()
 
     private fun historySummary(): String = _currentSteps.value.takeLast(4).joinToString("\n") {
         "Step ${it.stepIndex}: ${it.actionType} (${it.actionPayloadJson}) -> ${it.verificationResult}"

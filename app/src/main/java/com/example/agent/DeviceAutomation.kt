@@ -48,6 +48,14 @@ data class UiObservation(
             }
         }
     }
+
+    /**
+     * True when a usable text-entry field is visible, using the platform's
+     * `isEditable` flag or the [UiNode.isLikelyTextInput] heuristic (WebViews and
+     * custom composers often omit the flag).
+     */
+    fun hasTextInputField(): Boolean =
+        nodes.any { (it.packageName == null || it.packageName == packageName) && it.isLikelyTextInput() }
 }
 
 /** Outcome of dispatching a single native action. */
@@ -79,6 +87,14 @@ class AndroidDeviceAutomation(
     private val serviceProvider: () -> AgentAccessibilityService? = { AgentAccessibilityService.instance }
 ) : DeviceAutomation {
 
+    companion object {
+        /** Poll interval while waiting for the screen fingerprint to settle. */
+        private const val SETTLE_POLL_MS = 150L
+
+        /** Upper bound on how long to wait for the screen to settle before observing. */
+        private const val SETTLE_BUDGET_MS = 900L
+    }
+
     override fun isReady(): Boolean = serviceProvider() != null
 
     override fun unavailabilityReason(): String? =
@@ -89,10 +105,36 @@ class AndroidDeviceAutomation(
         }
 
     override suspend fun observe(): UiObservation = withContext(Dispatchers.Default) {
-        val service = serviceProvider()
-            ?: return@withContext UiObservation(null, emptyList(), "Screen unavailable", "unavailable")
-        UiObservation.fromSnapshot(service.dumpHierarchy())
+        settleAndCompose()
     }
+
+    /**
+     * Reads the hierarchy repeatedly until its fingerprint stops changing or
+     * [SETTLE_BUDGET_MS] elapses, then composes the final observation. This replaces a
+     * single fixed-delay read: a slow surface is waited out (bounded), while an
+     * already-stable screen returns after one poll.
+     */
+    private suspend fun settleAndCompose(): UiObservation {
+        val service = serviceProvider()
+            ?: return UiObservation(null, emptyList(), "Screen unavailable", "unavailable")
+        var snapshot = service.dumpHierarchy()
+        val deadline = System.currentTimeMillis() + SETTLE_BUDGET_MS
+        while (System.currentTimeMillis() < deadline) {
+            delay(SETTLE_POLL_MS)
+            val next = service.dumpHierarchy()
+            if (next.getFingerprint() == snapshot.getFingerprint()) break
+            snapshot = next
+        }
+        return composeObservation(snapshot)
+    }
+
+    /**
+     * Composes the observation from the settled snapshot. Kept as a seam so extra
+     * perception (page text, screenshot grounding) can be layered in here without
+     * touching the settle loop.
+     */
+    private fun composeObservation(snapshot: UiTreeSnapshot): UiObservation =
+        UiObservation.fromSnapshot(snapshot)
 
     override suspend fun execute(action: AgentAction): ActionResult = withContext(Dispatchers.Default) {
         val service = serviceProvider()
@@ -195,6 +237,48 @@ class AndroidDeviceAutomation(
             is AgentAction.Screenshot -> {
                 val bmp = service.takeScreenshotFallback()
                 ActionResult(bmp != null, "SCREENSHOT", if (bmp != null) "Screenshot captured" else "Screenshot unavailable")
+            }
+            is AgentAction.Submit -> {
+                val r = service.performSubmit(action.targetText)
+                ActionResult(
+                    success = r.success,
+                    method = r.method,
+                    message = if (r.success) "Submitted via ${r.method}" else (r.failureReason ?: "Submit failed")
+                )
+            }
+            is AgentAction.OpenUrl -> {
+                val ok = appDirectory.openUrl(action.url)
+                if (ok) delay(800)
+                ActionResult(ok, "OPEN_URL", if (ok) "Opened URL ${action.url}" else "No activity handled ${action.url}")
+            }
+            is AgentAction.DeepLink -> {
+                val ok = appDirectory.openDeepLink(action.uri)
+                if (ok) delay(800)
+                ActionResult(ok, "DEEP_LINK", if (ok) "Opened deep link ${action.uri}" else "No activity handled ${action.uri}")
+            }
+            is AgentAction.Drag -> {
+                val r = service.performDrag(action.fromText, action.toText)
+                ActionResult(
+                    success = r.success,
+                    method = r.method,
+                    message = if (r.success) "Dragged '${action.fromText}' -> '${action.toText}'" else (r.failureReason ?: "Drag failed")
+                )
+            }
+            is AgentAction.CopyText -> {
+                val ok = service.performCopy(action.targetText)
+                ActionResult(ok, "COPY", if (ok) "Copied text from '${action.targetText ?: "focused field"}'" else "Copy action unavailable")
+            }
+            is AgentAction.PasteText -> {
+                val ok = service.performPaste()
+                ActionResult(ok, "PASTE", if (ok) "Pasted clipboard into focused field" else "Paste action unavailable")
+            }
+            is AgentAction.ReadPageContent -> {
+                val text = service.readPageContent()
+                ActionResult(
+                    success = text.isNotBlank(),
+                    method = "READ_PAGE_CONTENT",
+                    message = if (text.isNotBlank()) "Extracted ${text.length} chars of page content" else "No page content found"
+                )
             }
             else -> ActionResult(false, "UNKNOWN", "Unsupported action for execution layer")
         }

@@ -76,6 +76,54 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 }
             }
 
+            is AgentAction.Submit -> FastPathDecision.Execute(
+                action,
+                "deterministic submit of the current text entry"
+            )
+
+            is AgentAction.OpenUrl -> FastPathDecision.Execute(
+                action,
+                "deterministic open of an http(s) URL"
+            )
+
+            is AgentAction.DeepLink -> FastPathDecision.Execute(
+                action,
+                "deterministic open of an app deep link"
+            )
+
+            is AgentAction.Drag -> {
+                if (observation.hasActivatableLabel(action.fromText, allowEditable = true) &&
+                    observation.hasActivatableLabel(action.toText, allowEditable = true)
+                ) {
+                    FastPathDecision.Execute(action, "deterministic drag between observed controls")
+                } else {
+                    FastPathDecision.ModelReason("drag endpoints are not both visible")
+                }
+            }
+
+            is AgentAction.CopyText -> FastPathDecision.Execute(
+                action,
+                "deterministic clipboard copy"
+            )
+
+            is AgentAction.PasteText -> {
+                if (editableFieldVisible(observation)) {
+                    FastPathDecision.Execute(action, "deterministic clipboard paste into the focused field")
+                } else {
+                    FastPathDecision.ModelReason("no editable field is exposed to paste into")
+                }
+            }
+
+            is AgentAction.ReadPageContent -> FastPathDecision.Execute(
+                action,
+                "deterministic page-content extraction"
+            )
+
+            // Web tools require a network round-trip; the loop executes them directly
+            // (they are explicit user-intent web tasks, not ambiguous UI decisions).
+            is AgentAction.WebSearch -> FastPathDecision.Execute(action, "deterministic web search")
+            is AgentAction.ReadUrl -> FastPathDecision.Execute(action, "deterministic read-url fetch")
+
             is AgentAction.Home -> {
                 if (isHomeForeground(observation.packageName)) {
                     FastPathDecision.Satisfied("home launcher is already foreground")
@@ -173,7 +221,7 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
         }
 
     private fun editableFieldVisible(observation: UiObservation): Boolean =
-        observation.nodes.any { it.isEditable && inForegroundPackage(it, observation) }
+        observation.nodes.any { it.isLikelyTextInput() && inForegroundPackage(it, observation) }
 
     private fun inForegroundPackage(node: UiNode, observation: UiObservation): Boolean =
         node.packageName == null || node.packageName == observation.packageName

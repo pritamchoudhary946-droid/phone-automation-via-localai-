@@ -87,6 +87,9 @@ class AgentAccessibilityService : AccessibilityService() {
         /** Bound on nodes scanned when extracting visible text or searching for a label. */
         private const val MAX_TEXT_SCAN_NODES = 400
 
+        /** Labels that commonly act as a "send/submit/enter" control. */
+        private val SUBMIT_HINTS = listOf("send", "enter", "submit", "go", "search", "done")
+
         var instance: AgentAccessibilityService? = null
             private set
 
@@ -888,6 +891,198 @@ class AgentAccessibilityService : AccessibilityService() {
         } finally {
             root.recycle()
         }
+    }
+
+    /**
+     * Submits/commits the current text entry.
+     *
+     * Order (never blind coordinates):
+     *  1. If [targetText] names a visible control (e.g. "Send"), click it.
+     *  2. Otherwise press the IME Enter/Send action on the focused editable node
+     *     (API 30+). This is what chat composers listen for.
+     *  3. Otherwise click a visible node whose label resembles a send/submit control.
+     *
+     * A deliberate Enter key event is preferred over [`ACTION_CLICK`] on an unrelated
+     * button because "submit" must act on the field the agent just typed into.
+     */
+    suspend fun performSubmit(targetText: String? = null): TapResult {
+        Log.i(TAG, "[SUBMIT_START] target='${targetText ?: "focused field"}'")
+
+        if (!targetText.isNullOrBlank()) {
+            val named = performTap(targetText, null, null) { true }
+            if (named.success) return TapResult(true, "SUBMIT_TARGET_CLICK", null, named.bounds, nodeFound = true)
+            Log.w(TAG, "[SUBMIT] Named control '${targetText}' not actionable; falling back to IME enter.")
+        }
+
+        val root = rootInActiveWindow
+            ?: return TapResult(false, "FAILED", "Active window is null for submit.", nodeFound = false)
+        try {
+            val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            val editable = when {
+                focused != null && focused.isEditable -> focused
+                else -> findTargetEditableNode(root, null)
+            }
+
+            if (editable != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val imeEnter = editable.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                if (imeEnter) {
+                    Log.i(TAG, "[SUBMIT_SUCCESS] IME enter dispatched on focused field.")
+                    return TapResult(true, "IME_ENTER", null, null, nodeFound = true)
+                }
+                Log.w(TAG, "[SUBMIT] ACTION_IME_ENTER returned false; trying a visible send control.")
+            }
+
+            // Fallback: a visible, clickable node whose label looks like a send control.
+            for (keyword in SUBMIT_HINTS) {
+                val node = findNodeByText(root, keyword)
+                if (node != null) {
+                    val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    node.recycle()
+                    if (clicked) {
+                        Log.i(TAG, "[SUBMIT_SUCCESS] Clicked visible '$keyword' control.")
+                        return TapResult(true, "SUBMIT_CONTROL_CLICK", null, null, nodeFound = true)
+                    }
+                }
+            }
+
+            return TapResult(false, "FAILED", "No submit/Enter affordance found on screen.", nodeFound = editable != null)
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /**
+     * Drags from the centre of the element matching [fromText] to the centre of the
+     * element matching [toText]. Used for reorder, swipe-to-dismiss, and drag handles.
+     */
+    suspend fun performDrag(fromText: String, toText: String, durationMs: Long = 600L): TapResult {
+        val root = rootInActiveWindow
+            ?: return TapResult(false, "FAILED", "Active window is null for drag.", nodeFound = false)
+        try {
+            val from = findNodeByText(root, fromText)
+                ?: return TapResult(false, "FAILED", "No visible node matches '$fromText' to drag from.", nodeFound = false)
+            val to = findNodeByText(root, toText)
+            if (to == null) {
+                from.recycle()
+                return TapResult(false, "FAILED", "No visible node matches '$toText' to drag to.", nodeFound = false)
+            }
+
+            val fromBounds = Rect().also { from.getBoundsInScreen(it) }
+            val toBounds = Rect().also { to.getBoundsInScreen(it) }
+            from.recycle()
+            to.recycle()
+
+            if (fromBounds.width() <= 0 || toBounds.width() <= 0) {
+                return TapResult(false, "FAILED", "Drag endpoints have empty bounds.", nodeFound = true)
+            }
+
+            val startX = fromBounds.centerX().toFloat()
+            val startY = fromBounds.centerY().toFloat()
+            val endX = toBounds.centerX().toFloat()
+            val endY = toBounds.centerY().toFloat()
+            val path = Path().apply {
+                moveTo(startX, startY)
+                lineTo(endX, endY)
+            }
+            val stroke = GestureDescription.StrokeDescription(
+                path, 0, durationMs.coerceIn(300L, 5_000L)
+            )
+            val gesture = GestureDescription.Builder().addStroke(stroke).build()
+            val (completed, reason) = dispatchGestureBounded(
+                gesture, startX, startY, timeoutMs = durationMs.coerceIn(300L, 5_000L) + GESTURE_CALLBACK_TIMEOUT_MS
+            )
+            return if (completed) {
+                Log.i(TAG, "[DRAG_SUCCESS] Dragged '$fromText' -> '$toText'")
+                TapResult(true, "DISPATCH_DRAG", null, fromBounds, nodeFound = true)
+            } else {
+                TapResult(false, "FAILED", reason ?: "Drag gesture was not completed.", bounds = fromBounds, nodeFound = true)
+            }
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /**
+     * Copies text to the clipboard via the node's ACTION_COPY, or from the focused
+     * editable field. Returns whether a copy was dispatched.
+     */
+    fun performCopy(targetText: String? = null): Boolean {
+        val root = rootInActiveWindow ?: return false
+        try {
+            val node = if (!targetText.isNullOrBlank()) {
+                findNodeByText(root, targetText)
+            } else {
+                root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            } ?: return false
+            val copied = node.performAction(AccessibilityNodeInfo.ACTION_COPY)
+            if (node !== root) node.recycle()
+            if (copied) Log.i(TAG, "[COPY] ACTION_COPY dispatched for '${targetText ?: "focused"}'")
+            return copied
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /** Pastes the clipboard into the focused editable field via ACTION_PASTE. */
+    fun performPaste(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        try {
+            val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            val editable = when {
+                focused != null && focused.isEditable -> focused
+                else -> findTargetEditableNode(root, null)
+            }
+            if (editable == null) return false
+            val pasted = editable.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            if (pasted) Log.i(TAG, "[PASTE] ACTION_PASTE dispatched")
+            return pasted
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /**
+     * Extracts the visible text of the current page. Prefers a scrollable container
+     * (an article/list) when present, falling back to the whole visible tree, so the
+     * agent can reason about a page's content rather than only its controls.
+     */
+    fun readPageContent(maxChars: Int = 2_000): String {
+        val root = rootInActiveWindow ?: return ""
+        try {
+            val scrollable = findFirstScrollable(root) ?: root
+            val seen = LinkedHashSet<String>()
+            val stack = ArrayDeque<AccessibilityNodeInfo>()
+            stack.addLast(scrollable)
+            var visited = 0
+            while (stack.isNotEmpty() && visited < MAX_TEXT_SCAN_NODES) {
+                val node = stack.removeLast()
+                visited++
+                val text = node.text?.toString()?.trim()
+                val desc = node.contentDescription?.toString()?.trim()
+                listOfNotNull(text, desc).forEach { if (it.isNotBlank()) seen.add(it) }
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { stack.addLast(it) }
+                }
+            }
+            return seen.joinToString("\n").take(maxChars)
+        } finally {
+            root.recycle()
+        }
+    }
+
+    private fun findFirstScrollable(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        stack.addLast(root)
+        var visited = 0
+        while (stack.isNotEmpty() && visited < MAX_TEXT_SCAN_NODES) {
+            val node = stack.removeLast()
+            visited++
+            if (node.isScrollable) return AccessibilityNodeInfo.obtain(node)
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { stack.addLast(it) }
+            }
+        }
+        return null
     }
 
     /**
