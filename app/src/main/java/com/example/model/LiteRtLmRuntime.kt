@@ -15,6 +15,45 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
+ * Shared, testable smoke-probe policy (plan 8.1). Runs up to [attempts] bounded
+ * generations via [probe], growing the token budget by [tokenStep] each time.
+ *
+ * An EMPTY-but-no-exception answer counts as SUCCESS: a healthy Gemma-4 E2B build can
+ * legitimately return an empty string for a tiny prompt (thinking-token-only output or
+ * no `Content.Text`), and that must never be reported as "the model failed to load" or
+ * cause a working runtime to be closed. Only generation that THROWS on every attempt is
+ * a real failure.
+ */
+internal suspend fun runTolerantSmokeProbe(
+    attempts: Int = 2,
+    baseTokens: Int = 8,
+    tokenStep: Int = 8,
+    probe: suspend (maxOutputTokens: Int) -> String
+): Boolean {
+    var lastError: Throwable? = null
+    for (attempt in 0 until attempts) {
+        try {
+            val result = probe(baseTokens + attempt * tokenStep)
+            // Non-blank OR empty-without-exception: the engine is serving requests.
+            Log.i(
+                TAG_SMOKE,
+                "Smoke probe attempt ${attempt + 1} returned '${result.take(32)}' (blank=${result.isBlank()}); engine usable"
+            )
+            return true
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            lastError = e
+            Log.w(TAG_SMOKE, "Smoke probe attempt ${attempt + 1} threw: ${e.message}")
+        }
+    }
+    Log.w(TAG_SMOKE, "Smoke probe failed after $attempts attempts: ${lastError?.message}")
+    return false
+}
+
+private const val TAG_SMOKE = "SmokeProbe"
+
+/**
  * Genuine on-device inference adapter around the official LiteRT-LM Kotlin API.
  *
  * Uses the CPU backend first for maximum device compatibility. GPU is opt-in and
@@ -142,23 +181,14 @@ class LiteRtLmRuntime(
     override suspend fun smokeTest(): Boolean = withContext(Dispatchers.IO) {
         if (!isReady()) {
             Log.w(TAG, "Smoke test failed: engine not ready")
-            false
-        } else {
-            try {
-                val result = generate(
-                    prompt = "Reply with the single word: ready",
-                    systemInstruction = "You are a minimal health check.",
-                    maxOutputTokens = 8
-                )
-                val success = result.isNotBlank()
-                if (!success) {
-                    Log.w(TAG, "Smoke test failed: empty response")
-                }
-                success
-            } catch (e: Throwable) {
-                Log.w(TAG, "Smoke test inference failed: ${e.message}")
-                false
-            }
+            return@withContext false
+        }
+        runTolerantSmokeProbe { maxTokens ->
+            generate(
+                prompt = "Reply with the single word: ready",
+                systemInstruction = "You are a minimal health check.",
+                maxOutputTokens = maxTokens
+            )
         }
     }
 
@@ -202,5 +232,11 @@ class LiteRtLmRuntime(
         // observations (page content, tool digests) while protecting peak RAM on the
         // confirmed 8 GB device. Kept conservative — not 4096.
         const val MAX_CONTEXT_TOKENS = 3072
+        // Smoke probe (plan 8.1): bounded attempts, starting small and nudging the token
+        // budget up. An empty answer is tolerated as success; only a thrown exception
+        // (after all attempts) marks the engine unavailable.
+        private const val SMOKE_TEST_ATTEMPTS = 2
+        private const val SMOKE_TEST_MAX_TOKENS = 8
+        private const val SMOKE_TEST_TOKEN_STEP = 8
     }
 }

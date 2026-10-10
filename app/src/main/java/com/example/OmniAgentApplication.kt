@@ -175,10 +175,18 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 val ok = inferenceEngine.initialize(modelFile)
                 if (ok) {
                     if (!inferenceEngine.smokeTest(modelFile)) {
-                        Log.w(TAG, "Smoke test failed; marking engine unavailable")
-                        inferenceEngine.reportUnavailable(
-                            "The model loaded but did not answer a test prompt (load or memory failure)"
-                        )
+                        // Plan 8.1(b): a healthy runtime is never thrown away. The smoke
+                        // probe now only fails on a real, repeated exception, but guard
+                        // anyway: if the engine still reports ready, keep it usable and
+                        // just note the inconclusive probe instead of closing it.
+                        if (inferenceEngine.isReady()) {
+                            Log.w(TAG, "Smoke probe inconclusive but engine reports ready; keeping it")
+                        } else {
+                            Log.w(TAG, "Smoke test failed; marking engine unavailable")
+                            inferenceEngine.reportUnavailable(
+                                "The model loaded but did not answer a test prompt (load or memory failure)"
+                            )
+                        }
                     } else {
                         Log.i(TAG, "Engine initialized and smoke test passed successfully")
                     }

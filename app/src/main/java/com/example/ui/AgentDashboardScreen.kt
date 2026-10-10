@@ -30,6 +30,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -50,6 +53,7 @@ import com.example.model.EngineState
 import com.example.model.LiteRtEngine
 import com.example.planning.PlanStepStatus
 import com.example.ui.theme.*
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -91,6 +95,27 @@ fun AgentDashboardScreen(
             try {
                 speechRecognizer?.destroy()
             } catch (_: Exception) {}
+        }
+    }
+
+    // 4.17: learn-from-demonstration. "Watch me" records the actions of a real run so
+    // it can be saved and replayed as a skill. Wired here because it was implemented
+    // in the orchestrator but had no reachable entry point.
+    val watching by orchestrator.watching.collectAsState()
+    val dashboardScope = rememberCoroutineScope()
+    var watchSkillName by remember { mutableStateOf("") }
+
+    fun saveWatchedDemonstration() {
+        val goal = goalInput.ifBlank { "demonstrated task" }
+        val name = watchSkillName.ifBlank { goal.take(60) }
+        dashboardScope.launch {
+            val saved = orchestrator.saveWatchedSkill(name, goal)
+            if (saved != null) {
+                Toast.makeText(context, "Saved skill \"$saved\"", Toast.LENGTH_SHORT).show()
+                watchSkillName = ""
+            } else {
+                Toast.makeText(context, "Nothing was demonstrated yet", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -669,6 +694,100 @@ fun AgentDashboardScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    }
+                }
+            }
+
+            item {
+                // 4.17 learn-from-demonstration: record a real run, then save it as a
+                // re-runnable skill. Off by default; nothing is captured until tapped.
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("demonstration_card"),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (watching) Icons.Default.FiberManualRecord else Icons.Default.School,
+                                contentDescription = null,
+                                tint = if (watching) CrimsonDanger else IndigoAccent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = if (watching) "Watching this run…" else "Learn from a demonstration",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (watching) {
+                                "Let Jarvis run the task once; its verified steps are recorded below. Tap Save to keep the sequence as a reusable skill."
+                            } else {
+                                "Tap Watch me, run a task once so its steps are recorded, then Save it to replay later as a skill."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        if (watching) {
+                            OutlinedTextField(
+                                value = watchSkillName,
+                                onValueChange = { watchSkillName = it },
+                                label = { Text("Skill name (optional)") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("skill_name_field")
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = { saveWatchedDemonstration() },
+                                    enabled = orchestrator.hasWatchedTurns(),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("save_skill_button"),
+                                    colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.Default.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Save skill", color = Color.White)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        orchestrator.stopWatching()
+                                        watchSkillName = ""
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("cancel_watch_button"),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Cancel")
+                                }
+                            }
+                        } else {
+                            Button(
+                                onClick = { orchestrator.startWatching() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("watch_me_button"),
+                                colors = ButtonDefaults.buttonColors(containerColor = IndigoAccent),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.FiberManualRecord, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Watch me", color = Color.White)
+                            }
                         }
                     }
                 }
