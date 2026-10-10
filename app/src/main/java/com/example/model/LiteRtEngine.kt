@@ -131,7 +131,8 @@ class LiteRtEngine(
         foregroundPackage: String?,
         historySummary: String,
         lastActionVerification: String?,
-        remainingStepBudget: Int
+        remainingStepBudget: Int,
+        screenshotBytes: ByteArray? = null
     ): StepDecision {
         val request = StepDecisionRequest(
             userCommand = goal,
@@ -143,7 +144,7 @@ class LiteRtEngine(
             remainingStepBudget = remainingStepBudget,
             availableActions = planner.availableActions()
         )
-        return planner.decideNextAction(request)
+        return planner.decideNextAction(request, screenshotBytes)
     }
 
     fun fallbackPlan(goal: String): TaskPlan = planner.fallbackPlan(goal)

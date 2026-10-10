@@ -366,6 +366,98 @@ class LiteRtModelManager(
         )
     }
 
+    /** Honest, device-level fit report for the pinned E2B model (plan 7.9 / 6.23). */
+    data class DeviceFit(
+        val fits: Boolean,
+        val recommendation: String,
+        val totalRamMb: Long,
+        val availableStorageMb: Long
+    )
+
+    /**
+     * 7.9 model-fit / battery guard. The pinned E2B model (~2.6 GB, context 3072) sits
+     * near the ceiling on the confirmed 8 GB device, where it must coexist with the
+     * accessibility service. This reports an honest, actionable recommendation from
+     * real memory and storage numbers — never a fake "optimized" claim.
+     */
+    fun isFitForDevice(): DeviceFit {
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        activityManager?.getMemoryInfo(memInfo)
+        val totalRamMb = if (memInfo.totalMem > 0) memInfo.totalMem / (1024 * 1024) else 0L
+        val (hasStorage, availableBytes) = checkStorageAvailability()
+        val availableStorageMb = availableBytes / (1024 * 1024)
+
+        val recommendation = when {
+            totalRamMb in 1..3071 ->
+                "This device has only ${totalRamMb} MB RAM. The E2B model needs roughly 8 GB to coexist with the accessibility service; expect the engine to be released under memory pressure."
+            totalRamMb in 3072..7167 ->
+                "RAM ${totalRamMb} MB is below the recommended 8 GB; the model will run but may be shut down by onTrimMemory during long tasks."
+            !hasStorage ->
+                "Not enough free storage: ${availableStorageMb} MB available, ~3.2 GB required for the model download."
+            else ->
+                "RAM ${totalRamMb} MB and ${availableStorageMb} MB free storage comfortably fit the E2B model (context 3072) on this device."
+        }
+        val fits = totalRamMb == 0L || (totalRamMb >= 3072 && hasStorage)
+        return DeviceFit(fits, recommendation, totalRamMb, availableStorageMb)
+    }
+
+    sealed class RemoteArtifactCheck {
+        data class Ok(val bytes: Long, val sha256: String?) : RemoteArtifactCheck()
+        data class Mismatch(val detail: String) : RemoteArtifactCheck()
+        data class Unreachable(val detail: String) : RemoteArtifactCheck()
+    }
+
+    /**
+     * Startup self-check (plan 7.1): confirms the pinned artifact is still reachable
+     * and, when the CDN exposes them, that its byte length and SHA-256 still match the
+     * pinned constants. A redirect-only HEAD is treated as reachable (the model is
+     * large; we never download it just to check). Logs a clear, actionable error so a
+     * wrong hash that would make the app BLOCK is visible immediately.
+     */
+    fun probeRemoteArtifact(): RemoteArtifactCheck {
+        return try {
+            val request = Request.Builder()
+                .url(modelUrl)
+                .head()
+                .addHeader("User-Agent", "OmniAgent-Android/1.0")
+                .build()
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    return RemoteArtifactCheck.Unreachable("HTTP ${resp.code} ${resp.message} for $modelUrl")
+                }
+                val linkedSize = resp.header("x-linked-size")?.toLongOrNull()
+                    ?: resp.header("Content-Length")?.toLongOrNull()
+                val linkedSha = resp.header("x-linked-etag")?.trim('"')
+                when {
+                    linkedSize != null && linkedSize != expectedBytes ->
+                        RemoteArtifactCheck.Mismatch(
+                            "Pinned size $expectedBytes != remote $linkedSize; a stale hash/size would delete a good download and (with 6.1) block planning."
+                        )
+                    linkedSha != null && !linkedSha.equals(expectedSha256, ignoreCase = true) ->
+                        RemoteArtifactCheck.Mismatch(
+                            "Pinned SHA-256 does not match the remote artifact; update EXPECTED_MODEL_SHA256 or the app will block after download."
+                        )
+                    else -> RemoteArtifactCheck.Ok(linkedSize ?: expectedBytes, linkedSha)
+                }
+            }
+        } catch (e: Exception) {
+            RemoteArtifactCheck.Unreachable(e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    /** Logs the 7.1 startup self-check result with a clear, actionable message. */
+    fun logRemoteArtifactCheck() {
+        when (val check = probeRemoteArtifact()) {
+            is RemoteArtifactCheck.Ok ->
+                Log.i(TAG, "Model artifact OK (${formatBytes(check.bytes)}${check.sha256?.let { ", sha=${it.take(12)}…" } ?: ""})")
+            is RemoteArtifactCheck.Mismatch ->
+                Log.e(TAG, "MODEL ARTIFACT MISMATCH: ${check.detail}")
+            is RemoteArtifactCheck.Unreachable ->
+                Log.w(TAG, "Model artifact not reachable right now: ${check.detail} (the pinned values stay authoritative offline)")
+        }
+    }
+
     /** Removes the downloaded model. Never called implicitly by a failed download. */
     fun deleteModel() {
         pauseDownload()

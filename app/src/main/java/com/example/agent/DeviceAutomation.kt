@@ -87,7 +87,9 @@ interface DeviceAutomation {
 class AndroidDeviceAutomation(
     private val appDirectory: AppDirectory,
     private val serviceProvider: () -> AgentAccessibilityService? = { AgentAccessibilityService.instance },
-    private val notificationSource: NotificationSource = NotificationBus
+    private val notificationSource: NotificationSource = NotificationBus,
+    private val ocrReader: com.example.perception.OcrReader = com.example.perception.UnavailableOcrReader,
+    private val visionGrounder: com.example.perception.VisionGrounder = com.example.perception.UnavailableVisionGrounder
 ) : DeviceAutomation {
 
     companion object {
@@ -136,8 +138,19 @@ class AndroidDeviceAutomation(
      * perception (page text, screenshot grounding) can be layered in here without
      * touching the settle loop.
      */
-    private fun composeObservation(snapshot: UiTreeSnapshot): UiObservation =
-        UiObservation.fromSnapshot(snapshot)
+    private suspend fun composeObservation(snapshot: UiTreeSnapshot): UiObservation {
+        val base = UiObservation.fromSnapshot(snapshot)
+        // 7.2/7.3: when the settled tree is blind (no nodes at all), fall back to OCR
+        // over a bounded screenshot so a canvas/WebView surface still yields text the
+        // planner can reason about. Only attempted when there is nothing in the tree.
+        if (base.nodes.isNotEmpty()) return base
+        val service = serviceProvider() ?: return base
+        val bitmap = try { service.takeScreenshotFallback() } catch (e: Exception) { null }
+        if (bitmap == null) return base
+        val text = try { ocrReader.readText(bitmap) } catch (e: Exception) { "" }
+        if (text.isBlank()) return base
+        return base.copy(summary = (base.summary + "\n[OCR]\n" + text).trim())
+    }
 
     override suspend fun execute(action: AgentAction): ActionResult = withContext(Dispatchers.Default) {
         val service = serviceProvider()
@@ -153,11 +166,18 @@ class AndroidDeviceAutomation(
             is AgentAction.OpenApp -> executeOpenApp(action, service)
             is AgentAction.Tap -> {
                 val r = service.performTap(action.targetText, action.x, action.y, uiChanged)
-                ActionResult(
-                    success = r.success,
-                    method = r.method,
-                    message = if (r.success) "Tap succeeded via ${r.method}" else (r.failureReason ?: "Tap failed")
-                )
+                if (r.success) {
+                    ActionResult(true, r.method, "Tap succeeded via ${r.method}")
+                } else {
+                    // 7.2: the tree could not represent the target. Try vision grounding
+                    // (OCR-backed) once and tap the located point instead of giving up.
+                    val grounded = visionTap(action.targetText, service, uiChanged)
+                    if (grounded != null) {
+                        grounded
+                    } else {
+                        ActionResult(false, r.method, r.failureReason ?: "Tap failed")
+                    }
+                }
             }
             is AgentAction.OpenItem -> {
                 // Reacquire the node from the live tree by its label; never reuse a stale node.
@@ -296,6 +316,29 @@ class AndroidDeviceAutomation(
                 )
             }
             else -> ActionResult(false, "UNKNOWN", "Unsupported action for execution layer")
+        }
+    }
+
+    /**
+     * 7.2: one bounded vision-grounding attempt when the a11y tree cannot represent
+     * the target. Takes a screenshot, asks the grounder to locate the label, and taps
+     * the point via the normal coordinate path. Returns null (never blind-taps) when no
+     * grounder is configured or the label cannot be located.
+     */
+    private suspend fun visionTap(
+        targetText: String?,
+        service: AgentAccessibilityService,
+        uiChanged: suspend () -> Boolean
+    ): ActionResult? {
+        if (targetText.isNullOrBlank()) return null
+        if (visionGrounder is com.example.perception.UnavailableVisionGrounder) return null
+        val bitmap = try { service.takeScreenshotFallback() } catch (e: Exception) { null } ?: return null
+        val point = try { visionGrounder.locate(targetText, bitmap) } catch (e: Exception) { null } ?: return null
+        val r = service.performTap(null, point.x, point.y, uiChanged)
+        return if (r.success) {
+            ActionResult(true, "VISION_GROUNDED", "Located '$targetText' via vision at (${point.x}, ${point.y})")
+        } else {
+            null
         }
     }
 

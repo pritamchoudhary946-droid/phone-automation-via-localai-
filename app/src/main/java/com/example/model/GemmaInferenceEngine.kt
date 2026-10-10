@@ -103,6 +103,30 @@ class GemmaInferenceEngine(
             }
         }
 
+    /**
+     * Multimodal generation (plan 7.4): sends a screenshot image alongside the prompt
+     * when the runtime supports it. Returns null (never fabricates) when not ready.
+     */
+    suspend fun generateWithImage(
+        prompt: String,
+        systemInstruction: String?,
+        maxOutputTokens: Int,
+        imageBytes: ByteArray
+    ): String? = withContext(Dispatchers.IO) {
+        val active = runtime
+        if (active == null || !active.isReady()) return@withContext null
+        mutex.withLock {
+            try {
+                active.generateWithImage(prompt, systemInstruction, maxOutputTokens, imageBytes)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.w(TAG, "Multimodal generation failed: ${e.message}")
+                null
+            }
+        }
+    }
+
     /** Small real inference used to prove the runtime works before declaring it ready. */
     suspend fun smokeTest(modelFile: File): Boolean {
         val active = runtime ?: run {
