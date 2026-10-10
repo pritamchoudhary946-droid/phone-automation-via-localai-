@@ -31,6 +31,8 @@ import com.example.agent.OrchestratorState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -72,7 +74,7 @@ class FloatingAgentDotService : Service() {
     private var speechRecognizer: SpeechRecognizer? = null
     private var isListeningVoice = false
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val scope = CoroutineScope(Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var stateObserverJob: Job? = null
 
     // Touch & Drag Tracking
@@ -815,6 +817,8 @@ class FloatingAgentDotService : Service() {
         super.onDestroy()
         isRunning = false
         stateObserverJob?.cancel()
+        scope.cancel()
+        mainHandler.removeCallbacksAndMessages(null)
         stopVoiceListening()
         if (isPanelOpen && panelView != null) {
             try {

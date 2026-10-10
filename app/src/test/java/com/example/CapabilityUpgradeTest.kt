@@ -162,6 +162,21 @@ class CapabilityUpgradeTest {
         }
     }
 
+    // --- The deterministic fast path must defer, not execute, unrunnable steps ---
+
+    @Test
+    fun fastPathDefersTargetlessLongPressToTheModel() {
+        val executor = HybridStepExecutor(AppDirectory(context))
+        val obs = observation("com.android.settings", "Settings list", 7)
+        // Validation always rejects a long press with no target, so the fast path must
+        // not claim it can execute one; doing so would burn an attempt for nothing.
+        val decision = executor.decide(
+            listOf(planStep(1, AgentAction.LongPress(null), "long_press")),
+            0, obs, nudgeUsed = false
+        )
+        assertTrue("expected ModelReason, got $decision", decision is FastPathDecision.ModelReason)
+    }
+
     // --- Mid-task replanning: a stalled plan is rebuilt instead of failing outright ---
 
     @Test

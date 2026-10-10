@@ -106,7 +106,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
             // These carry their own target or are pure system navigation: they need no
             // semantic reasoning, so the model is never consulted for them.
             is AgentAction.LongPress -> {
-                if (action.targetText.isNullOrBlank() || observation.hasActivatableLabel(action.targetText, allowEditable = true)) {
+                if (action.targetText.isNullOrBlank()) {
+                    // Validation rejects a targetless long press, so executing it here
+                    // would only burn an attempt; let the model resolve the target.
+                    FastPathDecision.ModelReason("long press has no target text to resolve")
+                } else if (observation.hasActivatableLabel(action.targetText, allowEditable = true)) {
                     FastPathDecision.Execute(action, "deterministic long press on an observed control")
                 } else {
                     FastPathDecision.ModelReason("long-press target '${action.targetText}' is not visible")

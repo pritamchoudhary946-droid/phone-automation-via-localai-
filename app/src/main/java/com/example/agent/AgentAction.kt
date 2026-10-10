@@ -156,6 +156,25 @@ class RiskEvaluator {
                     )
                 }
             }
+            is AgentAction.FinishTask -> {
+                val summaryLower = action.summary.lowercase()
+                // A finish summary is the model's claim that a sensitive operation
+                // succeeded. The same words that make a tap risky must not be allowed to
+                // complete silently just because they arrived via report_status.
+                val riskType = when {
+                    paymentKeywords.any { summaryLower.contains(it) } -> "Financial / Payment"
+                    deleteKeywords.any { summaryLower.contains(it) } -> "Destructive Deletion"
+                    externalSendKeywords.any { summaryLower.contains(it) } -> "External Communication"
+                    else -> null
+                }
+                if (riskType != null) {
+                    return RiskAssessment(
+                        isRisky = true,
+                        riskType = riskType,
+                        warningMessage = "The agent reported completing a sensitive ($riskType) operation; confirm before it is accepted as done."
+                    )
+                }
+            }
             else -> {}
         }
 
