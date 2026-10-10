@@ -1253,6 +1253,9 @@ class TaskOrchestrator(
         _watching.value = false
     }
 
+    /** True when at least one turn was recorded for a not-yet-saved demonstration. */
+    fun hasWatchedTurns(): Boolean = watchedTurns.isNotEmpty()
+
     /**
      * 7.10: converts the captured demonstration into a saved, re-runnable skill. Only
      * the actions the demonstrated run actually performed are stored; returns the skill

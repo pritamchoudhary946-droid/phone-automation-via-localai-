@@ -386,6 +386,54 @@ class OrchestratorLoopTest {
         assertEquals(com.example.planning.PlanStepStatus.FAILED, step.status)
     }
 
+    // 4.17 Learn-from-demonstration: watching a run captures its steps and saves a skill.
+
+    @Test
+    fun watchingARunSavesAReusableSkill() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenApp -> {
+                        defaultObservation = observation("com.google.android.youtube", "YouTube home", 2)
+                        ActionResult(true, "LAUNCH_VERIFIED", "verified")
+                    }
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[
+              {"id":1,"seq":1,"desc":"Launch YouTube","action":"launch_app","params":{"appQuery":"youtube"},"expect":"YouTube foreground","verify":"FOREGROUND_PACKAGE"}
+            ]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+
+        orchestrator.startWatching()
+        assertTrue(orchestrator.watching.value)
+
+        orchestrator.startTask("Open YouTube", maxSteps = 4)
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("expected completion, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue("a watched run records its turns", orchestrator.hasWatchedTurns())
+
+        val saved = orchestrator.saveWatchedSkill("Open YouTube routine", "Open YouTube")
+        assertEquals("Open YouTube routine", saved)
+        assertFalse("watching stops once the skill is saved", orchestrator.watching.value)
+
+        val skill = com.example.data.local.AgentDatabase.getInstance(context).skillDao()
+            .getSkill("Open YouTube routine")
+        assertTrue("the demonstrated skill is persisted", skill != null)
+        assertTrue("the recorded action is stored", skill!!.planJson.contains("OpenApp"))
+    }
+
+    @Test
+    fun savingWithNoDemonstrationDoesNothing() = kotlinx.coroutines.runBlocking {
+        val orchestrator = newOrchestrator(basicEngine(), FakeDeviceAutomation())
+        assertFalse(orchestrator.hasWatchedTurns())
+        assertEquals(null, orchestrator.saveWatchedSkill("empty", "nothing"))
+    }
+
     // ---- helpers ----
 
     private class AlwaysRejectRegistry : ToolRegistry() {
