@@ -348,14 +348,27 @@ fun SetupScreen(
                             color = MaterialTheme.colorScheme.error
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = { modelManager.startOrResumeDownload() },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Retry Download", color = Color.White, fontWeight = FontWeight.Bold)
+                        // Only offer a retry when the failure is transient. Fatal errors
+                        // (checksum mismatch, an HTML error page, insufficient storage)
+                        // will fail identically every time, so re-running them just spins.
+                        if (state.canRetry) {
+                            Button(
+                                onClick = { modelManager.startOrResumeDownload() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("retry_download_button"),
+                                colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Retry Download", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Text(
+                                text = "This error cannot be retried automatically. Free up storage or check your connection, then choose the file again.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }

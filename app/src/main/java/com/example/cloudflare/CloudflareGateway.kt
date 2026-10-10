@@ -1,5 +1,6 @@
 package com.example.cloudflare
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -24,6 +25,24 @@ class CloudflareGateway {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * Pure helper: extracts `AbstractText` from a DuckDuckGo-style JSON body.
+     * Returns an empty string for missing fields or non-JSON bodies (e.g. an
+     * error page), never throwing into the caller. Unit-testable without network.
+     */
+    internal fun extractAbstractText(body: String): String {
+        if (body.isBlank()) return ""
+        val raw = try {
+            org.json.JSONObject(body).optString("AbstractText", "")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // org.json throws JSONException on malformed bodies; treat as no summary.
+            return ""
+        }
+        return raw.trim().replace("\\n", "\n").replace("\\\"", "\"")
+    }
+
     suspend fun searchWeb(query: String): CloudflareTaskResult = withContext(Dispatchers.IO) {
         try {
             // Cloudflare Worker / Web endpoint integration
@@ -39,23 +58,28 @@ class CloudflareGateway {
             }
 
             val body = response.body?.string().orEmpty()
-            if (body.contains("\"AbstractText\":\"")) {
-                val abstractText = body.substringAfter("\"AbstractText\":\"").substringBefore("\"")
-                    .replace("\\n", "\n").replace("\\\"", "\"")
-                if (abstractText.isNotBlank()) {
-                    return@withContext CloudflareTaskResult.Success(
-                        title = "Search Results for '$query'",
-                        content = abstractText,
-                        sourceUrl = "https://duckduckgo.com/?q=$cleanQuery"
-                    )
-                }
+            val sourceUrl = "https://duckduckgo.com/?q=$cleanQuery"
+
+            // Parse with a real JSON parser. Substring scraping broke on any abstract
+            // containing an escaped quote or a newline, and could not tell an empty
+            // "AbstractText":"" from a missing field.
+            val abstractText = extractAbstractText(body)
+
+            if (abstractText.isNotBlank()) {
+                return@withContext CloudflareTaskResult.Success(
+                    title = "Search Results for '$query'",
+                    content = abstractText,
+                    sourceUrl = sourceUrl
+                )
             }
 
             return@withContext CloudflareTaskResult.Success(
                 title = "Search Results for '$query'",
                 content = "Found relevant topics for '$query'. Web summary ready.",
-                sourceUrl = "https://duckduckgo.com/?q=$cleanQuery"
+                sourceUrl = sourceUrl
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             return@withContext CloudflareTaskResult.Error("Web search failed: ${e.localizedMessage}")
         }
@@ -82,6 +106,8 @@ class CloudflareGateway {
             } else {
                 return@withContext CloudflareTaskResult.Error("Target URL does not appear to be a PDF (Content-Type: $contentType).")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             return@withContext CloudflareTaskResult.Error("PDF parsing failed: ${e.localizedMessage}")
         }
@@ -106,6 +132,8 @@ class CloudflareGateway {
             } else {
                 return@withContext CloudflareTaskResult.Error("Cloudflare Worker error: HTTP ${response.code}")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             return@withContext CloudflareTaskResult.Error("Custom worker query failed: ${e.localizedMessage}")
         }

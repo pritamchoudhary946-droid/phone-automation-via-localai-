@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
@@ -18,6 +19,7 @@ class AgentExecutionService : Service {
     constructor() : super()
 
     companion object {
+        private const val TAG = "AgentExecutionService"
         const val CHANNEL_ID = "agent_execution_channel"
         const val NOTIFICATION_ID = 2001
         const val ACTION_START = "ACTION_START_AGENT"
@@ -66,6 +68,16 @@ class AgentExecutionService : Service {
             }
         }
         return START_NOT_STICKY
+    }
+
+    /** Updates the ongoing notification text (e.g. with the current step) without a restart. */
+    fun updateNotification(goalText: String) {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        try {
+            manager.notify(NOTIFICATION_ID, buildNotification(goalText))
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not update execution notification: ${e.message}")
+        }
     }
 
     private fun createNotificationChannel() {

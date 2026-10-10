@@ -91,7 +91,7 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 val target = action.targetText
                 if (target.isNullOrBlank()) {
                     FastPathDecision.ModelReason("a coordinate-only tap needs model reasoning")
-                } else if (hasObservedLabel(observation, target)) {
+                } else if (observation.hasActivatableLabel(target, allowEditable = true)) {
                     FastPathDecision.Execute(AgentAction.Tap(target, null, null), "deterministic tap on an observed control")
                 } else {
                     FastPathDecision.ModelReason("target '$target' is not visible to tap deterministically")
@@ -106,9 +106,10 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
             is AgentAction.OpenItem -> {
                 val match = if (query != null) {
                     observation.nodes.firstOrNull {
-                        it.isClickable &&
+                        !it.isEditable &&
                             it.packageName == observation.packageName &&
-                            it.containsText(query)
+                            it.containsText(query) &&
+                            observation.hasActivatableLabel(query, allowEditable = false)
                     }
                 } else {
                     null
@@ -145,16 +146,6 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
     private fun inForegroundPackage(node: UiNode, observation: UiObservation): Boolean =
         node.packageName == null || node.packageName == observation.packageName
 
-    private fun hasObservedLabel(observation: UiObservation, target: String): Boolean =
-        observation.nodes.any {
-            inForegroundPackage(it, observation) &&
-                (it.isClickable || it.isEnabled) &&
-                it.containsText(target)
-        }
-
-    private fun isHomeForeground(pkg: String?): Boolean {
-        if (pkg == null) return false
-        val lower = pkg.lowercase()
-        return lower.contains("launcher") || lower == "com.android.systemui"
-    }
+    private fun isHomeForeground(pkg: String?): Boolean =
+        ForegroundPackageVerifier.isHomePackage(pkg)
 }

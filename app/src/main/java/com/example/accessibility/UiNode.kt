@@ -120,11 +120,36 @@ data class UiTreeSnapshot(
     }
 
     /**
-     * Fingerprint hash for stuck detection
+     * Fingerprint for stuck detection.
+     *
+     * Hashes the whole visible tree (bounded by the dump's node cap) rather than the
+     * first few nodes, and includes every signal that actually changes between two
+     * distinct screens: text, description, class, clickable/scrollable/checked state
+     * and bounds. Using only the first ten nodes made two different screens that
+     * shared a static header (e.g. a scrolled list) hash identically, which produced
+     * false "stuck" verdicts and spurious user-help escalations.
      */
     fun getFingerprint(): String {
-        return "${packageName}_" + nodes.take(10).joinToString(";") {
-            "${it.text}_${it.contentDescription}_${it.bounds.left}_${it.bounds.top}"
+        return buildString {
+            append(packageName ?: "unknown")
+            for (node in nodes) {
+                append('|')
+                append(node.text ?: "")
+                append('\u0001')
+                append(node.contentDescription ?: "")
+                append('\u0001')
+                append(node.className)
+                append('\u0001')
+                append(node.bounds.left).append(',')
+                append(node.bounds.top).append(',')
+                append(node.bounds.right).append(',')
+                append(node.bounds.bottom)
+                append('\u0001')
+                append(if (node.isClickable) 'c' else '-')
+                append(if (node.isScrollable) 's' else '-')
+                append(if (node.isChecked) 'x' else '-')
+                append(if (node.isEnabled) 'e' else '-')
+            }
         }
     }
 }

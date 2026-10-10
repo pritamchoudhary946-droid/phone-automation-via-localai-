@@ -6,6 +6,7 @@ import com.example.agent.ToolRegistry
 import com.example.model.GemmaInferenceEngine
 import com.example.model.HeuristicPlanner
 import com.example.model.LiteRtModelManager
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -95,8 +96,20 @@ class AgentPlanner(
         if (rawAction.isBlank()) return StepDecision.None("Step decision missing action")
 
         // Reuse the strict plan parser so the decision passes exactly the same
-        // validation gates as a full plan (known action, valid params).
-        val wrapped = """{"steps":[{"id":1,"seq":1,"desc":"next","action":"$rawAction","params":${obj.optJSONObject("params") ?: JSONObject()}}]}"""
+        // validation gates as a full plan (known action, valid params). Build the
+        // wrapper as real JSON rather than interpolating the model's strings, so a
+        // quoted/escaped value in the model output cannot corrupt the wrapper.
+        val wrapped = JSONObject().apply {
+            put("steps", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("id", 1)
+                    put("seq", 1)
+                    put("desc", "next")
+                    put("action", rawAction)
+                    put("params", obj.optJSONObject("params") ?: JSONObject())
+                })
+            })
+        }.toString()
         return when (val parsed = parser.parse(wrapped, request.userCommand)) {
             is PlanParseResult.Success -> {
                 val action = parsed.plan.steps.first().action
