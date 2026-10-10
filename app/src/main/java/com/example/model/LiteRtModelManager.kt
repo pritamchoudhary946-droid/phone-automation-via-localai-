@@ -244,14 +244,16 @@ class LiteRtModelManager(
             if (!isPartial) existingBytes = 0L
             if (isPartial) {
                 // A 206 does not guarantee the server honoured our exact offset: it may
-                // return a different range (or a range that starts at 0). Appending at
-                // the wrong offset silently corrupts the model, so verify the start byte
-                // and fall back to a full restart when it does not match.
+                // return a different range (or the whole file). The body is only the
+                // requested range, so appending it at the wrong position (or reusing it
+                // at all after discarding the bytes we hold) would corrupt the model.
+                // Discard the partial file and let the retry loop fetch a fresh full copy.
                 val contentRange = resp.header("Content-Range")
                 val rangeStart = parseContentRangeStart(contentRange)
                 if (rangeStart != existingBytes) {
-                    Log.w(TAG, "Resume range mismatch (requested $existingBytes, Content-Range=$contentRange); restarting from 0")
-                    existingBytes = 0L
+                    Log.w(TAG, "Resume range mismatch (requested $existingBytes, Content-Range=$contentRange); discarding partial file and restarting")
+                    partFile.delete()
+                    throw IOException("Resume range mismatch; restarting download from scratch")
                 }
             }
 
