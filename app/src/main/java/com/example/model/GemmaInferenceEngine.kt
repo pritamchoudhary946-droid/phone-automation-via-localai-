@@ -14,6 +14,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Honest lifecycle state for the on-device reasoning engine. */
 sealed class EngineState {
@@ -27,22 +28,20 @@ sealed class EngineState {
  * Owns exactly one [LlmRuntime] instance, loads it off the UI thread, guards it
  * against concurrent generation, and reports failures honestly so the app can
  * fall back to a clearly labelled basic mode instead of pretending Gemma ran.
+ *
+ * 8.9/8.10: the loader is CPU-first and single-flight. There is no GPU-primary +
+ * CPU two-attempt scheme, because on some devices a failed GPU delegate doubles
+ * the ~2.6 GB init work and thrashes memory; [runtimeFactory] is the one load path.
  */
 class GemmaInferenceEngine(
     private val runtimeFactory: (String, String?) -> LlmRuntime,
-    /**
-     * Optional CPU-only runtime factory used for the single bounded retry (plan 8.1).
-     * GPU-capable builds are known to fail `Engine.initialize()` ("unsupported file
-     * format" / vision-signature mismatch / GPU delegate OOM) on some devices; when
-     * the primary attempt fails we drop to CPU once before reporting failure. Null
-     * means "retry with the primary factory" (keeps every existing two-arg call site).
-     */
-    private val cpuRuntimeFactory: ((String, String?) -> LlmRuntime)? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
 
     private val mutex = Mutex()
     private var runtime: LlmRuntime? = null
+    /** True once a load+smoke cycle has completed, so the probe does not re-run. */
+    private val smokeVerified = AtomicBoolean(false)
 
     private val _state = MutableStateFlow<EngineState>(EngineState.NotInitialized)
     val state: StateFlow<EngineState> = _state.asStateFlow()
@@ -58,38 +57,39 @@ class GemmaInferenceEngine(
             return false
         }
 
-        _state.value = EngineState.Loading
         return mutex.withLock {
-            // Attempt 1: the primary (GPU-capable) runtime. Attempt 2 (plan 8.1): a
-            // bounded single retry on a fresh, CPU-only runtime, because a GPU delegate
-            // failure or a transient native init error is recoverable on CPU.
-            var lastError: Throwable? = null
-            for (attempt in 0 until MAX_INIT_ATTEMPTS) {
-                val factory = if (attempt == 0) runtimeFactory else (cpuRuntimeFactory ?: runtimeFactory)
-                try {
-                    val created = factory(modelFile.absolutePath, modelFile.parentFile?.absolutePath)
-                    created.initialize()
-                    if (created.isReady()) {
-                        runtime = created
-                        _state.value = EngineState.Ready(created.backendLabel())
-                        if (attempt > 0) {
-                            Log.i(TAG, "Engine recovered on CPU-fallback retry (attempt ${attempt + 1})")
-                        }
-                        return@withLock true
-                    }
+            // 8.9 single-flight: re-check INSIDE the lock. The early guard above is
+            // checked before acquiring it, so two concurrent callers (e.g. the
+            // MainActivity LaunchedEffect and a Retry tap) both pass it; without this
+            // re-check they would each load a ~2.6 GB runtime and the second assignment
+            // would overwrite (leak) the first — the reported phone hang.
+            if (_state.value is EngineState.Ready && runtime?.isReady() == true) return@withLock true
+
+            _state.value = EngineState.Loading
+            try {
+                val created = runtimeFactory(modelFile.absolutePath, modelFile.parentFile?.absolutePath)
+                created.initialize()
+                if (!created.isReady()) {
                     runCatching { created.close() }
-                    lastError = IllegalStateException("Engine did not report ready after initialization")
-                } catch (e: CancellationException) {
-                    _state.value = EngineState.NotInitialized
-                    throw e
-                } catch (e: Throwable) {
-                    Log.e(TAG, "Engine initialization attempt ${attempt + 1} failed", e)
-                    lastError = e
+                    runtime = null
+                    _state.value = EngineState.Failed("Engine did not report ready after initialization")
+                    return@withLock false
                 }
+                // Close any previous runtime before replacing it so two engines can
+                // never be alive at once (the core of the 8.9 memory fix).
+                runCatching { runtime?.close() }
+                runtime = created
+                _state.value = EngineState.Ready(created.backendLabel())
+                true
+            } catch (e: CancellationException) {
+                _state.value = EngineState.NotInitialized
+                throw e
+            } catch (e: Throwable) {
+                Log.e(TAG, "Engine initialization failed", e)
+                runtime = null
+                _state.value = EngineState.Failed(describeInitFailure(e))
+                false
             }
-            runtime = null
-            _state.value = EngineState.Failed(describeInitFailure(lastError))
-            false
         }
     }
 
@@ -145,27 +145,33 @@ class GemmaInferenceEngine(
         }
     }
 
-    /** Small real inference used to prove the runtime works before declaring it ready. */
-    suspend fun smokeTest(modelFile: File): Boolean {
-        val active = runtime ?: run {
-            if (!initialize(modelFile)) {
-                Log.w(TAG, "Smoke test failed: could not initialize engine")
-                return false
+    /**
+     * 8.9: loads the engine once, then runs the smoke probe ONCE, cheaply, and
+     * remembers it. Subsequent calls are cheap no-ops, so re-opening the app (or a
+     * model-ready transition re-triggering init) does not re-run a real generation on
+     * an already-hot device. Returns true only when the engine is ready and the probe
+     * passed; a failure is reported honestly via [reportUnavailable].
+     */
+    suspend fun ensureReady(modelFile: File): Boolean {
+        if (!initialize(modelFile)) return false
+        if (smokeVerified.get()) return true
+        val active = runtime ?: return false
+        val passed = try {
+            active.smokeTest().also {
+                if (!it) Log.w(TAG, "Smoke test failed: underlying runtime smoke test failed")
             }
-            runtime
-        } ?: return false
-        return try {
-            val result = active.smokeTest()
-            if (!result) {
-                Log.w(TAG, "Smoke test failed: underlying runtime smoke test failed")
-            }
-            result
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
             Log.w(TAG, "Smoke test threw: ${e.message}")
             false
         }
+        if (passed) {
+            smokeVerified.set(true)
+            return true
+        }
+        reportUnavailable("The model loaded but did not answer a test prompt (load or memory failure)")
+        return false
     }
 
     fun isReady(): Boolean = _state.value is EngineState.Ready && runtime?.isReady() == true
@@ -178,6 +184,7 @@ class GemmaInferenceEngine(
     fun reportUnavailable(reason: String) {
         runCatching { runtime?.close() }
         runtime = null
+        smokeVerified.set(false)
         _state.value = EngineState.Failed(reason)
     }
 
@@ -189,14 +196,13 @@ class GemmaInferenceEngine(
             Log.w(TAG, "Error unloading engine: ${e.message}")
         } finally {
             runtime = null
+            smokeVerified.set(false)
             _state.value = EngineState.NotInitialized
         }
     }
 
     companion object {
         private const val TAG = "GemmaInferenceEngine"
-        // Primary attempt + one bounded CPU-only retry (plan 8.1).
-        private const val MAX_INIT_ATTEMPTS = 2
         private const val MAX_REASON_CHARS = 300
     }
 }

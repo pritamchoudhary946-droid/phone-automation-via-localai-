@@ -9,7 +9,7 @@ premium Jarvis-like UI, and a model that actually loads.
 Scope for this work: Phases 0, 1, 2, 3, 4 (all items 4.1 - 4.17), Phase 5
 (Autonomy & Self-Healing, items 5.1 - 5.10), Phase 6 (Reasoning & Reliability
 Rescue, items 6.1 - 6.24), Phase 7 (Completion & Hardening, items 7.1 - 7.17) AND
-Phase 8 (Jarvis rebrand, working model load, premium UI - items 8.1 - 8.7) AND
+Phase 8 (Jarvis rebrand, working model load, premium UI - items 8.1 - 8.10) AND
 Phase 9 (fully-automated Jarvis capability upgrades - items 9.1 - 9.14), followed by
 a FINAL BUG SWEEP (section 4A) that finds and fixes every remaining bug.
 Phase 6 is landed; Phase 7 finishes the seams; Phase 8 fixes the live device
@@ -82,7 +82,9 @@ Full scope at a glance (everything in this plan):
   "written-but-not-working" defect (section 2.3, BS1 - BS10); rebrand all
   user-visible text to "Jarvis"; redesign the UI into a cool, premium, Jarvis-like
   interface; a new launcher/in-app icon; and a polish pass so task progress is
-  always visible. Built together with Phase 7 in the same pass.
+  always visible. Built together with Phase 7 in the same pass. Also fixes the
+  phone-hang regression (8.9) introduced by the model-load work and reverts the
+  earlier GPU/CPU backend changes (8.10).
 - Phase 9 (NEW, user-requested) - Fully-automated "Jarvis" capability upgrades
   (9.1 - 9.14): proactive awareness, context/event automation triggers, multi-turn
   conversational memory, cross-app data passing, personal memory commands + UI,
@@ -228,6 +230,43 @@ C) LIVE BLOCKERS reported by the user (these are the top priority - fix first):
   setup copy, launcher). The user wants it named "Jarvis".
 - C4 UI: the user wants a much better, "Jarvis-like", cool/premium interface and
   a new small icon, not the current generic look.
+- C5 (NEW, reported after the model-load work) THE WHOLE PHONE HANGS / STUTTERS.
+  "Pur phone bahut hand ho raha hai". VERIFIED resource causes in the code - the
+  model-load changes made the phone thrash. Each is a real defect, not a guess:
+  * DOUBLE-LOAD LEAK in `GemmaInferenceEngine.initialize()` (`model/GemmaInferenceEngine.kt`).
+    The early "already Ready" guard is checked BEFORE `mutex.withLock`, and there is
+    NO re-check inside the lock. Two concurrent callers (e.g. the `MainActivity`
+    `LaunchedEffect(isModelReady)` + a Retry tap, or the dashboard/Setup observers)
+    both pass the guard, then BOTH load a fresh `LiteRtLmRuntime`; the second does
+    `runtime = created`, OVERWRITING the first WITHOUT closing it. Each runtime
+    holds the whole ~2.6 GB model + KV cache, so two live engines = OOM / heavy
+    swap = the phone hangs. Fix: re-check `_state.value is Ready` inside the lock and
+    close any previous runtime before replacing it (single-flight init).
+  * LOAD/UNLOAD THRASH. `OmniAgentApplication.onLowMemory()` calls
+    `inferenceEngine.shutdown()` UNCONDITIONALLY, and `onTrimMemory(level >=
+    TRIM_MEMORY_RUNNING_LOW)` also shuts the engine down. Loading is a multi-second,
+    multi-GB operation, so a trim followed by a re-open/re-init is a giant CPU+IO
+    spike that stutters the whole device. `MainActivity`'s
+    `LaunchedEffect(isModelReady)` re-triggers `initializeEngineIfModelReady()` on
+    every model-ready transition, so this load/unload cycle can repeat. Fix: do not
+    shut the engine down on every trim; only release under genuine critical pressure
+    and debounce/back-off re-init so it cannot spin.
+  * GPU BACKEND LEFT ON. `OmniAgentApplication.USE_GPU_BACKEND = true`. The Adreno
+    810 + LiteRT GPU delegate is known to be poorly supported for this VLM and, on
+    failure, the engine ALSO tries the CPU path - i.e. a failed GPU attempt doubles
+    the init work and memory churn. `MAX_CONTEXT_TOKENS = 3072` and
+    `DEFAULT_CPU_THREADS = 4` further raise the footprint. Fix: default back to
+    CPU-first (GPU strictly opt-in), and make the CPU retry reuse the same load
+    rather than re-initializing a second engine.
+  * SMOKE TEST COST. `smokeTest()` runs a real generation on every initialize, and
+    the new tolerant probe can generate up to 2 attempts - extra CPU on an
+    already-hot device. Fix: run the probe once, cheaply, and only after the first
+    successful load (not on every re-open).
+  PRIMARY FIX (8.9): make engine init single-flight (re-check inside the lock, close
+  the old runtime before replacing), stop unconditional shutdown on trim/low-memory
+  (debounce + only on critical), default to CPU-first, and run the smoke probe once
+  - so the phone does not hang. Reference: `model/GemmaInferenceEngine.kt`,
+  `OmniAgentApplication.kt`, `MainActivity.kt`, `model/LiteRtLmRuntime.kt`.
 
 D) High-risk item to verify while building (not a gate, part of the same pass):
 - `LiteRtModelManager` pins `gemma-4-E2B-it.litertlm` with a hardcoded byte length
@@ -1197,9 +1236,42 @@ shown, many features are written but not actually wired, the app is still called
   `model/LiteRtEngine.kt`, `model/LiteRtLmRuntime.kt`,
   `notifications/CompletionNotifier.kt`, `overlay/FloatingAgentDotService.kt`,
   `res/mipmap-anydpi-v26/*`.
+- 8.9 STOP THE PHONE HANGING (C5, NEW, user-reported after the model-load work).
+  Goal: the phone is as smooth as before - the assistant never thrashes memory or
+  CPU. Method: (a) make engine init SINGLE-FLIGHT - re-check the Ready state INSIDE
+  `mutex.withLock` and close any existing runtime before assigning a new one, so
+  two concurrent initializers can never leave two ~2.6 GB runtimes alive;
+  (b) stop the load/unload thrash - `onLowMemory()`/`onTrimMemory()` must NOT
+  unconditionally `shutdown()` the engine; only release under genuine critical
+  pressure, and debounce/back-off any re-init so it cannot spin;
+  (c) default to CPU-first (`USE_GPU_BACKEND = false`; GPU strictly opt-in) so a
+  failed GPU delegate does not double the init work; (d) run the smoke probe once,
+  cheaply, only after the first successful load - not on every re-open;
+  (e) confirm the bounded context (3072) and thread budget (4) stay conservative.
+  Reference: `model/GemmaInferenceEngine.kt`, `OmniAgentApplication.kt`,
+  `MainActivity.kt`, `model/LiteRtLmRuntime.kt`.
+- 8.10 UNDO THE EARLIER GPU/CPU BACKEND CHANGES (user-requested revert). Goal: put
+  the model-backend behaviour back to how it was BEFORE the GPU/CPU changes were
+  made, because those changes are suspected of causing the hang. Method: revert the
+  loader-side changes rather than layering more on top -
+  * restore the original CPU-first load path and the original single runtime factory
+    (drop the added GPU-primary `runtimeFactory` + separate `cpuRuntimeFactory`
+    two-attempt scheme in `OmniAgentApplication`, unless a single CPU path already
+    covers it);
+  * set `USE_GPU_BACKEND = false` (GPU strictly opt-in, or removed for now);
+  * revert the context/thread/branch changes tied to that work back to the prior
+    values (`LiteRtLmRuntime` constructor defaults, `MAX_CONTEXT_TOKENS`,
+    `DEFAULT_CPU_THREADS`) so the engine footprint matches the pre-change build;
+  * keep only the honest error-surfacing (8.2) that the user asked for - do NOT
+    keep the GPU retry/two-engine behaviour that thrashes memory.
+  Method note: prefer a clean revert (git diff against the pre-change commit) over a
+  partial hand-edit, so no half-reverted loader path remains. Reference:
+  `model/GemmaInferenceEngine.kt`, `OmniAgentApplication.kt`,
+  `model/LiteRtLmRuntime.kt`, `model/LiteRtEngine.kt`, `git` history.
 
-Phase 8 scope note: do ALL of 8.1 - 8.7 together. 8.1, 8.2 and 8.7 are the
-functional fixes; 8.3 - 8.6 are the rebrand and UI. They ship in the same pass.
+Phase 8 scope note: do ALL of 8.1 - 8.10 together. 8.1, 8.2, 8.7, 8.9 and 8.10 are
+the functional fixes (8.9 is the phone-hang fix and 8.10 reverts the GPU/CPU
+loader changes); 8.3 - 8.6 are the rebrand and UI. They ship in the same pass.
 
 Phase 9 - Fully-automated "Jarvis" capability upgrades (items 9.1 - 9.14, NEW
 features the user asked for). Goal: move from "responds to a typed command" to a
@@ -1313,7 +1385,8 @@ just report them):
   model missing, model failing to load, empty/clipboard-empty, and rotate/kill.
 - Regression: every honest-behaviour rule still holds - no fake success, no silent
   cloud egress, risky actions still confirm, and the model-not-loaded path still
-  blocks (6.1) with the real reason shown (8.2).
+  blocks (6.1) with the real reason shown (8.2). Also re-verify the phone-hang fix
+  (8.9) holds under repeated open/close and memory pressure.
 
 # 5. TESTING AND VALIDATION
 
@@ -1321,7 +1394,7 @@ Success is defined per phase; each phase must keep the existing behaviour
 honest (no step may be marked COMPLETED unless a fresh observation proves it).
 Phases implemented: 0, 1, 2, 3, 4 (all items 4.1 - 4.17; 4.9 documented and
 deferred), 5 (items 5.1 - 5.10), 6 (items 6.1 - 6.24), and 7 (items 7.1 - 7.17).
-Phase 8 (8.1 - 8.7) is the rebrand + working-load + bug-sweep + UI phase and is
+Phase 8 (8.1 - 8.10) is the rebrand + working-load + bug-sweep + UI phase and is
 done next, together with any remaining Phase 7 seams.
 
 Phase 0 (must pass first):
@@ -1481,6 +1554,17 @@ Phase 8 (Jarvis rebrand, working load, premium UI):
   `MAX_CONTEXT_TOKENS` (BS5), no user-visible "OmniAgent" remains (BS6), the new
   icon ships (BS7), no misleading "Basic mode" label (BS8), and no reachable
   "Unavailable*" default remains (BS10). No dead code left advertising a capability.
+- 8.9 (phone hang): two concurrent `initialize()` calls result in exactly ONE live
+  runtime (assert the second does not create a second engine and that any prior
+  runtime is closed); a trim/low-memory event does NOT repeatedly shut down and
+  re-load the engine (assert no init spin); the GPU backend is opt-in and the
+  default is CPU-first; and the smoke probe does not re-run on every re-open.
+  Device check: the phone stays smooth while the model is loaded and the app is
+  reopened.
+- 8.10 (revert): the loader is back to the pre-GPU/CPU-change shape - a single
+  CPU-first runtime factory, no GPU-primary + CPU two-attempt scheme, `USE_GPU_BACKEND`
+  false/removed, and the prior context/thread defaults restored; the honest
+  load-error surfacing (8.2) still works. Assert the app builds and loads on CPU.
 
 STATUS (Phase 8.7, done): BS1 `EngineLoadStatusCard(app)` is called in
 `SetupScreen`; BS2 `privilegedActions` is surfaced in the Settings self-test and
@@ -1511,6 +1595,28 @@ was implemented in the orchestrator but had no reachable UI; it is now wired to 
 "Watch me / Save skill" card in the dashboard, with an end-to-end regression test
 (`OrchestratorLoopTest.watchingARunSavesAReusableSkill`). Same "written but not
 reachable" defect class as the BS sweep. Suite: 194 tests, 0 failures.
+
+STATUS (Phase 8.9 + 8.10, done): the reported phone hang (C5) is fixed and the
+GPU/CPU loader changes are reverted to the pre-change shape.
+- 8.9(a) single-flight init: `GemmaInferenceEngine.initialize()` re-checks the Ready
+  state INSIDE `mutex.withLock` and closes any previous runtime before assigning a
+  new one, so two concurrent initializers (MainActivity `LaunchedEffect` + a Retry
+  tap) can never leave two ~2.6 GB runtimes alive (the leak that OOM'd the device).
+- 8.9(b) no load/unload thrash: `MemoryTrimPolicy.shouldReleaseEngine(level)` gates
+  release to `TRIM_MEMORY_COMPLETE` only; `onLowMemory()` no longer shuts the engine
+  down at all (it is advisory). A release bumps `trimGeneration` and the next
+  explicit use reloads - the app never re-loads on its own and cannot spin.
+- 8.9(c) CPU-first: `USE_GPU_BACKEND = false`; GPU is strictly opt-in, so a failed
+  GPU delegate cannot double the init work.
+- 8.9(d) probe once: `GemmaInferenceEngine.ensureReady()` loads once, runs the smoke
+  probe once, and remembers it; re-open/re-transition is a cheap no-op.
+- 8.10 revert: the GPU-primary + CPU two-attempt `cpuRuntimeFactory` scheme and
+  `MAX_INIT_ATTEMPTS` are removed; a single CPU-first `runtimeFactory` is the one
+  load path. The honest error surfacing (8.2) is kept (`reportUnavailable`).
+Regression coverage added to `Phase8HangFixTest` (concurrent init -> one runtime,
+repeated init no-op, shutdown closes + reloads, probe once, re-probe after trim,
+trim policy) and `Phase8ModelLoadTest` updated to the CPU-first shape.
+Suite: 229 tests, 0 failures; lint clean; assembleDebug green.
 
 Phase 9 (fully-automated Jarvis capability upgrades):
 - 9.1: proactive suggestions fire ONLY when the awareness mode is opted in; with it

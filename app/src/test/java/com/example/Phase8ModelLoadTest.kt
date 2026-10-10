@@ -33,34 +33,30 @@ class Phase8ModelLoadTest {
     }
 
     @Test
-    fun primaryFailureFallsBackToCpuRuntimeAndBecomesReady() = runBlocking {
+    fun singleCpuFirstLoadBecomesReady() = runBlocking {
         val cpu = FakeLlmRuntime(backend = "CPU")
-        var primaryCalls = 0
-        var cpuCalls = 0
+        var factoryCalls = 0
         val engine = GemmaInferenceEngine(
-            runtimeFactory = { _, _ -> primaryCalls++; FakeLlmRuntime(readyAfterInitialize = false) },
-            cpuRuntimeFactory = { _, _ -> cpuCalls++; cpu }
+            runtimeFactory = { _, _ -> factoryCalls++; cpu }
         )
 
         assertTrue(engine.initialize(fakeModelFile(context.cacheDir)))
-        assertEquals(1, primaryCalls)
-        assertEquals(1, cpuCalls)
+        assertEquals("one CPU-first load, no two-attempt scheme", 1, factoryCalls)
         assertTrue(engine.isReady())
         assertEquals(EngineState.Ready("CPU"), engine.state.value)
     }
 
     @Test
-    fun bothAttemptsFailReportsTheRealReason() = runBlocking {
+    fun initFailureReportsTheRealReason() = runBlocking {
         val engine = GemmaInferenceEngine(
-            runtimeFactory = { _, _ -> throw LlmInferenceException("primary boom: unsupported file format") },
-            cpuRuntimeFactory = { _, _ -> throw LlmInferenceException("cpu boom: out of memory") }
+            runtimeFactory = { _, _ -> throw LlmInferenceException("native boom: out of memory") }
         )
 
         assertFalse(engine.initialize(fakeModelFile(context.cacheDir)))
         val state = engine.state.value
         assertTrue(state is EngineState.Failed)
-        // The last (CPU-fallback) error is the one surfaced, not a generic placeholder.
-        assertTrue((state as EngineState.Failed).message.contains("cpu boom"))
+        // The real init error is surfaced, not a generic placeholder.
+        assertTrue((state as EngineState.Failed).message.contains("native boom"))
         assertFalse(engine.isReady())
     }
 

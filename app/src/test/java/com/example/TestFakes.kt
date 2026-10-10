@@ -64,6 +64,7 @@ class FakeLlmRuntime(
     val prompts = mutableListOf<String>()
     val requestedMaxOutputTokens = mutableListOf<Int>()
     var initializeCount = 0
+    var smokeTestCount = 0
     var closed = false
 
     override suspend fun initialize() {
@@ -80,7 +81,7 @@ class FakeLlmRuntime(
         return output
     }
 
-    override suspend fun smokeTest(): Boolean = smokeOk
+    override suspend fun smokeTest(): Boolean = smokeOk.also { smokeTestCount++ }
 
     override fun backendLabel(): String = backend
 

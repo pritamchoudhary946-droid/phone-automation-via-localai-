@@ -194,8 +194,11 @@ class GemmaIntegrationTest {
         val runtime = stageRuntimeFromFactory(fake)
         val engine = GemmaInferenceEngine(runtimeFactory = runtime)
         val file = fakeModelFile(context.cacheDir)
-        assertTrue(engine.initialize(file))
-        assertFalse(engine.smokeTest(file))
+        // 8.9: ensureReady loads once, then runs the probe; a failing probe marks the
+        // engine unavailable (and never leaves it claiming ready).
+        assertFalse(engine.ensureReady(file))
+        assertFalse(engine.isReady())
+        assertTrue(engine.state.value is EngineState.Failed)
     }
 
     // 5. Invalid model output / unknown actions rejected; bounded repair then fallback.
