@@ -1022,15 +1022,16 @@ class TaskOrchestrator(
             if (step.action !is AgentAction.OpenSearch) {
                 return PostconditionVerdict(false, "Opened the search interface; text still has to be entered")
             }
-            // The step's declared intent was to open search: success means the search
-            // surface advanced, or an editable field is now genuinely exposed.
-            val nowEditable = post.nodes.any { it.isEditable }
-            val screenChanged = pre.fingerprint != post.fingerprint
-            return if (nowEditable || screenChanged) {
-                PostconditionVerdict(true, if (nowEditable) "Search field now present on screen" else "Search interface changed the screen")
+            // A changed screen is not proof that search opened: it may be a popup,
+            // keyboard, or unrelated navigation. Require a semantic search field.
+            return if (post.hasSearchInputField()) {
+                PostconditionVerdict(true, "Search-specific input field verified on screen")
             } else {
-                PostconditionVerdict(false, "Search interface did not open (no editable field and no screen change)")
+                PostconditionVerdict(false, "Search interface did not expose a search-specific input field")
             }
+        }
+        if (action is AgentAction.OpenItem) {
+            return verifyOpenedItem(action, pre, post)
         }
         val targetPkg = if (action is AgentAction.OpenApp) {
             action.packageName ?: appDirectory.resolvePackage(action.appQuery)
@@ -1061,6 +1062,33 @@ class TaskOrchestrator(
             return PostconditionVerdict(true, "${verdict.detail} (vision diff confirmed)")
         }
         return PostconditionVerdict(verdict.satisfied, verdict.detail)
+    }
+
+    /**
+     * Opening a result requires detail/player evidence plus a real transition.
+     * A generic screen change or the continued presence of the result label is
+     * insufficient because taps can hit ads, menus, or unrelated rows.
+     */
+    private fun verifyOpenedItem(
+        action: AgentAction.OpenItem,
+        pre: UiObservation,
+        post: UiObservation
+    ): PostconditionVerdict {
+        val changed = pre.fingerprint != post.fingerprint || visionDiff(pre, post)
+        val lower = post.summary.lowercase()
+        val target = action.targetText.trim().lowercase()
+        val targetPresent = target.isNotBlank() && lower.contains(target)
+        val detailSignal = listOf(
+            "now playing", "video player", "watching", "pause", "resume",
+            "fullscreen", "seek", "conversation", "profile", "details"
+        ).any { lower.contains(it) }
+        val listSurface = lower.contains("[scrollable]") && !detailSignal
+        val verified = changed && targetPresent && detailSignal && !listSurface
+        return PostconditionVerdict(
+            verified,
+            if (verified) "Opened item and verified detail/player surface"
+            else "Item open is unverified: changed=$changed targetPresent=$targetPresent detailSignal=$detailSignal"
+        )
     }
 
     private data class PostconditionVerdict(val satisfied: Boolean, val detail: String)
