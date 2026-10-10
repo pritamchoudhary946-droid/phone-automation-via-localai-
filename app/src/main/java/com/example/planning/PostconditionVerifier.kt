@@ -63,8 +63,15 @@ object PostconditionVerifier {
             }
             VerificationMethod.SCREEN_CHANGED ->
                 Verdict(screenChanged, if (screenChanged) "Screen changed after action" else "Screen did not change")
-            VerificationMethod.NONE ->
-                Verdict(screenChanged, if (screenChanged) "Incidental screen change observed" else "No observable change")
+            VerificationMethod.NONE -> {
+                // NONE is intentionally not a success shortcut. Callers must provide
+                // a concrete postcondition or an action-specific verifier; incidental
+                // animation/navigation cannot prove task completion.
+                Verdict(
+                    false,
+                    "No structured postcondition was supplied; completion is not verifiable"
+                )
+            }
         }
     }
 
