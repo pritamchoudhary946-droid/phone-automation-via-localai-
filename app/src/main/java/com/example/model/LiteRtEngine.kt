@@ -158,9 +158,14 @@ class LiteRtEngine(
         planner.exploreNextAction(request)
 
     /**
-     * Backward-compatible decision path used by the legacy diagnostic tests. When the
-     * local model is ready it drives the decision; otherwise the deterministic basic
-     * fallback is used and the thought text explicitly says so.
+     * Backward-compatible decision path used ONLY by the legacy diagnostic tests; it is
+     * NOT part of the live execution loop. The live loop plans via [planTask] and steps
+     * via [decideNextAction] through the orchestrator, which passes a real
+     * `remainingStepBudget` and the observed `foregroundPackage`.
+     *
+     * The fixed `remainingStepBudget = 10` and `foregroundPackage = null` below are
+     * deliberate values for this bounded diagnostic probe, not a claim about the live
+     * budget - do not treat them as the loop's configuration.
      */
     suspend fun reasonAndPlan(
         goal: String,
@@ -173,9 +178,11 @@ class LiteRtEngine(
                 goal = goal,
                 activeSubGoal = goal,
                 screenSummary = screenSummary,
+                // Diagnostic probe: no foreground package is tracked on this path.
                 foregroundPackage = null,
                 historySummary = historySummary,
                 lastActionVerification = lastActionVerification,
+                // Diagnostic probe: a fixed bound, independent of the live step budget.
                 remainingStepBudget = 10
             )
             if (decision is StepDecision.Act) {

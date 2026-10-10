@@ -79,6 +79,13 @@ fun AgentDashboardScreen(
         (context.applicationContext as? com.example.OmniAgentApplication)?.settings
     }
 
+    // 8.7/BS8: with 6.1 the app BLOCKS when the model is not loaded unless the user
+    // explicitly opted into the labelled degraded (keyword) mode. Reflect that truth
+    // in the UI instead of advertising a "Basic mode" that never runs.
+    val modelReady = engineState is EngineState.Ready
+    val basicFallbackExplicit = appSettings?.basicFallbackExplicit == true
+    val canPlan = canStartTask(modelReady, basicFallbackExplicit)
+
     DisposableEffect(Unit) {
         onDispose {
             try {
@@ -153,13 +160,26 @@ fun AgentDashboardScreen(
         }
     }
 
+    // 8.7/BS3: the opt-in wake-word detector now fronts the hands-free flow (it was
+    // previously dead code). It arms only with opt-in + mic permission, exactly like
+    // the manual voice button, so no audio is ever captured silently.
+    val wakeWordDetector = remember(context) {
+        com.example.voice.OptInWakeWordDetector(
+            optIn = { (context.applicationContext as? com.example.OmniAgentApplication)?.settings?.handsFreeEnabled == true },
+            hasMicPermission = {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            }
+        )
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             resourceStats = liteRtEngine.getResourceStats()
             isDotEnabled = FloatingAgentDotService.isRunning
             val handsFreeNow = appSettings?.handsFreeEnabled == true
-            // Start listening once when hands-free is switched on; the listeners
-            // re-arm themselves after each utterance.
+            // Arm/disarm the wake-word seam with the live toggle, then start listening
+            // once when hands-free is switched on (the listeners re-arm themselves).
+            if (handsFreeNow) wakeWordDetector.start() else wakeWordDetector.stop()
             if (handsFreeNow && !handsFreeEnabled) startListening()
             handsFreeEnabled = handsFreeNow
             kotlinx.coroutines.delay(2000)
@@ -563,8 +583,10 @@ fun AgentDashboardScreen(
                         } else {
                             Button(
                                 onClick = {
-                                    if (goalInput.isNotBlank()) {
+                                    if (goalInput.isNotBlank() && canPlan) {
                                         orchestrator.startTask(goalInput)
+                                    } else if (!canPlan) {
+                                        onNavigateToSetup()
                                     }
                                 },
                                 enabled = goalInput.isNotBlank(),
@@ -572,13 +594,18 @@ fun AgentDashboardScreen(
                                     .fillMaxWidth()
                                     .height(48.dp)
                                     .testTag("execute_agent_button"),
-                                colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (canPlan) CyanPrimary else AmberWarning
+                                ),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Run Phone Agent (Gemma 4 E2B)",
+                                    text = when {
+                                        canPlan -> "Run Phone Agent (Gemma 4 E2B)"
+                                        else -> "Set up the model to run tasks"
+                                    },
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -589,15 +616,19 @@ fun AgentDashboardScreen(
             }
 
             item {
-                // Planning Mode Banner: honest about whether Gemma or basic fallback is driving.
+                // Planning Mode Banner: honest about whether Gemma or the explicitly
+                // opted-in degraded fallback is driving. When neither can plan, the app
+                // is BLOCKED (6.1) - say so instead of implying a "Basic mode" runs.
+                val bannerAccent = when {
+                    usesModelPlanning -> CyanPrimary
+                    canPlan -> AmberWarning
+                    else -> CrimsonDanger
+                }
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("planning_mode_banner"),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (usesModelPlanning) CyanPrimary.copy(alpha = 0.12f)
-                        else AmberWarning.copy(alpha = 0.12f)
-                    ),
+                    colors = CardDefaults.cardColors(containerColor = bannerAccent.copy(alpha = 0.12f)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Row(
@@ -605,24 +636,35 @@ fun AgentDashboardScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = if (usesModelPlanning) Icons.Default.AutoAwesome else Icons.Default.Info,
+                            imageVector = when {
+                                usesModelPlanning -> Icons.Default.AutoAwesome
+                                canPlan -> Icons.Default.Info
+                                else -> Icons.Default.Block
+                            },
                             contentDescription = null,
-                            tint = if (usesModelPlanning) CyanPrimary else AmberWarning,
+                            tint = bannerAccent,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = if (usesModelPlanning) "Local Gemma AI planning active" else "Basic (rule-based) plan",
+                                text = when {
+                                    usesModelPlanning -> "Local Gemma AI planning active"
+                                    basicFallbackExplicit -> "Basic (rule-based) plan • degraded mode"
+                                    else -> "Model required • tasks are blocked"
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = if (usesModelPlanning) CyanPrimary else AmberWarning
+                                color = bannerAccent
                             )
                             Text(
-                                text = if (usesModelPlanning) {
-                                    "Plans and next actions are generated by the on-device model. Every step is verified before advancing."
-                                } else {
-                                    "Gemma is unavailable, so a deterministic rule-based plan is used. Native automation still runs; this is not AI planning."
+                                text = when {
+                                    usesModelPlanning ->
+                                        "Plans and next actions are generated by the on-device model. Every step is verified before advancing."
+                                    basicFallbackExplicit ->
+                                        "You enabled the degraded keyword planner, so a deterministic rule-based plan runs instead of AI. This is not AI planning."
+                                    else ->
+                                        "The local Gemma model is not loaded, so a task cannot start. Open Setup to download/load it, or enable the degraded planner in Capabilities."
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -763,7 +805,7 @@ fun StateBanner(
             CyanPrimary.copy(alpha = 0.15f),
             CyanPrimary,
             if (state.fromModel) "Gemma 4 E2B Reasoning • Step ${state.stepIndex}..."
-            else "Basic (rule-based) planning • Step ${state.stepIndex}...",
+            else "Degraded (rule-based) planning • Step ${state.stepIndex}...",
             if (state.fromModel) Icons.Default.Psychology else Icons.Default.Info
         )
         is OrchestratorState.Executing -> Quad(
@@ -852,6 +894,14 @@ fun StateBanner(
         }
     }
 }
+
+/**
+ * 8.7/BS8: single source of truth for whether a task may start. With 6.1 the app is
+ * BLOCKED without a loaded model unless the user explicitly enabled the labelled
+ * degraded planner. Pure so the dashboard gating is unit-testable.
+ */
+internal fun canStartTask(modelReady: Boolean, basicFallbackExplicit: Boolean): Boolean =
+    modelReady || basicFallbackExplicit
 
 @Composable
 fun StepTimelineItem(step: TaskStepEntity) {

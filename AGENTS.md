@@ -204,4 +204,26 @@ An action the native layer cannot execute must not appear in the catalogue
 - Live progress (8.6): the dashboard shows a `now_doing_card` derived from
   `OrchestratorState` (Planning/Executing/Replanning/Paused) so the user always
   sees the current action and its reasoning.
+- Bug sweep (8.7, BS1-BS10): the previously "written but not working" seams are
+  now real or honestly gated:
+  * BS1 `SetupScreen` actually calls `EngineLoadStatusCard(app)`; keep it wired —
+    it is the only place the load/failure reason shows next to download progress.
+  * BS2 Shizuku: `OmniAgentApplication.privilegedActions` is referenced by the
+    Settings self-test (real status); the bridge refuses unless opted in AND
+    Shizuku runs. Do NOT advertise it as available by default.
+  * BS3 Wake word: `OptInWakeWordDetector` fronts the hands-free flow in
+    `AgentDashboardScreen` (armed only with opt-in + mic permission). Keep it
+    gated; never capture audio silently.
+  * BS4 Cloud fallback: configurable end to end via `SettingsScreen` ->
+    `HttpCloudPlannerProvider.saveConfiguration(endpoint, key, model)`. Still
+    OFF by default; `isEnabled()` requires the toggle AND non-blank endpoint/key.
+    There is one shared provider instance on the application (`cloudPlannerProvider`).
+  * BS5 `MAX_CONTEXT_TOKENS` stays a single source of truth (LiteRtLmRuntime).
+  * BS8 start gating: `canStartTask(modelReady, basicFallbackExplicit)` is the
+    single truth; the dashboard shows "Model required • tasks are blocked" and
+    routes to Setup instead of pretending a "Basic mode" runs.
+  * BS9 `LiteRtEngine.reasonAndPlan` is a legacy diagnostic-only path, NOT in the
+    live loop; its fixed budget/foreground are documented as such.
+  * BS10 no reachable `Unavailable*` default: the app wires real OCR/vision/
+    summarizer/cloud; the stubs are inert constructor defaults for tests only.
 
