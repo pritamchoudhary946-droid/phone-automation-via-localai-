@@ -166,6 +166,21 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
         return null
     }
 
+    /**
+     * Maps a persisted (raw) action name + params into an approved [AgentAction].
+     * Used when replaying a saved skill: returns null for an unknown tool or invalid
+     * parameters so a stored plan can never introduce a new executable surface.
+     */
+    fun mapPersistedAction(rawAction: String, params: JSONObject): AgentAction? {
+        val name = rawAction.trim().lowercase()
+        if (name.isBlank() || toolRegistry.getTool(name) == null) return null
+        return try {
+            mapAction(name, params)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun mapAction(rawAction: String, params: JSONObject): AgentAction {
         return when (rawAction) {
             ToolRegistry.TOOL_LAUNCH_APP -> {

@@ -212,6 +212,70 @@ class Phase4UpgradeTest {
         assertTrue(json.contains("launch_app"))
         assertTrue(json.contains("FOREGROUND_PACKAGE"))
     }
+
+    // --- 4.13 replay: a persisted skill round-trips back to a runnable plan ---
+
+    @Test
+    fun skillJsonRoundTripsToReplayablePlan() {
+        val plan = com.example.planning.TaskPlan(
+            goal = "search youtube",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "open youtube",
+                    action = AgentAction.OpenApp("YouTube", "com.google.android.youtube"),
+                    rawActionName = "launch_app", expectedPostcondition = "youtube foreground",
+                    verification = com.example.planning.VerificationMethod.FOREGROUND_PACKAGE
+                ),
+                com.example.planning.PlanStep(
+                    id = 2, sequence = 2, description = "type query",
+                    action = AgentAction.TypeText("network theory", null),
+                    rawActionName = "enter_text", expectedPostcondition = "query entered",
+                    verification = com.example.planning.VerificationMethod.TEXT_PRESENT
+                ),
+                com.example.planning.PlanStep(
+                    id = 3, sequence = 3, description = "open a result",
+                    action = AgentAction.OpenItem("network theory beginner"),
+                    rawActionName = "open_item", expectedPostcondition = "video opened",
+                    verification = com.example.planning.VerificationMethod.SCREEN_CHANGED
+                )
+            )
+        )
+
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+
+        assertTrue("a saved skill must be replayable", restored != null)
+        val steps = restored!!.steps
+        assertEquals(3, steps.size)
+        // The action parameters (not just the action name) survive the round trip.
+        assertEquals(AgentAction.OpenApp("YouTube", "com.google.android.youtube"), steps[0].action)
+        assertEquals(AgentAction.TypeText("network theory", null), steps[1].action)
+        assertEquals(AgentAction.OpenItem("network theory beginner"), steps[2].action)
+        assertEquals(com.example.planning.VerificationMethod.FOREGROUND_PACKAGE, steps[0].verification)
+    }
+
+    // --- 4.13 replay: unreconstructable / unsafe stored plans are refused ---
+
+    @Test
+    fun legacySkillJsonWithoutParamsIsNotReplayed() {
+        // The old format stored no `params`, only a `null` opts marker, so a targetless
+        // action cannot be replayed and the skill must be re-planned instead.
+        val legacy = """{"goal":"open youtube","fromModel":true,"steps":[
+            {"id":1,"seq":1,"desc":"open the app","action":"launch_app","verify":"FOREGROUND_PACKAGE","opts":null}
+        ]}"""
+        assertNull(com.example.planning.TaskPlanSerializer.fromJson(legacy, goalOverride = "open youtube"))
+    }
+
+    @Test
+    fun skillJsonWithUnknownActionIsRejected() {
+        val hostile = """{"goal":"x","fromModel":true,"steps":[
+            {"id":1,"seq":1,"desc":"x","action":"reboot_phone","params":{},"verify":"NONE"}
+        ]}"""
+        assertNull(com.example.planning.TaskPlanSerializer.fromJson(hostile))
+    }
 }
 
 /** Minimal in-memory [KnowledgeDao] so retrieval can be tested without Room. */
