@@ -43,7 +43,12 @@ object PlannerPromptBuilder {
         - open_search: {"query":"<optional hint>"}   (opens the app's search UI)
         - enter_text:  {"text":"<query>","targetNodeId":"<optional>"}
         - tap_element: {"targetText":"<visible label>"}  or  {"x":<int>,"y":<int>}
+        - long_press:  {"targetText":"<visible label>","durationMs":<optional int>}
         - scroll:      {"direction":"up|down|left|right"}
+        - scroll_until_found: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}
+        - read_text:   {}   (reads the visible on-screen text back to you)
+        - wait_for_text: {"targetText":"<label>","timeoutMs":<int>}
+        - open_notifications: {}   open_quick_settings: {}   open_recents: {}
         - navigate_back: {}   navigate_home: {}   wait: {"durationMs":<int>}
         - read_screen: {}     screenshot: {}
         - report_status: {"status":"success|failure","summary":"<short text>"}

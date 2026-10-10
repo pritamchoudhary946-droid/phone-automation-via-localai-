@@ -212,6 +212,25 @@ class LiteRtModelManager(
     }
 
     private suspend fun downloadOnce() = withContext(Dispatchers.IO) {
+        val partFile = getPartFile()
+        var existingBytes = if (partFile.exists()) partFile.length() else 0L
+        // A part file LONGER than the model cannot be a valid prefix; discard it and
+        // restart. A part file of exactly the expected length is a complete download
+        // that only lost the verification/finalize step (e.g. a crash before rename),
+        // so keep it and verify instead of fetching 2.59 GB again — and without
+        // demanding free space we no longer need.
+        if (existingBytes > expectedBytes) {
+            Log.w(TAG, "Discarding oversized part file (${formatBytes(existingBytes)} > ${formatBytes(expectedBytes)})")
+            partFile.delete()
+            existingBytes = 0L
+        }
+
+        if (existingBytes >= expectedBytes) {
+            _downloadState.value = ModelDownloadState.Verifying
+            finalizeVerifiedPart(partFile)
+            return@withContext
+        }
+
         val (hasEnoughStorage, availableBytes) = checkStorageAvailability()
         if (!hasEnoughStorage) {
             throw NonRetryableDownloadException(
@@ -219,13 +238,6 @@ class LiteRtModelManager(
             )
         }
         _downloadState.value = ModelDownloadState.CheckingStorage(REQUIRED_FREE_SPACE_BYTES, availableBytes)
-
-        val partFile = getPartFile()
-        var existingBytes = if (partFile.exists()) partFile.length() else 0L
-        if (existingBytes >= expectedBytes) {
-            partFile.delete()
-            existingBytes = 0L
-        }
 
         val requestBuilder = Request.Builder()
             .url(modelUrl)
@@ -309,6 +321,16 @@ class LiteRtModelManager(
         }
 
         _downloadState.value = ModelDownloadState.Verifying
+        finalizeVerifiedPart(partFile)
+    }
+
+    /**
+     * Verifies the completed `.part` file against the pinned size and SHA-256, then
+     * promotes it to the final model name and records it. Shared by the post-download
+     * path and the resume path so a crash between "download finished" and "rename"
+     * does not force a fresh 2.59 GB fetch.
+     */
+    private fun finalizeVerifiedPart(partFile: File) {
         val downloadedLength = partFile.length()
         if (downloadedLength != expectedBytes) {
             throw IOException(

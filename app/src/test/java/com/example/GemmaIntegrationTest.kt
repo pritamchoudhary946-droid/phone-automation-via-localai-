@@ -446,6 +446,43 @@ class GemmaIntegrationTest {
         }
     }
 
+    /**
+     * Bug: a part file that reached exactly the expected byte count (download
+     * finished, app died before the verify/rename step) was deleted and fetched
+     * again. It must instead be verified and finalized without any network use.
+     */
+    @Test
+    fun completePartFileIsVerifiedAndFinalizedWithoutRedownload() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val bytes = byteArrayOf(1, 2, 3, 4)
+            val manager = LiteRtModelManager(
+                context,
+                downloadClient = OkHttpClient.Builder().build(),
+                expectedBytes = bytes.size.toLong(),
+                expectedSha256 = "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+                maxTransientRetries = 0,
+                modelUrl = server.url("/model.litertlm").toString()
+            )
+            val part = File(manager.getModelFile().parentFile, "gemma-4-E2B-it.litertlm.part")
+            part.writeBytes(bytes)
+            assertTrue(part.exists())
+            assertEquals(4L, part.length())
+
+            manager.startOrResumeDownload()
+            awaitTerminal(manager)
+
+            val state = manager.downloadState.value
+            assertTrue("expected Ready, got $state", state is ModelDownloadState.Ready)
+            assertTrue(manager.getModelFile().exists())
+            assertFalse("part file should be promoted, not left behind", part.exists())
+            assertEquals("a complete part file must be finalized without any download", 0, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
     // 15. Inference init/generation failures reported honestly (covered above) and
     // engine shutdown releases the runtime.
 

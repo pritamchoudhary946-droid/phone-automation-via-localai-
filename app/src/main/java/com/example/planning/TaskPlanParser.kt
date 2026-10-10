@@ -158,6 +158,23 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             }
             ToolRegistry.TOOL_OPEN_ITEM -> AgentAction.OpenItem(params.optString("targetText", ""))
             ToolRegistry.TOOL_SCROLL -> AgentAction.Scroll(params.optString("direction", "down"))
+            ToolRegistry.TOOL_LONG_PRESS -> AgentAction.LongPress(
+                targetText = params.optString("targetText", "").ifBlank { null },
+                durationMs = params.optLong("durationMs", 700L)
+            )
+            ToolRegistry.TOOL_SCROLL_UNTIL_FOUND -> AgentAction.ScrollUntilFound(
+                targetText = params.optString("targetText", ""),
+                direction = params.optString("direction", "down"),
+                maxSwipes = params.optInt("maxSwipes", 6)
+            )
+            ToolRegistry.TOOL_READ_TEXT -> AgentAction.ReadText
+            ToolRegistry.TOOL_WAIT_FOR_TEXT -> AgentAction.WaitForText(
+                targetText = params.optString("targetText", ""),
+                timeoutMs = params.optLong("timeoutMs", 5_000L)
+            )
+            ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
+            ToolRegistry.TOOL_OPEN_QUICK_SETTINGS -> AgentAction.OpenQuickSettings
+            ToolRegistry.TOOL_OPEN_RECENTS -> AgentAction.PressRecents
             ToolRegistry.TOOL_NAVIGATE_BACK -> AgentAction.Back
             ToolRegistry.TOOL_NAVIGATE_HOME -> AgentAction.Home
             ToolRegistry.TOOL_WAIT -> AgentAction.Wait(params.optLong("durationMs", 800L))

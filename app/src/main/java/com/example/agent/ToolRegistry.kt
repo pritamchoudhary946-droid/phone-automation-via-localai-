@@ -28,6 +28,13 @@ open class ToolRegistry {
         const val TOOL_OPEN_SEARCH = "open_search"
         const val TOOL_OPEN_ITEM = "open_item"
         const val TOOL_SCROLL = "scroll"
+        const val TOOL_LONG_PRESS = "long_press"
+        const val TOOL_SCROLL_UNTIL_FOUND = "scroll_until_found"
+        const val TOOL_READ_TEXT = "read_text"
+        const val TOOL_WAIT_FOR_TEXT = "wait_for_text"
+        const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
+        const val TOOL_OPEN_QUICK_SETTINGS = "open_quick_settings"
+        const val TOOL_OPEN_RECENTS = "open_recents"
         const val TOOL_NAVIGATE_BACK = "navigate_back"
         const val TOOL_NAVIGATE_HOME = "navigate_home"
         const val TOOL_WAIT = "wait"
@@ -76,6 +83,44 @@ open class ToolRegistry {
             name = TOOL_SCROLL,
             description = "Dispatches a scroll gesture in one of four cardinal directions",
             requiredParameters = listOf("direction")
+        ),
+        TOOL_LONG_PRESS to ToolDefinition(
+            name = TOOL_LONG_PRESS,
+            description = "Presses and holds a visible control to open a context menu or start a hold gesture",
+            requiredParameters = listOf("targetText"),
+            optionalParameters = listOf("durationMs")
+        ),
+        TOOL_SCROLL_UNTIL_FOUND to ToolDefinition(
+            name = TOOL_SCROLL_UNTIL_FOUND,
+            description = "Scrolls the current list until a target label becomes visible, bounded by maxSwipes",
+            requiredParameters = listOf("targetText"),
+            optionalParameters = listOf("direction", "maxSwipes")
+        ),
+        TOOL_READ_TEXT to ToolDefinition(
+            name = TOOL_READ_TEXT,
+            description = "Reads the visible on-screen text back to the agent as a bounded digest",
+            requiredParameters = emptyList()
+        ),
+        TOOL_WAIT_FOR_TEXT to ToolDefinition(
+            name = TOOL_WAIT_FOR_TEXT,
+            description = "Waits until a target label appears on screen, bounded by timeoutMs",
+            requiredParameters = listOf("targetText"),
+            optionalParameters = listOf("timeoutMs")
+        ),
+        TOOL_OPEN_NOTIFICATIONS to ToolDefinition(
+            name = TOOL_OPEN_NOTIFICATIONS,
+            description = "Opens the notification shade via the system global action",
+            requiredParameters = emptyList()
+        ),
+        TOOL_OPEN_QUICK_SETTINGS to ToolDefinition(
+            name = TOOL_OPEN_QUICK_SETTINGS,
+            description = "Opens the quick settings panel via the system global action",
+            requiredParameters = emptyList()
+        ),
+        TOOL_OPEN_RECENTS to ToolDefinition(
+            name = TOOL_OPEN_RECENTS,
+            description = "Opens the recent-apps switcher via the system global action",
+            requiredParameters = emptyList()
         ),
         TOOL_NAVIGATE_BACK to ToolDefinition(
             name = TOOL_NAVIGATE_BACK,
@@ -159,6 +204,36 @@ open class ToolRegistry {
                     ToolValidationResult.Valid
                 }
             }
+            is AgentAction.LongPress -> {
+                if (action.targetText.isNullOrBlank()) {
+                    ToolValidationResult.Invalid("long_press requires a non-blank target label")
+                } else if (action.durationMs < 300 || action.durationMs > 5_000) {
+                    ToolValidationResult.Invalid("Long-press duration must be between 300ms and 5000ms: ${action.durationMs}")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.ScrollUntilFound -> {
+                val validDirs = setOf("up", "down")
+                when {
+                    action.targetText.isBlank() ->
+                        ToolValidationResult.Invalid("scroll_until_found requires a non-blank target label")
+                    !validDirs.contains(action.direction.lowercase()) ->
+                        ToolValidationResult.Invalid("scroll_until_found direction must be 'up' or 'down': ${action.direction}")
+                    action.maxSwipes < 1 || action.maxSwipes > 20 ->
+                        ToolValidationResult.Invalid("scroll_until_found maxSwipes must be between 1 and 20: ${action.maxSwipes}")
+                    else -> ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.WaitForText -> {
+                if (action.targetText.isBlank()) {
+                    ToolValidationResult.Invalid("wait_for_text requires a non-blank target label")
+                } else if (action.timeoutMs < 200 || action.timeoutMs > 30_000) {
+                    ToolValidationResult.Invalid("wait_for_text timeout must be between 200ms and 30000ms: ${action.timeoutMs}")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
             is AgentAction.Wait -> {
                 if (action.durationMs < 0 || action.durationMs > 30_000) {
                     ToolValidationResult.Invalid("Wait duration must be between 0ms and 30000ms: ${action.durationMs}")
@@ -190,6 +265,10 @@ open class ToolRegistry {
             is AgentAction.Back,
             is AgentAction.Home,
             is AgentAction.ReadScreen,
+            is AgentAction.ReadText,
+            is AgentAction.OpenNotifications,
+            is AgentAction.OpenQuickSettings,
+            is AgentAction.PressRecents,
             is AgentAction.Screenshot -> ToolValidationResult.Valid
         }
     }

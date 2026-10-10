@@ -149,6 +149,21 @@ class FakeDeviceAutomation(
     }
 }
 
+/**
+ * In-memory [LlmRuntime] that returns a different canned output on each successive
+ * `generate` call. Used to observe replanning: the first planning call gets one plan,
+ * the next gets another.
+ */
+class SequencedLlmRuntime(private val outputs: List<String>) : LlmRuntime by FakeLlmRuntime() {
+    private var index = 0
+
+    override suspend fun generate(prompt: String, systemInstruction: String?, maxOutputTokens: Int): String {
+        val out = outputs.getOrElse(index) { outputs.lastOrNull() ?: "" }
+        index++
+        return out
+    }
+}
+
 fun observation(
     pkg: String?,
     summary: String,

@@ -327,6 +327,20 @@ class FixesRegressionTest {
     }
 
     /**
+     * Bug: a finish summary (report_status) claiming a payment/delete/send was the one
+     * path that could complete a sensitive operation without a confirmation prompt,
+     * because risk was only evaluated for Tap/TypeText.
+     */
+    @Test
+    fun riskEvaluatorFlagsSensitiveFinishSummary() {
+        val evaluator = com.example.agent.RiskEvaluator()
+        assertTrue(evaluator.evaluate(AgentAction.FinishTask("Order placed successfully"), "").isRisky)
+        assertTrue(evaluator.evaluate(AgentAction.FinishTask("Deleted the account"), "").isRisky)
+        assertTrue(evaluator.evaluate(AgentAction.FinishTask("Send message to the team"), "").isRisky)
+        assertTrue(!evaluator.evaluate(AgentAction.FinishTask("Opened YouTube and played a video"), "").isRisky)
+    }
+
+    /**
      * Bug: a list row's text label is usually not itself clickable (its container is),
      * so a bare clickable check rejected real results. A label inside a clickable
      * container must be tappable.

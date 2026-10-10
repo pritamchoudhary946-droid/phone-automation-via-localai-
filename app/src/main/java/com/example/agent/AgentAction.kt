@@ -13,6 +13,36 @@ sealed class AgentAction {
     data class OpenSearch(val query: String? = null) : AgentAction()
     data class Scroll(val direction: String) : AgentAction() // "up", "down", "left", "right"
     /**
+     * Press and hold an observed control (long press). Some UI affordances
+     * (context menus, drag handles, "hold to record") only respond to a sustained
+     * press, which a normal [Tap] cannot trigger.
+     */
+    data class LongPress(val targetText: String?, val durationMs: Long = 700L) : AgentAction()
+    /**
+     * Scrolls the current surface until [targetText] becomes visible, bounded by
+     * [maxSwipes] so a missing label cannot scroll forever. [direction] defaults to
+     * "down"; use "up" to search back toward the top of a list.
+     */
+    data class ScrollUntilFound(
+        val targetText: String,
+        val direction: String = "down",
+        val maxSwipes: Int = 6
+    ) : AgentAction()
+    /**
+     * Reads the visible text of the current screen back to the agent loop. Unlike
+     * [ReadScreen] (which only refreshes the tree), this exposes a bounded text
+     * digest that can be summarised or acted on.
+     */
+    object ReadText : AgentAction()
+    /**
+     * Waits until [targetText] appears on screen, bounded by [timeoutMs]. Used for
+     * slow-loading surfaces where a fixed [Wait] is either too short or wasteful.
+     */
+    data class WaitForText(val targetText: String, val timeoutMs: Long = 5_000L) : AgentAction()
+    object OpenNotifications : AgentAction()
+    object OpenQuickSettings : AgentAction()
+    object PressRecents : AgentAction()
+    /**
      * Opens an observed result item (e.g. a search result) by its visible label.
      * The executor reacquires the node from a fresh observation rather than reusing
      * a stale accessibility node.
@@ -34,6 +64,13 @@ sealed class AgentAction {
             is TypeText -> "Type: \"$text\""
             is OpenSearch -> "Open Search"
             is Scroll -> "Scroll $direction"
+            is LongPress -> "Long press: '${targetText ?: "($durationMs ms)"}'"
+            is ScrollUntilFound -> "Scroll $direction until '$targetText' (max $maxSwipes)"
+            is ReadText -> "Read screen text"
+            is WaitForText -> "Wait for text '$targetText' (up to ${timeoutMs}ms)"
+            is OpenNotifications -> "Open notification shade"
+            is OpenQuickSettings -> "Open quick settings"
+            is PressRecents -> "Open recents"
             is OpenItem -> "Open Item: '$targetText'"
             is Back -> "Press Back"
             is Home -> "Press Home"
@@ -66,8 +103,12 @@ class RiskEvaluator {
         val screenLower = currentScreenContext.lowercase()
 
         when (action) {
-            is AgentAction.Tap -> {
-                val target = (action.targetText ?: "").lowercase()
+            is AgentAction.Tap, is AgentAction.LongPress -> {
+                val target = when (action) {
+                    is AgentAction.Tap -> (action.targetText ?: "").lowercase()
+                    is AgentAction.LongPress -> (action.targetText ?: "").lowercase()
+                    else -> ""
+                }
                 // Risk is judged from the element being tapped. Matching payment words
                 // against the whole screen made unrelated taps risky whenever the screen
                 // merely contained a word like "order" or "post" (e.g. a video feed or a
@@ -112,6 +153,25 @@ class RiskEvaluator {
                         isRisky = true,
                         riskType = "Sensitive Credentials",
                         warningMessage = "Attempting to type sensitive security credentials."
+                    )
+                }
+            }
+            is AgentAction.FinishTask -> {
+                val summaryLower = action.summary.lowercase()
+                // A finish summary is the model's claim that a sensitive operation
+                // succeeded. The same words that make a tap risky must not be allowed to
+                // complete silently just because they arrived via report_status.
+                val riskType = when {
+                    paymentKeywords.any { summaryLower.contains(it) } -> "Financial / Payment"
+                    deleteKeywords.any { summaryLower.contains(it) } -> "Destructive Deletion"
+                    externalSendKeywords.any { summaryLower.contains(it) } -> "External Communication"
+                    else -> null
+                }
+                if (riskType != null) {
+                    return RiskAssessment(
+                        isRisky = true,
+                        riskType = riskType,
+                        warningMessage = "The agent reported completing a sensitive ($riskType) operation; confirm before it is accepted as done."
                     )
                 }
             }
