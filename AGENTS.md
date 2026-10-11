@@ -344,6 +344,19 @@ The prompt never advertises a capability the executor cannot run.
   honestly: the audio/media controllers read the stream level / `isMusicActive()`
   back and return `AUDIO_UNCHANGED`/`MEDIA_UNCHANGED` when nothing moved. Never
   widen this to an action whose success is not independently read back.
+- `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
+  the device-state read primitive: battery level/charging, screen on/off, ringer
+  mode and connectivity live on system services (`BatteryManager`, `PowerManager`/
+  `KeyguardManager`, `AudioManager`, `ConnectivityManager`), not the accessibility
+  tree, so no screen read or UI tap can answer "how much battery do I have" /
+  "is wifi on" / "am I on silent". Like `read_notifications` it is resolved
+  *before* the a11y-service gate, carries its digest as `ActionResult.readText`,
+  and self-evidences a NONE-verified step (empty digest -> failure, never a fake
+  success). `AndroidDeviceStatusReader.format(...)` is pure and unit-tested, so
+  the planner-visible digest text is asserted without a device; an unwired reader
+  returns `STATUS_UNAVAILABLE`, never a fabricated status, and each reading is
+  fresh per call (no cache). The digest is the whole goal evidence for a
+  device-status question - do not require a screen change for it.
 - 9.1 `ProactiveEngine.Runner` is started once from `OmniAgentApplication`; it only
   *offers* (notification/TTS) and is gated by the toggle AND `BatteryGuard` (9.14).
 - 9.7 `VoiceLoop`/`VoiceLoopController` drive wake -> listen -> confirm -> execute ->

@@ -263,6 +263,7 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 transport = str(params, "transport", "command", "action").ifBlank { "toggle" }
             )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
+            ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
             ToolRegistry.TOOL_OPEN_QUICK_SETTINGS -> AgentAction.OpenQuickSettings
             ToolRegistry.TOOL_OPEN_RECENTS -> AgentAction.PressRecents

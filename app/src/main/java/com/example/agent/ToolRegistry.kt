@@ -46,6 +46,7 @@ open class ToolRegistry {
         const val TOOL_ADJUST_VOLUME = "adjust_volume"
         const val TOOL_PLAY_MEDIA = "play_media"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
+        const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
         const val TOOL_OPEN_QUICK_SETTINGS = "open_quick_settings"
         const val TOOL_OPEN_RECENTS = "open_recents"
@@ -196,6 +197,11 @@ open class ToolRegistry {
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
             description = "Reads a bounded list of recently posted notifications (title/text) for the planner",
+            requiredParameters = emptyList()
+        ),
+        TOOL_READ_DEVICE_STATUS to ToolDefinition(
+            name = TOOL_READ_DEVICE_STATUS,
+            description = "Reads the device's own status: battery level/charging, screen on/off, ringer mode and connectivity. Use for questions like 'how much battery do I have', 'is wifi on', 'am I on silent' - no screen read or tap can answer these",
             requiredParameters = emptyList()
         ),
         TOOL_OPEN_NOTIFICATIONS to ToolDefinition(
@@ -432,6 +438,7 @@ open class ToolRegistry {
             is AgentAction.ReadScreen,
             is AgentAction.ReadText,
             is AgentAction.ReadNotifications,
+            is AgentAction.ReadDeviceStatus,
             is AgentAction.OpenNotifications,
             is AgentAction.OpenQuickSettings,
             is AgentAction.PressRecents,
