@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 6,
+  "sessions_done": 7,
   "session_cap": 48,
-  "current_milestone": "9.9 opt-in enforcement: reading/summarising notifications requires the triage flag, gated end to end (executor refusal + briefing consent)",
+  "current_milestone": "main-unbreak: 9.9 notification-triage regression - an opted-in read was misreported as NO_SERVICE; ReadNotifications now resolves before the a11y-service gate",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -18,7 +18,10 @@
     "9.10 fix 2026-10-11: FloatingAgentDotService.executeDirectPhoneAction now reports the real Boolean result (\"<name> executed\" vs \"<name> nahi ho paya\") instead of a blanket success toast",
     "validation 2026-10-11: COULD NOT RUN - sandbox has no JDK/SDK (java: command not found, ANDROID_HOME unset, /opt/android-sdk and /usr/lib/jvm absent); change is small and reasoned from source, next run with a toolchain must run ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon",
     "9.9 fix 2026-10-11: notification triage was only a Settings toggle - nothing in the live path read notificationTriageEnabled. AndroidDeviceAutomation.execute now refuses AgentAction.ReadNotifications with TRIAGE_DISABLED when triageEnabled() is false, and DailyBriefingWorker requires briefingEnabled AND notificationTriageEnabled before summarising; OmniAgentApplication wires triageEnabled = { settings.notificationTriageEnabled }; regression tests readNotificationsRefusedWhenTriageOff / readNotificationsReadsDigestWhenTriageOn",
-    "9.9 merged 2026-10-11 via PR #30 (squash, branch deleted). Gradle gate still COULD NOT RUN - no JDK/SDK in sandbox."
+    "9.9 merged 2026-10-11 via PR #30 (squash, branch deleted). Gradle gate still COULD NOT RUN - no JDK/SDK in sandbox.",
+    "validation 2026-10-11 (toolchain sandbox): ran the deferred gate ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD FAILED, 1 failure / 263 tests (Phase4UpgradeTest.readNotificationsReadsDigestWhenTriageOn). The 9.9 code merged in PR #30 was broken on main.",
+    "main-unbreak 2026-10-11: AndroidDeviceAutomation.execute() returned NO_SERVICE (a11y-service gate) BEFORE reaching the ReadNotifications branch, so an opted-in triage read with no bound a11y service reported failure with method=NO_SERVICE. ReadNotifications is notification-bus backed and independent of the accessibility tree, so it is now resolved before the service gate (TRIAGE_DISABLED when off, else readNotificationDigest()); the now-dead branch was removed. Root cause: capability placed behind an unrelated service requirement.",
+    "validation 2026-10-11: ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m42s, 265 tests 0 failures 0 errors 0 skipped. main is green again."
   ],
   "in_progress": {
     "item": "",
@@ -26,18 +29,16 @@
     "note": ""
   },
   "next_items": [
-    "Run the Gradle gate in a toolchain sandbox: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (last two runs could not run it - no JDK/SDK)",
-    "9.9 follow-up: gate AgentAction.ReadNotifications in ToolRegistry.validateAction/availableActions by the live flag so the planner is not even offered it when triage is off (needs a flag-aware registry seam)",
+    "Run the full gate with assembleDebug when the milestone needs an APK: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon",
+    "9.9 follow-up: gate AgentAction.ReadNotifications in ToolRegistry.validateAction/availableActions by the live flag so the planner is not even offered it when triage is off (needs a flag-aware registry seam; would also drop read_notifications from the prompt catalogue)",
     "9.10 overlay HUD: review onDoubleTap screen readout and command-panel routing for any remaining false-success or stale-observation handling",
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-0631",
-  "open_pr": "https://github.com/pritamchoudhary946-droid/phone-automation-via-localai-/pull/30",
+  "branch": "auto/jarvis-autonomy-20261011-0731",
+  "open_pr": null,
   "risky_actions_done": [],
-  "blockers": [
-    "sandbox has no JDK/Android SDK, so unit tests and assembleDebug could not run this run; merged per section 18 auto-merge policy"
-  ],
-  "last_run_id": "internal-20261011T0631Z",
-  "last_updated": "2026-10-11T06:45:00Z"
+  "blockers": [],
+  "last_run_id": "internal-20261011T0731Z",
+  "last_updated": "2026-10-11T07:44:00Z"
 }

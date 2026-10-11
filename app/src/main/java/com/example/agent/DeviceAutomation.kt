@@ -196,14 +196,20 @@ class AndroidDeviceAutomation(
     }
 
     override suspend fun execute(action: AgentAction): ActionResult = withContext(Dispatchers.Default) {
-        // 9.9: consent before capability. Reading notifications is the smart-triage
-        // feature, so refuse honestly when it is off, regardless of the a11y service.
-        if (action is AgentAction.ReadNotifications && !triageEnabled()) {
-            return@withContext ActionResult(
-                false,
-                "TRIAGE_DISABLED",
-                "Notification triage is off. Enable it in Settings to summarise notifications."
-            )
+        // Notification triage is independent of the accessibility tree: it reads the
+        // bounded NotificationBus digest, so it is resolved before the service gate
+        // (otherwise an opted-in read would be misreported as NO_SERVICE when the a11y
+        // service happens to be down).
+        if (action is AgentAction.ReadNotifications) {
+            // 9.9: consent before capability. Refuse honestly when triage is off.
+            if (!triageEnabled()) {
+                return@withContext ActionResult(
+                    false,
+                    "TRIAGE_DISABLED",
+                    "Notification triage is off. Enable it in Settings to summarise notifications."
+                )
+            }
+            return@withContext readNotificationDigest()
         }
         val service = serviceProvider()
             ?: return@withContext ActionResult(false, "NO_SERVICE", "Accessibility Service unavailable")
@@ -355,20 +361,25 @@ class AndroidDeviceAutomation(
                     message = if (text.isNotBlank()) "Extracted ${text.length} chars of page content" else "No page content found"
                 )
             }
-            is AgentAction.ReadNotifications -> {
-                val items = notificationSource.recent(NotificationSource.DEFAULT_LIMIT)
-                ActionResult(
-                    success = items.isNotEmpty(),
-                    method = "READ_NOTIFICATIONS",
-                    message = if (items.isEmpty()) {
-                        "No recent notifications available (grant notification access to enable this)"
-                    } else {
-                        items.joinToString(" | ") { "${it.packageName}: ${it.title} — ${it.text}".take(120) }
-                    }
-                )
-            }
             else -> ActionResult(false, "UNKNOWN", "Unsupported action for execution layer")
         }
+    }
+
+    /**
+     * 9.9: reads the bounded, on-device notification digest. Kept free of the a11y
+     * service so triage works (and is testable) without a bound accessibility tree.
+     */
+    private fun readNotificationDigest(): ActionResult {
+        val items = notificationSource.recent(NotificationSource.DEFAULT_LIMIT)
+        return ActionResult(
+            success = items.isNotEmpty(),
+            method = "READ_NOTIFICATIONS",
+            message = if (items.isEmpty()) {
+                "No recent notifications available (grant notification access to enable this)"
+            } else {
+                items.joinToString(" | ") { "${it.packageName}: ${it.title} — ${it.text}".take(120) }
+            }
+        )
     }
 
     /**

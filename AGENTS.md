@@ -124,11 +124,16 @@ An action the native layer cannot execute must not appear in the catalogue
   `TaskPlanParser.mapAction` must all know it.
 - 9.9 opt-in is enforced, not just displayed: `AndroidDeviceAutomation` takes a
   `triageEnabled: () -> Boolean` (live supplier, default `{ false }`) and refuses
-  `AgentAction.ReadNotifications` with `TRIAGE_DISABLED` when it is off, before
-  touching the a11y service; `DailyBriefingWorker` requires `briefingEnabled`
-  AND `notificationTriageEnabled`; `OmniAgentApplication` wires
+  `AgentAction.ReadNotifications` with `TRIAGE_DISABLED` when it is off;
+  `DailyBriefingWorker` requires `briefingEnabled` AND
+  `notificationTriageEnabled`; `OmniAgentApplication` wires
   `triageEnabled = { settings.notificationTriageEnabled }`. Never read the user's
   notifications from a default-off capability.
+- `ReadNotifications` is notification-bus backed and must NOT sit behind the
+  accessibility-service gate: `AndroidDeviceAutomation.execute` resolves it (consent
+  check, then `readNotificationDigest()`) *before* `serviceProvider()`, so an
+  opted-in read works without a bound a11y service and is never misreported as
+  `NO_SERVICE`. Keep the digest helper service-free.
 
 ## Jarvis Phase 5 autonomy & self-healing (do not regress)
 - The execution loop replaces "retry the same action N times then fail" with a
