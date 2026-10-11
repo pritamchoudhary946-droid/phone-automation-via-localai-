@@ -47,8 +47,9 @@ Notes:
 digest), `WaitForText` (bounded wait), `OpenNotifications`, `OpenQuickSettings`,
 `PressRecents`, `Submit` (press the send/search/enter affordance),
 `OpenUrl`/`DeepLink` (external navigation), `Drag`, `CopyText`/`PasteText`,
-`ReadPageContent` (UI-tree digest), and the in-loop web tools `WebSearch` /
-`ReadUrl`. When adding an action you must update, together:
+`ClearText` (empty the focused/named field via `ACTION_SET_TEXT ""` before
+retyping), `ReadPageContent` (UI-tree digest), and the in-loop web tools
+`WebSearch` / `ReadUrl`. When adding an action you must update, together:
 1. `AgentAction` (+ `getDisplayName`, and `RiskEvaluator` if it can be Risky),
 2. `ToolRegistry` (const, `ToolDefinition`, `validateAction`),
 3. `TaskPlanParser` (tool name -> action mapping),

@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 12,
+  "sessions_done": 13,
   "session_cap": 48,
-  "current_milestone": "Capability: find_element (bounded scroll-to-find-and-tap) - the general 'reveal an off-screen item then press it' primitive, plus TaskPlanSerializer.toParams for ScrollUntilFound so a learned scroll skill replays with its real direction/budget",
+  "current_milestone": "Capability: clear_text (empty the focused/named field before retyping) - the general 'replace stale/default field text' primitive, wired across every action-vocabulary seam with parser/validation/fast-path/prompt/replay regression tests",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -38,7 +38,11 @@
     "capability 2026-10-11: DeviceAutomation refactored the scroll loop into a shared revealByScrolling() used by both executeScrollUntilFound and executeFindElement; executeFindElement taps only after a fresh observation and verifies the tap against the screen fingerprint at tap time (a dispatched gesture that leaves the screen identical is reported as failure, not success).",
     "fix 2026-10-11: TaskPlanSerializer.toParams had no ScrollUntilFound branch, so a learned skill's direction/maxSwipes were silently dropped on replay (a scroll-UP skill would replay scrolling DOWN with the default 6 swipes). Added the branch; regression test Phase4UpgradeTest.scrollUntilFoundSkillKeepsDirectionAndBudgetOnReplay.",
     "AGENTS.md 2026-10-11: action-vocabulary checklist now includes step 7 TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor) - the omitted seam that caused the ScrollUntilFound replay defect.",
-    "validation 2026-10-11 (this run, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m8s, 269 tests 0 failures 0 errors 0 skipped (19 suites)."
+    "validation 2026-10-11 (this run, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m8s, 269 tests 0 failures 0 errors 0 skipped (19 suites).",
+    "capability 2026-10-11: new AgentAction.ClearText + tool clear_text ('empty the focused or named editable field'). A field holding a default/previous value cannot be overwritten by appending, so this is the general 'start typing fresh' primitive (e.g. correcting a mistyped query). Implemented across all action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (const, ToolDefinition, validateAction), TaskPlanParser.mapAction, HybridStepExecutor.decide (deterministic fast path only when an editable field is visible, else ModelReason), PlannerPromptBuilder.ACTION_CATALOG, PlanVariables.substitute, AndroidDeviceAutomation.execute (service.performTextInput(\"\")), and TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor).",
+    "capability 2026-10-11: ClearText is verified like a normal entry - ACTION_SET_TEXT \"\" must read back empty, so a clear that did not take is reported as failure, not success.",
+    "regression tests 2026-10-11 (CapabilityUpgradeTest): parserMapsClearTextToTheClearAction (with and without a target), validationAcceptsClearTextWithOrWithoutATarget, fastPathClearsOnlyWhenAnEditableFieldIsExposed (Execute with field / ModelReason without), promptAdvertisesClearText, clearTextSkillKeepsItsTargetOnReplay (serializer round-trip keeps targetText).",
+    "validation 2026-10-11 (this run, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m15s, 274 tests 0 failures 0 errors 0 skipped (269 baseline + 5 new ClearText tests)."
   ],
   "in_progress": {
     "item": "",
@@ -53,12 +57,12 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-1244",
+  "branch": "auto/jarvis-autonomy-20261011-1440",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261011T1244Z",
-  "last_updated": "2026-10-11T12:50:00Z",
+  "last_run_id": "internal-20261011T1440Z",
+  "last_updated": "2026-10-11T14:45:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,
