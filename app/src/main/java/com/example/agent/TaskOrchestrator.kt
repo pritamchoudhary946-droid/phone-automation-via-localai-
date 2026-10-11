@@ -958,7 +958,11 @@ class TaskOrchestrator(
         return when (step.action) {
             is AgentAction.WebSearch, is AgentAction.ReadUrl,
             is AgentAction.ReadText, is AgentAction.ReadPageContent,
-            is AgentAction.ReadNotifications -> true
+            is AgentAction.ReadNotifications,
+            // Device-control actions act on a system service no screen reflects; a
+            // completed, honestly-read-back volume/media command is its own evidence,
+            // exactly like the read actions above.
+            is AgentAction.AdjustVolume, is AgentAction.PlayMedia -> true
             else -> false
         }
     }
@@ -1116,6 +1120,29 @@ class TaskOrchestrator(
             } else {
                 PostconditionVerdict(false, "Read action returned no visible text to capture")
             }
+        }
+        // Device-control actions are their own evidence. A volume change, a media
+        // transport command and a notification read all act on a system service that
+        // no accessibility screen reflects, so their default NONE verification can
+        // never be satisfied from a fresh observation - the step would be retried
+        // forever and never complete, exactly the 9.4 read defect. The executor has
+        // already reported success honestly (it reads the stream level / playback
+        // state back, and returns failure when nothing moved), so a successful result
+        // is accepted as the step's evidence. This mirrors selfEvidencingToolSatisfied,
+        // which already counts a completed read_notifications as goal evidence.
+        if (step.verification == VerificationMethod.NONE &&
+            (action is AgentAction.AdjustVolume ||
+                action is AgentAction.PlayMedia ||
+                action is AgentAction.ReadNotifications)
+        ) {
+            val detail = if (action is AgentAction.ReadNotifications) {
+                // The digest is the result's message; the executor caps it and never
+                // persists it.
+                "Read notifications (${result.message.length} chars)"
+            } else {
+                action.getDisplayName()
+            }
+            return PostconditionVerdict(true, "$detail completed: ${result.message}")
         }
         if (action is AgentAction.OpenSearch) {
             // A text-entry step that was re-routed into opening the search interface

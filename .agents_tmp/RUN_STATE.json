@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 17,
+  "sessions_done": 18,
   "session_cap": 48,
-  "current_milestone": "PLAN 9.4 cross-app data passing (task variables/slots): make the dead variable-capture feature live so a value read in one app is usable, via {{name}}, by a later step in another app.",
+  "current_milestone": "Make service-backed device-control actions (adjust_volume, play_media, read_notifications) genuinely completable: their default NONE verification was unsatisfiable from a fresh observation, so a planned 'pause the music'/'turn the volume up'/'read my notifications' step could never complete and the run always failed.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -65,7 +65,11 @@
     "9.4 security 2026-10-11 (session 17): PlanVariableStore.set now refuses to store a value that looks sensitive (13-19 digit payment-card shape, or a labelled otp/pin/password/cvv/secret line) via the pure, unit-tested looksSensitive(...) guard, so a captured secret never reaches a later step or the plan prompt. Deliberately conservative: a bare price/quantity/year digit run is NOT refused.",
     "regression tests 2026-10-11 (session 17, CapabilityUpgradeTest +4): capturedReadTextReachesALaterStepInAnotherApp (end-to-end cross-app {{price}} -> enter_text), readTextStepCompletesFromItsOwnCapturedTextWithoutAScreenChange, failedReadDoesNotSatisfyACaptureStepAndTheRunFailsHonestly, variableStoreTracksSourceFreshnessAndRefusesSecrets.",
     "fix 2026-10-11 (session 17): the two new cross-app tests originally used the non-catalog action name 'type_text' (the real tool is enter_text, ToolRegistry.TOOL_ENTER_TEXT), so TaskPlanParser correctly rejected the plan ('Unknown action type_text is not in the approved catalog') and the plan never executed - a TEST bug, not a production bug. Corrected to enter_text.",
-    "validation 2026-10-11 (session 17, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 59s, 293 tests 0 failures 0 errors 0 skipped (19 suites; 289 baseline + 4 new 9.4 tests)."
+    "validation 2026-10-11 (session 17, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 59s, 293 tests 0 failures 0 errors 0 skipped (19 suites; 289 baseline + 4 new 9.4 tests).",
+    "capability/fix 2026-10-11 (session 18): adjust_volume, play_media and read_notifications were each registered, validated, parsed, fast-pathed, prompt-advertised AND given a real executor branch - yet a step using them could never COMPLETE. Root cause: their default verification is NONE, and TaskOrchestrator.verifyAction had a self-evidencing carve-out only for ReadText/ReadPageContent (the 9.4 fix), so a NONE-verified adjust_volume/play_media/read_notifications step was retried until maxRetries and failed - and the goal gate (selfEvidencingToolSatisfied) had no branch for them either. They were 'written but not working' in the same class the 9.4 read defect belonged to. verifyAction now accepts a successful result for these three as the step evidence, and selfEvidencingToolSatisfied counts a completed one as goal evidence.",
+    "safety 2026-10-11 (session 18): the self-evidencing carve-out only accepts a genuinely successful ActionResult (the `!result.success` guard runs first), so it is safe only because the executor reports success honestly - AndroidAudioController/AndroidMediaController read the stream level / isMusicActive() back and return AUDIO_UNCHANGED/MEDIA_UNCHANGED when nothing moved. It must never be widened to an action whose success is not independently read back. Recorded in AGENTS.md.",
+    "regression tests 2026-10-11 (session 18, CapabilityUpgradeTest +3): playMediaStepCompletesFromItsOwnHonestResult (play_media NONE step -> Completed), adjustVolumeStepCompletesFromItsOwnHonestResult (adjust_volume NONE step -> Completed), playMediaFailureIsNotMaskedByTheSelfEvidencingRule (MEDIA_UNCHANGED failure -> Failed, never a fake success). Both positive tests FAILED before the verifyAction+goal-gate change and PASS after.",
+    "validation 2026-10-11 (session 18, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m40s, 295 tests 0 failures 0 errors 0 skipped (292 baseline + 3 new)."
   ],
   "in_progress": {
     "item": "",
@@ -77,14 +81,15 @@
     "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4. Reconcile the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2).",
     "5.2 (low-risk): FailureClassifier.burnedByWrongPackage is only set when a WRONG_PACKAGE failure precedes TARGET_NOT_FOUND. No change made.",
     "Continue item 4A mandatory full bug sweep on the live recovery path.",
-    "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
+    "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session.",
+    "Add an orchestration-level read_notifications completion test (the 9.9 gate is unit-tested at the executor level; a step-level test needs a triageEnabled=true orchestrator, not wired in the shared test helper)."
   ],
-  "branch": "auto/jarvis-autonomy-20261011-1730",
+  "branch": "auto/jarvis-autonomy-20261011-2031",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261011T1730Z",
-  "last_updated": "2026-10-11T17:33:00Z",
+  "last_run_id": "internal-20261011T2031Z",
+  "last_updated": "2026-10-11T20:38:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,
