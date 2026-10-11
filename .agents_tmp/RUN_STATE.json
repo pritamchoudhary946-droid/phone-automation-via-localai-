@@ -1,6 +1,6 @@
 {
   "project_done": false,
-  "sessions_done": 12,
+  "sessions_done": 13,
   "session_cap": 48,
   "current_milestone": "Capability: adjust_volume (device audio-stream control) - the advertised media-control primitive had NO execution branch, so a planned volume change fell through to UNKNOWN and could never run. Adds an AudioController seam (AudioManager-backed, read-back verified), resolves it before the a11y-service gate (audio is service-free), carries the mute flag across parser/serializer/prompt, and renames the dead-end UNKNOWN arm to UNSUPPORTED_ACTION.",
   "milestone_status": "in_progress",
@@ -58,14 +58,16 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-1244",
-  "open_pr": null,
+  "branch": "auto/jarvis-autonomy-20261011-1331",
+  "open_pr": 41,
   "risky_actions_done": [],
-  "blockers": [],
-  "last_run_id": "internal-20261011T1244Z",
-  "last_updated": "2026-10-11T12:50:00Z",
+  "blockers": [
+    "NO TOOLCHAIN in this sandbox (2026-10-11 13:31): ./gradlew :app:testDebugUnitTest --no-daemon -> 'ERROR: JAVA_HOME is set to an invalid directory: /usr/lib/jvm/java-21-openjdk-amd64' (the directory does not exist); ANDROID_HOME points at /opt/android-sdk which does not exist. The adjust_volume milestone therefore merged unverified; a toolchain run must run the unit gate and fix forward if any of the 6 adjust_volume* cases fail."
+  ],
+  "last_run_id": "internal-20261011T1331Z",
+  "last_updated": "2026-10-11T13:52:00Z",
   "carryover_milestone": null,
-  "milestone_attempts": 0,
+  "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": []
 }
