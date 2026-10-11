@@ -21,7 +21,9 @@
     "9.9 merged 2026-10-11 via PR #30 (squash, branch deleted). Gradle gate still COULD NOT RUN - no JDK/SDK in sandbox.",
     "validation 2026-10-11 (toolchain sandbox): ran the deferred gate ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD FAILED, 1 failure / 263 tests (Phase4UpgradeTest.readNotificationsReadsDigestWhenTriageOn). The 9.9 code merged in PR #30 was broken on main.",
     "main-unbreak 2026-10-11: AndroidDeviceAutomation.execute() returned NO_SERVICE (a11y-service gate) BEFORE reaching the ReadNotifications branch, so an opted-in triage read with no bound a11y service reported failure with method=NO_SERVICE. ReadNotifications is notification-bus backed and independent of the accessibility tree, so it is now resolved before the service gate (TRIAGE_DISABLED when off, else readNotificationDigest()); the now-dead branch was removed. Root cause: capability placed behind an unrelated service requirement.",
-    "validation 2026-10-11: ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m42s, 265 tests 0 failures 0 errors 0 skipped. main is green again."
+    "validation 2026-10-11: ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m42s, 265 tests 0 failures 0 errors 0 skipped. main is green again.",
+    "main-unbreak merged 2026-10-11 via PR #32 (squash, branch auto/jarvis-autonomy-20261011-0731 deleted). Merge commit 240b839 on main.",
+    "9.9 invariant recorded in AGENTS.md: ReadNotifications is notification-bus backed and must be resolved before the a11y-service gate (TRIAGE_DISABLED when off, else readNotificationDigest); the digest helper stays service-free."
   ],
   "in_progress": {
     "item": "",
@@ -35,7 +37,7 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-0731",
+  "branch": null,
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
