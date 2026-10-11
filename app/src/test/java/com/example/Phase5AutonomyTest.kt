@@ -197,6 +197,18 @@ class Phase5AutonomyTest {
         assertFalse(status.isStuck)
     }
 
+    @Test
+    fun stuckTapOnFrozenScreenSuggestsScrollNotBack() {
+        // rawActionName is the lowercase catalog tool name ("tap_element"), never the
+        // capitalised display name ("Tap: ..."). A case-sensitive "Tap" check never
+        // matched, so a stuck tap was misrouted to PRESS_BACK instead of scroll-to-find.
+        val detector = StuckLoopDetector()
+        repeat(2) { detector.recordStep("frozen", "tap_element") }
+        val status = detector.recordStep("frozen", "tap_element")
+        assertTrue(status.isStuck)
+        assertEquals(RecoveryStrategy.SCROLL_TO_DISCOVER, status.suggestedRecovery)
+    }
+
     // --- 5.9 Episodic lessons ---------------------------------------------------
 
     @Test
