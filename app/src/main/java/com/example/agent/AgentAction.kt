@@ -85,6 +85,13 @@ sealed class AgentAction {
         val maxSwipes: Int = 6
     ) : AgentAction()
     /**
+     * Clears the focused (or named) editable field to an empty value. A field that
+     * already contains a default/previous value cannot be overwritten by appending,
+     * so this is the general "start typing fresh" primitive (e.g. correcting a
+     * mistyped query before re-entering it).
+     */
+    data class ClearText(val targetText: String? = null) : AgentAction()
+    /**
      * Reads the visible text of the current screen back to the agent loop. Unlike
      * [ReadScreen] (which only refreshes the tree), this exposes a bounded text
      * digest that can be summarised or acted on.
@@ -146,6 +153,7 @@ sealed class AgentAction {
             is LongPress -> "Long press: '${targetText ?: "($durationMs ms)"}'"
             is ScrollUntilFound -> "Scroll $direction until '$targetText' (max $maxSwipes)"
             is FindElement -> "Find and tap '$targetText' ($direction, max $maxSwipes swipes)"
+            is ClearText -> if (targetText != null) "Clear text in '$targetText'" else "Clear focused text"
             is ReadText -> "Read screen text"
             is WaitForText -> "Wait for text '$targetText' (up to ${timeoutMs}ms)"
             is AdjustVolume -> when {

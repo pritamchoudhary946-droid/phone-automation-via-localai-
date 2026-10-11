@@ -358,6 +358,94 @@ class CapabilityUpgradeTest {
         assertTrue("a saved volume skill must be replayable", restored != null)
         assertEquals(AgentAction.AdjustVolume("ring", 0, mute = true), restored!!.steps[0].action)
     }
+    // --- clear_text: the "empty the field before retyping" primitive ---
+
+    @Test
+    fun parserMapsClearTextToTheClearAction() {
+        val parser = TaskPlanParser()
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Empty the search box","action":"clear_text","params":{"targetText":"Search"},"expect":"empty","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Empty the focused field","action":"clear_text","params":{},"expect":"empty","verify":"NONE"}
+        ]}
+        """.trimIndent()
+
+        val result = parser.parse(json, "clear the query")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(2, steps.size)
+        assertEquals(AgentAction.ClearText("Search"), steps[0].action)
+        // A missing target label is valid: it means "clear whichever field is focused".
+        assertEquals(AgentAction.ClearText(null), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsClearTextWithOrWithoutATarget() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.ClearText()) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.ClearText("Search")) is ToolValidationResult.Valid)
+    }
+
+    @Test
+    fun fastPathClearsOnlyWhenAnEditableFieldIsExposed() {
+        val executor = HybridStepExecutor(AppDirectory(context))
+        val step = planStep(1, AgentAction.ClearText(null), "clear_text")
+
+        // A visible editable field: the clear is deterministic (no model call needed).
+        val withField = executor.decide(listOf(step), 0, observation("com.android.settings", "Search", 3, editable = true), nudgeUsed = false)
+        assertTrue("expected a deterministic Execute, got $withField", withField is FastPathDecision.Execute)
+
+        // No editable field anywhere: defer to the model rather than dispatch a clear
+        // that cannot target anything.
+        val withoutField = executor.decide(listOf(step), 0, observation("com.android.settings", "Settings list", 4), nudgeUsed = false)
+        assertTrue("expected ModelReason, got $withoutField", withoutField is FastPathDecision.ModelReason)
+    }
+
+    @Test
+    fun promptAdvertisesClearText() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue("advertised actions are missing ${ToolRegistry.TOOL_CLEAR_TEXT}", actions.contains(ToolRegistry.TOOL_CLEAR_TEXT))
+
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "clear the search box",
+                desiredOutcome = "field is empty",
+                foregroundPackage = "com.android.settings",
+                screenSummary = "Search",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing clear_text", prompt.contains("clear_text"))
+    }
+
+    @Test
+    fun clearTextSkillKeepsItsTargetOnReplay() {
+        // A learned skill that clears a named field must not replay as "clear focused":
+        // the serializer has to persist targetText, not drop it.
+        val plan = com.example.planning.TaskPlan(
+            goal = "empty the search box",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "clear the Search box",
+                    action = AgentAction.ClearText("Search"),
+                    rawActionName = "clear_text", expectedPostcondition = "Search is empty",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+
+        assertTrue("a saved clear-text skill must be replayable", restored != null)
+        assertEquals(AgentAction.ClearText("Search"), restored!!.steps[0].action)
+    }
 
     // --- Helpers ---
 

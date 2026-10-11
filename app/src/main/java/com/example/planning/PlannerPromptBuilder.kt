@@ -43,6 +43,7 @@ object PlannerPromptBuilder {
         - launch_app:  {"appQuery":"<app name>","packageName":"<optional>"}
         - open_search: {"query":"<optional hint>"}   (opens the app's search UI)
         - enter_text:  {"text":"<query>","targetNodeId":"<optional>"}
+        - clear_text:  {"targetText":"<optional label>"}   (empty the focused/named field before retyping)
         - submit:      {"targetText":"<optional send control label>"}  (press Enter/Send)
         - open_url:    {"url":"https://<host>/<path>"}   (open in the browser)
         - deep_link:   {"uri":"spotify:artist:... or app://..."}

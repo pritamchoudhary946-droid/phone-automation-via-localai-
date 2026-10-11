@@ -25,6 +25,7 @@ open class ToolRegistry {
         const val TOOL_READ_SCREEN = "read_screen"
         const val TOOL_TAP_ELEMENT = "tap_element"
         const val TOOL_ENTER_TEXT = "enter_text"
+        const val TOOL_CLEAR_TEXT = "clear_text"
         const val TOOL_SUBMIT = "submit"
         const val TOOL_OPEN_URL = "open_url"
         const val TOOL_COPY_TEXT = "copy_text"
@@ -78,6 +79,12 @@ open class ToolRegistry {
             description = "Injects text into an editable focused input field via ACTION_SET_TEXT",
             requiredParameters = listOf("text"),
             optionalParameters = listOf("targetNodeId")
+        ),
+        TOOL_CLEAR_TEXT to ToolDefinition(
+            name = TOOL_CLEAR_TEXT,
+            description = "Clears the focused (or named) editable field to empty via ACTION_SET_TEXT, so stale/default text can be replaced",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("targetText")
         ),
         TOOL_SUBMIT to ToolDefinition(
             name = TOOL_SUBMIT,
@@ -265,6 +272,7 @@ open class ToolRegistry {
                     ToolValidationResult.Valid
                 }
             }
+            is AgentAction.ClearText -> ToolValidationResult.Valid
             is AgentAction.Submit -> ToolValidationResult.Valid
             is AgentAction.OpenUrl -> {
                 if (action.url.isBlank()) {

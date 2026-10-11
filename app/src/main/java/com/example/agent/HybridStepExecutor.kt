@@ -115,6 +115,14 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 }
             }
 
+            is AgentAction.ClearText -> {
+                if (editableFieldVisible(observation)) {
+                    FastPathDecision.Execute(action, "deterministic clear of the focused field")
+                } else {
+                    FastPathDecision.ModelReason("no editable field is exposed to clear")
+                }
+            }
+
             is AgentAction.ReadPageContent -> FastPathDecision.Execute(
                 action,
                 "deterministic page-content extraction"
