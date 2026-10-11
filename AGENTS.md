@@ -152,6 +152,14 @@ The prompt never advertises a capability the executor cannot run.
   `notificationTriageEnabled`; `OmniAgentApplication` wires
   `triageEnabled = { settings.notificationTriageEnabled }`. Never read the user's
   notifications from a default-off capability.
+- 9.9 opt-in also gates the *prompt*: `PlannerPromptBuilder.availableActions(registry,
+  notificationTriageEnabled)` withholds `read_notifications` from the advertised tool
+  list, and `actionCatalog(enabled)` withholds its schema line from the planning
+  prompt, while the capability is off. The flag must be a live `() -> Boolean` read per
+  call (AgentPlanner reads it in `availableToolNames()`), never captured once, so a
+  Settings toggle flip is honoured on the next prompt. Both new params default to the
+  safe/OFF value; keep it that way so a caller that forgets the flag never advertises an
+  action the executor refuses.
 - `ReadNotifications` is notification-bus backed and must NOT sit behind the
   accessibility-service gate: `AndroidDeviceAutomation.execute` resolves it (consent
   check, then `readNotificationDigest()`) *before* `serviceProvider()`, so an

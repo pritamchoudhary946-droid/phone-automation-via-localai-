@@ -37,37 +37,54 @@ object PlannerPromptBuilder {
         - end a plan with report_status only when the goal is fully achieved.
     """.trimIndent()
 
-    /** Compact parameter guide so the model emits valid params instead of guessing. */
-    private val ACTION_CATALOG = """
-        Action parameters:
-        - launch_app:  {"appQuery":"<app name>","packageName":"<optional>"}
-        - open_search: {"query":"<optional hint>"}   (opens the app's search UI)
-        - enter_text:  {"text":"<query>","targetNodeId":"<optional>"}
-        - clear_text:  {"targetText":"<optional label>"}   (empty the focused/named field before retyping)
-        - submit:      {"targetText":"<optional send control label>"}  (press Enter/Send)
-        - open_url:    {"url":"https://<host>/<path>"}   (open in the browser)
-        - deep_link:   {"uri":"spotify:artist:... or app://..."}
-        - tap_element: {"targetText":"<visible label>"}  or  {"x":<int>,"y":<int>}
-        - long_press:  {"targetText":"<visible label>","durationMs":<optional int>}
-        - drag:        {"fromText":"<label>","toText":"<label>"}
-        - copy_text:   {"targetText":"<optional label>"}   paste_text: {"targetText":"<optional>"}
-        - scroll:      {"direction":"up|down|left|right"}
-        - scroll_until_found: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}
-        - find_element: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}   (scroll to a label if needed, then tap it)
-        - read_text:   {}   (reads the visible on-screen text back to you)
-        - read_page_content: {}   (extracts the visible page/article text)
-        - wait_for_text: {"targetText":"<label>","timeoutMs":<int>}
-        - adjust_volume: {"stream":"media|ring|alarm|notification|call","steps":<int>,"mute":<optional bool>}   (steps: +raises, -lowers; mute=true silences the stream; one step is one hardware volume press)
-        - play_media: {"transport":"play|pause|toggle|stop|next|previous"}   (controls the active media/song: toggle=play/pause; use for "pause the music" / "next song" / "stop playback")
-        - read_notifications: {}   (reads recent on-device notifications)
-        - web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}
-        - open_notifications: {}   open_quick_settings: {}   open_recents: {}
-        - navigate_back: {}   navigate_home: {}   wait: {"durationMs":<int>}
-        - read_screen: {}     screenshot: {}
-        - report_status: {"status":"success|failure","summary":"<short text>"}
-    """.trimIndent()
+    /**
+     * Compact parameter guide so the model emits valid params instead of guessing.
+     * Kept as individual lines so the opt-in `read_notifications` schema can be
+     * withheld from the catalogue when notification triage is disabled — advertising
+     * it would invite a plan the executor then rejects.
+     */
+    private val ACTION_CATALOG_LINES = listOf(
+        "Action parameters:",
+        """- launch_app:  {"appQuery":"<app name>","packageName":"<optional>"}""",
+        """- open_search: {"query":"<optional hint>"}   (opens the app's search UI)""",
+        """- enter_text:  {"text":"<query>","targetNodeId":"<optional>"}""",
+        """- clear_text:  {"targetText":"<optional label>"}   (empty the focused/named field before retyping)""",
+        """- submit:      {"targetText":"<optional send control label>"}  (press Enter/Send)""",
+        """- open_url:    {"url":"https://<host>/<path>"}   (open in the browser)""",
+        """- deep_link:   {"uri":"spotify:artist:... or app://..."}""",
+        """- tap_element: {"targetText":"<visible label>"}  or  {"x":<int>,"y":<int>}""",
+        """- long_press:  {"targetText":"<visible label>","durationMs":<optional int>}""",
+        """- drag:        {"fromText":"<label>","toText":"<label>"}""",
+        """- copy_text:   {"targetText":"<optional label>"}   paste_text: {"targetText":"<optional>"}""",
+        """- scroll:      {"direction":"up|down|left|right"}""",
+        """- scroll_until_found: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}""",
+        """- find_element: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}   (scroll to a label if needed, then tap it)""",
+        """- read_text:   {}   (reads the visible on-screen text back to you)""",
+        """- read_page_content: {}   (extracts the visible page/article text)""",
+        """- wait_for_text: {"targetText":"<label>","timeoutMs":<int>}""",
+        """- adjust_volume: {"stream":"media|ring|alarm|notification|call","steps":<int>,"mute":<optional bool>}   (steps: +raises, -lowers; mute=true silences the stream; one step is one hardware volume press)""",
+        """- play_media: {"transport":"play|pause|toggle|stop|next|previous"}   (controls the active media/song: toggle=play/pause; use for "pause the music" / "next song" / "stop playback")"""
+        """- read_notifications: {}   (reads recent on-device notifications)""",
+        """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",
+        """- open_notifications: {}   open_quick_settings: {}   open_recents: {}""",
+        """- navigate_back: {}   navigate_home: {}   wait: {"durationMs":<int>}""",
+        """- read_screen: {}     screenshot: {}""",
+        """- report_status: {"status":"success|failure","summary":"<short text>"}"""
+    )
 
-    fun buildPlanningPrompt(request: PlanningRequest): String = buildString {
+    /**
+     * The parameter guide shown to the model. The `read_notifications` line is
+     * withheld when the opt-in triage capability is off, matching [availableActions].
+     */
+    private fun actionCatalog(notificationTriageEnabled: Boolean): String =
+        ACTION_CATALOG_LINES
+            .filter { notificationTriageEnabled || !it.startsWith("- ${ToolRegistry.TOOL_READ_NOTIFICATIONS}:") }
+            .joinToString("\n")
+
+    fun buildPlanningPrompt(
+        request: PlanningRequest,
+        notificationTriageEnabled: Boolean = false
+    ): String = buildString {
         appendLine("Task: produce the ordered subgoals needed to satisfy the user command.")
         appendLine("User command: \"${request.userCommand}\"")
         appendLine("Desired final outcome: ${request.desiredOutcome}")
@@ -97,7 +114,7 @@ object PlannerPromptBuilder {
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
         appendLine()
         appendLine(SCHEMA_HINT)
-        appendLine(ACTION_CATALOG)
+        appendLine(actionCatalog(notificationTriageEnabled))
     }
 
     fun buildStepDecisionPrompt(request: StepDecisionRequest): String = buildString {
@@ -179,14 +196,25 @@ object PlannerPromptBuilder {
         appendLine("Reply with ONLY this JSON: {\"thought\":\"...\",\"action\":\"<allowed action>\",\"params\":{...}}")
     }
 
-    /** Short catalogue handed to the model. Never exposes free-form Android APIs. */
-    fun availableActions(registry: ToolRegistry): List<String> =
+    /**
+     * Short catalogue handed to the model. Never exposes free-form Android APIs.
+     *
+     * The opt-in `read_notifications` tool is only advertised when notification
+     * triage is enabled: with it off the executor refuses the action, so offering
+     * it would let the model emit a step that is always rejected. The filter is a
+     * live boolean so a toggle flip is honoured on the next prompt.
+     */
+    fun availableActions(
+        registry: ToolRegistry,
+        notificationTriageEnabled: Boolean = false
+    ): List<String> =
         registry.getRegisteredTools()
             .map { it.name }
             // ask_confirmation cannot be executed by the native layer (the loop injects
             // its own risk prompt). Exposing it would let the model emit a step that is
             // always rejected, burning attempts and step budget.
             .filter { it != ToolRegistry.TOOL_ASK_CONFIRMATION }
+            .filter { notificationTriageEnabled || it != ToolRegistry.TOOL_READ_NOTIFICATIONS }
 
     /**
      * Neutralises instruction-like content in untrusted, app-controlled text before
