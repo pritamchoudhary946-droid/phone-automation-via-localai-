@@ -5,7 +5,10 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.agent.ActionResult
 import com.example.agent.AgentAction
 import com.example.agent.AndroidDeviceAutomation
+import com.example.agent.AndroidDeviceStatusReader
 import com.example.agent.AppDirectory
+import com.example.agent.DeviceStatusReader
+import com.example.agent.DeviceStatusResult
 import com.example.agent.AudioAdjustResult
 import com.example.agent.AudioController
 import com.example.agent.AudioStream
@@ -780,7 +783,141 @@ class CapabilityUpgradeTest {
         assertTrue("a failed media command must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- read_device_status: a device-status read is a capability no screen read can answer ---
+
+    @Test
+    fun readDeviceStatusExecutesWithoutAnAccessibilityService() {
+        // Battery/screen/ringer/connectivity live on system services, not the a11y tree,
+        // so the read must resolve before the a11y-service gate (like ReadNotifications).
+        // Before this it would have fallen through to NO_SERVICE when the service was down.
+        val reader = RecordingDeviceStatusReader()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            deviceStatusReader = reader
+        )
+
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.ReadDeviceStatus) }
+
+        assertTrue("device-status read must succeed without a bound a11y service: $result", result.success)
+        assertEquals("READ_DEVICE_STATUS", result.method)
+        assertEquals(1, reader.calls)
+        assertEquals(
+            "the digest must be carried as readText so a NONE step can self-satisfy",
+            "Battery 80% | Screen on | Ringer silent | Network wifi",
+            result.readText
+        )
+    }
+
+    @Test
+    fun readDeviceStatusRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            deviceStatusReader = null
+        )
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.ReadDeviceStatus) }
+        assertFalse("an unwired reader must not be a fake success", result.success)
+        assertEquals("STATUS_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun readDeviceStatusStepCompletesFromItsOwnDigestWithoutAScreenChange() = kotlinx.coroutines.runBlocking {
+        // Same self-evidencing class as read_notifications/read_text: the digest IS the
+        // goal evidence, so a NONE-verified step must complete rather than retry to
+        // exhaustion, and the goal gate must accept it.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.ReadDeviceStatus ->
+                        ActionResult(
+                            true,
+                            "READ_DEVICE_STATUS",
+                            "Battery 55% | Screen on | Ringer normal | Network wifi",
+                            readText = "Battery 55% | Screen on | Ringer normal | Network wifi"
+                        )
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Read the battery level","action":"read_device_status","params":{}}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("how much battery do I have", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("read_device_status with NONE verification must complete, got $terminal", terminal is OrchestratorState.Completed)
+    }
+
+    @Test
+    fun parserMapsReadDeviceStatusToTheAction() {
+        val parsed = TaskPlanParser().parse(
+            """{"steps":[{"id":1,"seq":1,"desc":"Battery?","action":"read_device_status","params":{}}]}""",
+            "how much battery do I have"
+        )
+        assertTrue("plan must parse: $parsed", parsed is PlanParseResult.Success)
+        val step = (parsed as PlanParseResult.Success).plan.steps.first()
+        assertTrue("read_device_status must map to AgentAction.ReadDeviceStatus", step.action is AgentAction.ReadDeviceStatus)
+    }
+
+    @Test
+    fun validationAcceptsReadDeviceStatus() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.ReadDeviceStatus) is ToolValidationResult.Valid)
+    }
+
+    @Test
+    fun promptAdvertisesReadDeviceStatus() {
+        assertTrue(
+            "the planner must be told about read_device_status",
+            PlannerPromptBuilder.availableActions(ToolRegistry()).contains(ToolRegistry.TOOL_READ_DEVICE_STATUS)
+        )
+    }
+
+    @Test
+    fun readDeviceStatusDigestIsPureAndHonestAboutUnknownReadings() {
+        // The digest text is the planner-visible evidence, so its formatting is asserted
+        // directly; an unavailable reading must say "unknown" rather than invent a value.
+        assertEquals(
+            "Battery 42% (charging) | Screen off | Ringer vibrate | Network cellular",
+            AndroidDeviceStatusReader.format(42, charging = true, screenOn = false, ringerMode = "vibrate", connectivity = "cellular")
+        )
+        assertEquals(
+            "Battery unknown | Screen on | Ringer unknown | Network offline",
+            AndroidDeviceStatusReader.format(-1, charging = false, screenOn = true, ringerMode = "unknown", connectivity = "offline")
+        )
+    }
+
+    @Test
+    fun readDeviceStatusSkillKeepsItsToolNameOnReplay() {
+        val plan = TaskPlan(
+            goal = "battery check",
+            fromModel = true,
+            steps = listOf(planStep(1, AgentAction.ReadDeviceStatus, "read_device_status"))
+        )
+        val restored = TaskPlanSerializer.fromJson(TaskPlanSerializer.toJson(plan), goalOverride = plan.goal)
+        assertTrue("a saved skill must replay read_device_status", restored != null)
+        assertTrue(
+            "replayed step must be ReadDeviceStatus",
+            restored!!.steps.first().action is AgentAction.ReadDeviceStatus
+        )
+    }
+
     // --- Helpers ---
+
+    private class RecordingDeviceStatusReader : DeviceStatusReader {
+        var calls = 0
+        override fun read(): DeviceStatusResult {
+            calls++
+            return DeviceStatusResult(
+                success = true,
+                method = "READ_DEVICE_STATUS",
+                message = "Battery 80% | Screen on | Ringer silent | Network wifi"
+            )
+        }
+    }
 
     private class RecordingAudioController : AudioController {
         val calls = mutableListOf<Triple<AudioStream, Int, Boolean>>()

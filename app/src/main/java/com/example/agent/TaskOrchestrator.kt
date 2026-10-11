@@ -958,7 +958,7 @@ class TaskOrchestrator(
         return when (step.action) {
             is AgentAction.WebSearch, is AgentAction.ReadUrl,
             is AgentAction.ReadText, is AgentAction.ReadPageContent,
-            is AgentAction.ReadNotifications,
+            is AgentAction.ReadNotifications, is AgentAction.ReadDeviceStatus,
             // Device-control actions act on a system service no screen reflects; a
             // completed, honestly-read-back volume/media command is its own evidence,
             // exactly like the read actions above.
@@ -1114,12 +1114,18 @@ class TaskOrchestrator(
         // read_notifications is the same shape: the notification digest it reads back
         // IS the goal evidence, so it must self-satisfy too (otherwise the goal gate's
         // ReadNotifications allowance is unreachable and every triage read fails).
+        // read_device_status is the same shape: the battery/screen/ringer/connectivity
+        // digest it reads back is carried as readText and IS the goal evidence.
         if (step.verification == VerificationMethod.NONE &&
             (action is AgentAction.ReadText || action is AgentAction.ReadPageContent ||
-                action is AgentAction.ReadNotifications)
+                action is AgentAction.ReadNotifications || action is AgentAction.ReadDeviceStatus)
         ) {
             val captured = result.readText
-            val what = if (action is AgentAction.ReadNotifications) "notification digest" else "visible text"
+            val what = when (action) {
+                is AgentAction.ReadNotifications -> "notification digest"
+                is AgentAction.ReadDeviceStatus -> "device status"
+                else -> "visible text"
+            }
             return if (!captured.isNullOrBlank()) {
                 PostconditionVerdict(true, "Read ${captured.length} chars of $what")
             } else {

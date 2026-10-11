@@ -153,7 +153,12 @@ class AndroidDeviceAutomation(
     // through the AudioManager to the active media session, so it is resolved before
     // the a11y-service gate (a UI tap cannot reach an arbitrary player's transport).
     // An unwired controller gets an honest "unavailable" result, never a silent no-op.
-    private val mediaController: MediaController? = null
+    private val mediaController: MediaController? = null,
+    // Device status (battery/screen/ringer/connectivity) is read from system services,
+    // not the accessibility tree, so it is resolved before the a11y-service gate (same
+    // rule as ReadNotifications/AdjustVolume/PlayMedia). An unwired reader returns an
+    // honest "unavailable" result rather than a fabricated status.
+    private val deviceStatusReader: DeviceStatusReader? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -254,6 +259,17 @@ class AndroidDeviceAutomation(
                 ?: return@withContext ActionResult(false, "MEDIA_UNAVAILABLE", "Media control is not available")
             val result = controller.control(transport)
             return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Device status is likewise service-free: it reads system services, so it is
+        // resolved before the a11y-service gate. The digest is carried as readText so a
+        // NONE-verified read_device_status step can self-satisfy (same rule as the
+        // other read actions) instead of retrying to exhaustion.
+        if (action is AgentAction.ReadDeviceStatus) {
+            val reader = deviceStatusReader
+                ?: return@withContext ActionResult(false, "STATUS_UNAVAILABLE", "Device status read is not available")
+            val result = reader.read()
+            val digest = result.message.take(ActionResult.MAX_CAPTURED_CHARS).ifBlank { null }
+            return@withContext ActionResult(result.success, result.method, result.message, digest)
         }
         val service = serviceProvider()
             ?: return@withContext ActionResult(false, "NO_SERVICE", "Accessibility Service unavailable")

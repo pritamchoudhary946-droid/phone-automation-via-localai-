@@ -204,6 +204,7 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
             )
 
             AgentAction.ReadText,
+            AgentAction.ReadDeviceStatus,
             AgentAction.OpenNotifications,
             AgentAction.OpenQuickSettings,
             AgentAction.PressRecents -> FastPathDecision.Execute(

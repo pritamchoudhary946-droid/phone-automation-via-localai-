@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 19,
+  "sessions_done": 20,
   "session_cap": 48,
-  "current_milestone": "Make the two remaining service-backed device-control actions (adjust_volume, play_media) genuinely completable: their default NONE verification was unsatisfiable from a fresh observation, so a planned 'pause the music'/'turn the volume up' step could never complete. (read_notifications, the third member of this class, was landed separately in PR #48.)",
+  "current_milestone": "Capability: new AgentAction.ReadDeviceStatus (read_device_status) - read the device's own state (battery level/charging, screen on/off, ringer mode, connectivity), which no screen read or UI tap can answer. Service-backed, self-evidencing, wired across all seven action-vocabulary seams.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -74,7 +74,12 @@
     "regression tests 2026-10-11 (session 18): CapabilityUpgradeTest.readNotificationsStepCompletesFromItsOwnDigestWithoutAScreenChange (orchestrator completes a read_notifications step with NONE verification) and Phase4UpgradeTest.readNotificationsReadsDigestWhenTriageOn now asserts the digest is carried as readText. Fails-before evidence: with DeviceAutomation.kt+TaskOrchestrator.kt stashed, the new test FAILED (AssertionError CapabilityUpgradeTest.kt:636); with the fix restored it passes.",
     "validation 2026-10-11 (session 18, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 293 tests 0 failures 0 errors 0 skipped (19 suites; main baseline 292 @Test + 1 new).",
     "merge 2026-10-11 (session 18): read_notifications self-evidencing fix merged via PR #48 (squash, branch auto/jarvis-autonomy-20261011-2131 deleted). Merge commit cf3cc2634 on main. Validated in-sandbox before merge: 293 tests 0 failures.",
-    "merge 2026-10-11 (session 18): service-backed device-control completion fix merged via PR #50 (squash, branch auto/jarvis-autonomy-20261011-2031 deleted). Merge commit 2bb4d3bcb on main. main had advanced with PR #48 (read_notifications self-evidencing, the third member of the same class); the code auto-merged cleanly, only RUN_STATE.json conflicted and was resolved keeping both runs' entries. Re-validated on the merged tree: ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 296 tests 0 failures 0 errors 0 skipped."
+    "merge 2026-10-11 (session 18): service-backed device-control completion fix merged via PR #50 (squash, branch auto/jarvis-autonomy-20261011-2031 deleted). Merge commit 2bb4d3bcb on main. main had advanced with PR #48 (read_notifications self-evidencing, the third member of the same class); the code auto-merged cleanly, only RUN_STATE.json conflicted and was resolved keeping both runs' entries. Re-validated on the merged tree: ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 296 tests 0 failures 0 errors 0 skipped.",
+    "capability 2026-10-11 (session 19/20): new AgentAction.ReadDeviceStatus + tool read_device_status ('battery level/charging, screen on/off, ringer mode, connectivity'). Answers questions no accessibility-tree read or UI tap can: 'how much battery do I have', 'is wifi on', 'am I on silent'. Implemented across all seven action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (const, ToolDefinition, validateAction), TaskPlanParser.mapAction, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, DeviceAutomation.execute -> AndroidDeviceAutomation (resolved before the a11y-service gate, like ReadNotifications/AdjustVolume/PlayMedia), and TaskPlanSerializer.toolNameFor. No params, so no toParams entry is needed.",
+    "capability 2026-10-11 (session 19/20): new com.example.agent.DeviceStatusReader seam + AndroidDeviceStatusReader (KeyguardManager/PowerManager screen-on, BatteryManager level+charging, AudioManager ringerMode, ConnectivityManager/NetworkCapabilities transport) + pure, unit-tested AndroidDeviceStatusReader.format(...) so the exact planner-visible digest is testable without a device. Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication; an unwired reader returns STATUS_UNAVAILABLE rather than a fabricated status. Every reading is fresh per call (no cache).",
+    "capability 2026-10-11 (session 19/20): ReadDeviceStatus is self-evidencing. read()'s digest is carried as ActionResult.readText, TaskOrchestrator.verifyAction treats a NONE-verified ReadDeviceStatus as satisfied by that non-empty digest (empty -> failure, never a fake success), and selfEvidencingToolSatisfied counts a completed ReadDeviceStatus as goal evidence (same rule as ReadText/ReadPageContent/ReadNotifications). Without this the step's default NONE postcondition would be unsatisfiable from a fresh observation and it would retry to exhaustion - the same 'written but not working' class fixed in session 18.",
+    "regression tests 2026-10-11 (session 19/20, CapabilityUpgradeTest +8): readDeviceStatusExecutesWithoutAnAccessibilityService (service-free resolution), readDeviceStatusRefusesHonestlyWhenUnwired (STATUS_UNAVAILABLE, no fake success), readDeviceStatusStepCompletesFromItsOwnDigestWithoutAScreenChange (NONE step -> Completed), parserMapsReadDeviceStatusToTheAction, validationAcceptsReadDeviceStatus, promptAdvertisesReadDeviceStatus, readDeviceStatusDigestIsPureAndHonestAboutUnknownReadings (unknown readings say 'unknown'), readDeviceStatusSkillKeepsItsToolNameOnReplay (serializer round-trip).",
+    "validation 2026-10-11 (session 19/20, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m22s, 304 tests 0 failures 0 errors 0 skipped (19 suites; 296 baseline + 8 new). Note: the first compile attempt failed on a missing TaskPlanParser.parse(...) goal argument in the new test (a TEST bug, fixed); production code compiled clean."
   ],
   "in_progress": {
     "item": "",
@@ -88,12 +93,12 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path.",
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
   ],
-  "branch": "",
+  "branch": "auto/jarvis-autonomy-20261011-2231",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261011T2031Z",
-  "last_updated": "2026-10-11T20:52:00Z",
+  "last_run_id": "internal-20261011T2231Z",
+  "last_updated": "2026-10-11T22:55:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,

@@ -177,6 +177,7 @@ object TaskPlanSerializer {
         is AgentAction.AdjustVolume -> com.example.agent.ToolRegistry.TOOL_ADJUST_VOLUME
         is AgentAction.PlayMedia -> com.example.agent.ToolRegistry.TOOL_PLAY_MEDIA
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS
+        is AgentAction.ReadDeviceStatus -> com.example.agent.ToolRegistry.TOOL_READ_DEVICE_STATUS
         is AgentAction.OpenNotifications -> com.example.agent.ToolRegistry.TOOL_OPEN_NOTIFICATIONS
         is AgentAction.OpenQuickSettings -> com.example.agent.ToolRegistry.TOOL_OPEN_QUICK_SETTINGS
         is AgentAction.PressRecents -> com.example.agent.ToolRegistry.TOOL_OPEN_RECENTS

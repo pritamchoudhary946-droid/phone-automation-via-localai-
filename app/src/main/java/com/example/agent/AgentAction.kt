@@ -125,6 +125,14 @@ sealed class AgentAction {
      */
     data class PlayMedia(val transport: String = "toggle") : AgentAction()
     object ReadNotifications : AgentAction()
+    /**
+     * Reads the device's own status (battery level/charging, screen on/off, ringer
+     * mode, connectivity) back to the agent loop. None of these live in the
+     * accessibility tree, so no screen read or UI tap can answer "how much battery
+     * do I have" / "is wifi on" / "am I on silent". Like [ReadNotifications] this is
+     * a service-backed read resolved before the accessibility-service gate.
+     */
+    object ReadDeviceStatus : AgentAction()
     object OpenNotifications : AgentAction()
     object OpenQuickSettings : AgentAction()
     object PressRecents : AgentAction()
@@ -171,6 +179,7 @@ sealed class AgentAction {
             }
             is PlayMedia -> "Media ${transport}: control playback"
             is ReadNotifications -> "Read notifications"
+            is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"
             is OpenQuickSettings -> "Open quick settings"
             is PressRecents -> "Open recents"

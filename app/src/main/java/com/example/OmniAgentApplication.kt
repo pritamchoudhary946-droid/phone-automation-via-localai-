@@ -158,7 +158,10 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 triageEnabled = { settings.notificationTriageEnabled },
                 // Media control primitive: changes a system audio stream directly.
                 audioController = com.example.agent.AndroidAudioController(this),
-                mediaController = com.example.agent.AndroidMediaController(this)
+                mediaController = com.example.agent.AndroidMediaController(this),
+                // Device-status read primitive: battery/screen/ringer/connectivity,
+                // read fresh from system services on each call.
+                deviceStatusReader = com.example.agent.AndroidDeviceStatusReader(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
