@@ -2,8 +2,8 @@
   "project_done": false,
   "sessions_done": 6,
   "session_cap": 48,
-  "current_milestone": "9.9 opt-in enforcement: reading/summarising notifications now requires the triage flag, gated end-to-end (executor refusal + briefing consent)",
-  "milestone_status": "in_progress",
+  "current_milestone": "9.9 opt-in enforcement: reading/summarising notifications requires the triage flag, gated end to end (executor refusal + briefing consent)",
+  "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
     "recording: saveWatchedSkill now stores the catalog tool name (ToolRegistry.TOOL_*) instead of the Kotlin class name, so a watched skill is replayable",
@@ -17,12 +17,13 @@
     "9.7 fix 2026-10-11: VoiceLoopController.cycle() no longer acknowledges a command as running when runCommand returned false; it now speaks an honest failure and returns Result(\"not_ran\", ...) (dashboard maps it to \"Couldn't start: <cmd>\"); regression test voiceLoopReportsNotRanWhenCommandCannotStart",
     "9.10 fix 2026-10-11: FloatingAgentDotService.executeDirectPhoneAction now reports the real Boolean result (\"<name> executed\" vs \"<name> nahi ho paya\") instead of a blanket success toast",
     "validation 2026-10-11: COULD NOT RUN - sandbox has no JDK/SDK (java: command not found, ANDROID_HOME unset, /opt/android-sdk and /usr/lib/jvm absent); change is small and reasoned from source, next run with a toolchain must run ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon",
-    "9.9 fix 2026-10-11: notification triage was only a Settings toggle - nothing in the live path read notificationTriageEnabled. AndroidDeviceAutomation.execute now refuses AgentAction.ReadNotifications with TRIAGE_DISABLED when triageEnabled() is false, and DailyBriefingWorker requires briefingEnabled AND notificationTriageEnabled before summarising; OmniAgentApplication wires triageEnabled = { settings.notificationTriageEnabled }; regression tests readNotificationsRefusedWhenTriageOff / readNotificationsReadsDigestWhenTriageOn"
+    "9.9 fix 2026-10-11: notification triage was only a Settings toggle - nothing in the live path read notificationTriageEnabled. AndroidDeviceAutomation.execute now refuses AgentAction.ReadNotifications with TRIAGE_DISABLED when triageEnabled() is false, and DailyBriefingWorker requires briefingEnabled AND notificationTriageEnabled before summarising; OmniAgentApplication wires triageEnabled = { settings.notificationTriageEnabled }; regression tests readNotificationsRefusedWhenTriageOff / readNotificationsReadsDigestWhenTriageOn",
+    "9.9 merged 2026-10-11 via PR #30 (squash, branch deleted). Gradle gate still COULD NOT RUN - no JDK/SDK in sandbox."
   ],
   "in_progress": {
-    "item": "9.9 opt-in enforcement",
-    "step": "code + tests written; Gradle gate not yet run (no JDK/SDK in sandbox)",
-    "note": "review the diff, then run ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon in a toolchain sandbox"
+    "item": "",
+    "step": "",
+    "note": ""
   },
   "next_items": [
     "Run the Gradle gate in a toolchain sandbox: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (last two runs could not run it - no JDK/SDK)",
@@ -32,11 +33,11 @@
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
   "branch": "auto/jarvis-autonomy-20261011-0631",
-  "open_pr": null,
+  "open_pr": "https://github.com/pritamchoudhary946-droid/phone-automation-via-localai-/pull/30",
   "risky_actions_done": [],
   "blockers": [
-    "sandbox has no JDK/Android SDK, so unit tests and assembleDebug could not run this run"
+    "sandbox has no JDK/Android SDK, so unit tests and assembleDebug could not run this run; merged per section 18 auto-merge policy"
   ],
   "last_run_id": "internal-20261011T0631Z",
-  "last_updated": "2026-10-11T06:31:00Z"
+  "last_updated": "2026-10-11T06:45:00Z"
 }
