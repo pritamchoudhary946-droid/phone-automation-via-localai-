@@ -128,7 +128,11 @@ class AndroidDeviceAutomation(
     private val serviceProvider: () -> AgentAccessibilityService? = { AgentAccessibilityService.instance },
     private val notificationSource: NotificationSource = NotificationBus,
     private val ocrReader: com.example.perception.OcrReader = com.example.perception.UnavailableOcrReader,
-    private val visionGrounder: com.example.perception.VisionGrounder = com.example.perception.UnavailableVisionGrounder
+    private val visionGrounder: com.example.perception.VisionGrounder = com.example.perception.UnavailableVisionGrounder,
+    // 9.9: reading posted notifications is the smart-triage capability, so it is gated
+    // by the opt-in flag. Default OFF means the flag is only read when a caller passes a
+    // live supplier; the built-in path wires the real setting.
+    private val triageEnabled: () -> Boolean = { false }
 ) : DeviceAutomation {
 
     companion object {
@@ -192,6 +196,15 @@ class AndroidDeviceAutomation(
     }
 
     override suspend fun execute(action: AgentAction): ActionResult = withContext(Dispatchers.Default) {
+        // 9.9: consent before capability. Reading notifications is the smart-triage
+        // feature, so refuse honestly when it is off, regardless of the a11y service.
+        if (action is AgentAction.ReadNotifications && !triageEnabled()) {
+            return@withContext ActionResult(
+                false,
+                "TRIAGE_DISABLED",
+                "Notification triage is off. Enable it in Settings to summarise notifications."
+            )
+        }
         val service = serviceProvider()
             ?: return@withContext ActionResult(false, "NO_SERVICE", "Accessibility Service unavailable")
 

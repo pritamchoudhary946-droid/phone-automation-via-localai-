@@ -148,7 +148,9 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             deviceAutomation = com.example.agent.AndroidDeviceAutomation(
                 appDirectory,
                 ocrReader = ocrReader,
-                visionGrounder = visionGrounder
+                visionGrounder = visionGrounder,
+                // 9.9: live opt-in gate for reading/summarising notifications.
+                triageEnabled = { settings.notificationTriageEnabled }
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
