@@ -49,6 +49,7 @@ object TaskPlanSerializer {
             put("text", text)
             if (!targetNodeId.isNullOrBlank()) put("targetNodeId", targetNodeId)
         }
+        is AgentAction.ClearText -> targetText?.takeIf { it.isNotBlank() }?.let { JSONObject().put("targetText", it) }
         is AgentAction.OpenUrl -> JSONObject().put("url", url)
         is AgentAction.DeepLink -> JSONObject().put("uri", uri)
         is AgentAction.WebSearch -> JSONObject().put("query", query)
@@ -80,6 +81,7 @@ object TaskPlanSerializer {
     /** Reconstructs the target label for actions that carry one outside their params. */
     private fun AgentAction.toVerificationTarget(): String? = when (this) {
         is AgentAction.Submit -> targetText
+        is AgentAction.ClearText -> targetText
         is AgentAction.CopyText -> targetText
         is AgentAction.PasteText -> targetText
         is AgentAction.LongPress -> targetText
@@ -146,6 +148,7 @@ object TaskPlanSerializer {
         is AgentAction.OpenApp -> com.example.agent.ToolRegistry.TOOL_LAUNCH_APP
         is AgentAction.Tap -> com.example.agent.ToolRegistry.TOOL_TAP_ELEMENT
         is AgentAction.TypeText -> com.example.agent.ToolRegistry.TOOL_ENTER_TEXT
+        is AgentAction.ClearText -> com.example.agent.ToolRegistry.TOOL_CLEAR_TEXT
         is AgentAction.Submit -> com.example.agent.ToolRegistry.TOOL_SUBMIT
         is AgentAction.OpenUrl -> com.example.agent.ToolRegistry.TOOL_OPEN_URL
         is AgentAction.CopyText -> com.example.agent.ToolRegistry.TOOL_COPY_TEXT

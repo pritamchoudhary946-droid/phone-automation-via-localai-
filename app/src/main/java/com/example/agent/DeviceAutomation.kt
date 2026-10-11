@@ -254,6 +254,16 @@ class AndroidDeviceAutomation(
                     message = if (r.success) "Typed \"${action.text}\" via ${r.method}" else (r.failureReason ?: "Text input failed")
                 )
             }
+            is AgentAction.ClearText -> {
+                // ACTION_SET_TEXT with an empty value empties the field and is verified
+                // the same way as a normal entry (the field must read back empty).
+                val r = service.performTextInput("", action.targetText)
+                ActionResult(
+                    success = r.success,
+                    method = "CLEAR_TEXT",
+                    message = if (r.success) "Cleared '${action.targetText ?: "focused field"}'" else (r.failureReason ?: "Clear field failed")
+                )
+            }
             is AgentAction.OpenSearch -> {
                 val r = service.openSearchInterface(action.query)
                 if (r.success) {

@@ -46,6 +46,7 @@ class PlanVariableStore {
     /** Returns a copy of [action] with all placeholders resolved. */
     fun substitute(action: AgentAction): AgentAction = when (action) {
         is AgentAction.TypeText -> action.copy(text = substitute(action.text))
+        is AgentAction.ClearText -> action.copy(targetText = action.targetText?.let(::substitute))
         is AgentAction.Tap -> action.copy(targetText = action.targetText?.let(::substitute))
         is AgentAction.Submit -> action.copy(targetText = action.targetText?.let(::substitute))
         is AgentAction.OpenUrl -> action.copy(url = substitute(action.url))

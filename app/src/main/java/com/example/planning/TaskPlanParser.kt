@@ -200,6 +200,8 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 val nodeId = str(params, "targetNodeId", "nodeId", "id").ifBlank { null }
                 AgentAction.TypeText(text, nodeId)
             }
+            ToolRegistry.TOOL_CLEAR_TEXT ->
+                AgentAction.ClearText(str(params, "targetText", "text", "element", "label").ifBlank { null })
             ToolRegistry.TOOL_SUBMIT ->
                 AgentAction.Submit(str(params, "targetText", "target", "element").ifBlank { null })
             ToolRegistry.TOOL_OPEN_URL -> AgentAction.OpenUrl(str(params, "url", "uri", "link"))
