@@ -1,0 +1,57 @@
+name: Verify
+
+# Required pre-merge gate. Add the "Verify (unit tests + APK)" check to the
+# `main` branch-protection required status checks (see .github/scripts/protect-main.sh)
+# so a red PR can never be merged. Keep this job name stable: branch protection
+# references it by name.
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (unit tests + APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v5
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Make the verify script executable
+        run: chmod +x .github/scripts/verify.sh
+
+      - name: Run the verification gate (unit tests + debug APK)
+        run: bash .github/scripts/verify.sh
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: OmniAgent-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
