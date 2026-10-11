@@ -57,7 +57,10 @@ class StuckLoopDetector {
             val strategy = when {
                 identicalActionStreak >= 4 -> RecoveryStrategy.ASK_USER_HELP
                 identicalActionStreak >= 3 -> RecoveryStrategy.PRESS_BACK_TO_UNBLOCK
-                actionName.contains("Tap") -> RecoveryStrategy.SCROLL_TO_DISCOVER
+                // rawActionName is the lowercase catalog tool name (e.g. "tap_element"),
+                // so a case-sensitive "Tap" comparison never matched and every stuck tap
+                // fell through to PRESS_BACK instead of SCROLL_TO_DISCOVER.
+                actionName.contains("tap", ignoreCase = true) -> RecoveryStrategy.SCROLL_TO_DISCOVER
                 else -> RecoveryStrategy.PRESS_BACK_TO_UNBLOCK
             }
             return StuckStatus(

@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 7,
+  "sessions_done": 8,
   "session_cap": 48,
-  "current_milestone": "main-unbreak: 9.9 notification-triage regression - an opted-in read was misreported as NO_SERVICE; ReadNotifications now resolves before the a11y-service gate",
+  "current_milestone": "5.7 stuck-loop recovery: a stuck tap was misrouted to PRESS_BACK because StuckLoopDetector matched the capitalised display name (\"Tap\") against the lowercase catalog tool name (rawActionName, e.g. \"tap_element\")",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -23,7 +23,9 @@
     "main-unbreak 2026-10-11: AndroidDeviceAutomation.execute() returned NO_SERVICE (a11y-service gate) BEFORE reaching the ReadNotifications branch, so an opted-in triage read with no bound a11y service reported failure with method=NO_SERVICE. ReadNotifications is notification-bus backed and independent of the accessibility tree, so it is now resolved before the service gate (TRIAGE_DISABLED when off, else readNotificationDigest()); the now-dead branch was removed. Root cause: capability placed behind an unrelated service requirement.",
     "validation 2026-10-11: ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m42s, 265 tests 0 failures 0 errors 0 skipped. main is green again.",
     "main-unbreak merged 2026-10-11 via PR #32 (squash, branch auto/jarvis-autonomy-20261011-0731 deleted). Merge commit 240b839 on main.",
-    "9.9 invariant recorded in AGENTS.md: ReadNotifications is notification-bus backed and must be resolved before the a11y-service gate (TRIAGE_DISABLED when off, else readNotificationDigest); the digest helper stays service-free."
+    "9.9 invariant recorded in AGENTS.md: ReadNotifications is notification-bus backed and must be resolved before the a11y-service gate (TRIAGE_DISABLED when off, else readNotificationDigest); the digest helper stays service-free.",
+    "5.7 fix 2026-10-11: StuckLoopDetector.recordStep compared actionName.contains(\"Tap\") case-sensitively, but rawActionName is ALWAYS the lowercase catalog tool name (TaskPlanParser line 52 .lowercase() -> line 82; HeuristicPlanner \"basic_fallback\"; TaskPlanSerializer.toolNameFor returns ToolRegistry.TOOL_* lowercase). The capitalised form \"Tap\" only exists in the UI monitor's display name (AgentLiveMonitorScreen reads actionPayloadJson/display), never in rawActionName. Result: the SCROLL_TO_DISCOVER branch was dead and every stuck tap (streak 2) misrouted to PRESS_BACK_TO_UNBLOCK - a wrong recovery direction on the 10.7 stuck path. Fixed with contains(\"tap\", ignoreCase = true); regression test stuckTapOnFrozenScreenSuggestsScrollNotBack (Phase5AutonomyTest).",
+    "validation 2026-10-11: COULD NOT RUN - ./gradlew :app:testDebugUnitTest --no-daemon -> \"ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH\"; ANDROID_HOME unset, /opt/android-sdk and /usr/lib/jvm absent. Change is 1 line + 1 test, reasoned from source; next run with a toolchain must run ./gradlew :app:testDebugUnitTest --no-daemon."
   ],
   "in_progress": {
     "item": "",
@@ -31,16 +33,19 @@
     "note": ""
   },
   "next_items": [
-    "Run the full gate with assembleDebug when the milestone needs an APK: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon",
+    "Run the full gate with assembleDebug when the milestone needs an APK: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (needs JDK21 + Android SDK 36.1; absent in this sandbox)",
     "9.9 follow-up: gate AgentAction.ReadNotifications in ToolRegistry.validateAction/availableActions by the live flag so the planner is not even offered it when triage is off (needs a flag-aware registry seam; would also drop read_notifications from the prompt catalogue)",
-    "9.10 overlay HUD: review onDoubleTap screen readout and command-panel routing for any remaining false-success or stale-observation handling",
+    "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4, so a single stuck path can exhaust the explore budget and reach ASK_USER_HELP on one pair-run. Rationale is not documented; consider reconciling the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2 intact) in a dedicated run with a toolchain to confirm the intent.",
+    "5.2 (low-risk): FailureClassifier.burnedByWrongPackage is only set when a WRONG_PACKAGE failure precedes TARGET_NOT_FOUND; a target-not-found with no prior wrong-package is unaffected. No change made.",
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": null,
+  "branch": "auto/jarvis-autonomy-20261011-0831",
   "open_pr": null,
   "risky_actions_done": [],
-  "blockers": [],
-  "last_run_id": "internal-20261011T0731Z",
-  "last_updated": "2026-10-11T07:44:00Z"
+  "blockers": [
+    "No JDK/SDK in this sandbox: ./gradlew :app:testDebugUnitTest --no-daemon fails with 'JAVA_HOME is not set and no java command'; run the suite in a toolchain sandbox to validate the 5.7 fix + regression test."
+  ],
+  "last_run_id": "internal-20261011T0831Z",
+  "last_updated": "2026-10-11T08:40:00Z"
 }
