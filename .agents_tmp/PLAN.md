@@ -1693,6 +1693,29 @@ not just report them):
 - **Not verified.** Real-device behaviour of the permission-dialog recovery path
   remains unverified (same limitation as the rest of the loop's device-side recovery).
 
+#### 2026-10-11 - confirmed defect: generic Skip/Close misread as a full-screen ad
+
+- **Finding (confirmed defect).** `ObstacleDetector.detect` used a bare
+  `skip`/`close`/`x` label as the ad cue, and its dismiss matcher included a bare
+  `x`. `isSafeDismiss("skip")` is true, so `TaskOrchestrator` (L472-489) actually
+  **tapped** the control as if it dismissed an ad. Any ordinary screen with a
+  "Skip" affordance - onboarding, a tutorial, "Skip for now" on a login sheet -
+  was classified `Kind.AD` and auto-tapped mid-task. Separately, `firstPresent`
+  returned the *candidate token* rather than the real on-screen label, so the
+  orchestrator could tap text that was not on screen; the `x` candidate also
+  substring-matched unrelated labels such as "Next".
+- **Fix.** AD now requires a real ad cue (`advertisement`, `sponsored`, `skip ad`,
+  `close ad`, `dismiss ad`); the loose dismiss matcher no longer includes a bare
+  `x`. `firstPresent` returns the actual matching on-screen label.
+- **Validation (unit/build only).** New regression test
+  `Phase9UpgradeTest.genericSkipControlIsNotMisreadAsAnAd` (a bare "Skip" /
+  "Skip for now" is NOT an ad; a real "Skip Ad" cue is still detected and the
+  dismiss label is the real label). Full gate
+  `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon` -> BUILD
+  SUCCESSFUL, 261 tests 0 failures 0 errors, `app-debug.apk` produced. No
+  emulator/real-device run available in the sandbox.
+- **Not verified.** Real-device ad/dialog handling remains unverified.
+
 # 5. TESTING AND VALIDATION
 
 Success is defined per phase; each phase must keep the existing behaviour
