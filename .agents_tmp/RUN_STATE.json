@@ -10,11 +10,12 @@
     "regression tests: skill JSON round-trip, legacy-format refusal, unknown-action refusal, orchestrator replays saved skill without re-planning, unreconstructable skill re-plans",
     "validation 2026-10-10: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 259 tests 0 failures, app-debug.apk produced",
     "4A fix 2026-10-11: FailureClassifier permission-dialog condition parenthesised (regression: && bound tighter than || so bare 'permission' text hijacked recovery to PRESS_BACK); regression test classifierRequiresBothPermissionAndDialogSignals",
-    "4A fix 2026-10-11: ObstacleDetector no longer treats a bare 'skip'/'close'/'x' as an ad cue (false positive auto-tapped any 'Skip' control and derailed the task); firstPresent now returns the real on-screen label; regression test genericSkipControlIsNotMisreadAsAnAd"
+    "4A fix 2026-10-11: ObstacleDetector no longer treats a bare 'skip'/'close'/'x' as an ad cue (false positive auto-tapped any 'Skip' control and derailed the task); firstPresent now returns the real on-screen label; regression test genericSkipControlIsNotMisreadAsAnAd",
+    "validation 2026-10-11: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 261 tests 0 failures 0 errors, app-debug.apk produced (115 MB)"
   ],
   "in_progress": {
     "item": "4A FINAL BUG SWEEP",
-    "step": "ObstacleDetector + FailureClassifier defects fixed with regression tests; running full test/build gate",
+    "step": "ObstacleDetector + FailureClassifier defects fixed with regression tests; full gate green",
     "note": "unit/build verification only; no emulator/real-device run available in sandbox"
   },
   "next_items": [
@@ -26,6 +27,6 @@
   "open_pr": "https://github.com/pritamchoudhary946-droid/phone-automation-via-localai-/pull/28",
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261011T0030Z",
-  "last_updated": "2026-10-11T00:45:00Z"
+  "last_run_id": "internal-20261011T0150Z",
+  "last_updated": "2026-10-11T01:50:00Z"
 }
