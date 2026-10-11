@@ -15,12 +15,7 @@ set -euo pipefail
 
 CHECK="Verify (unit tests + APK)"
 
-curl -sS -X PUT \
-  -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-  -H "Accept: application/vnd.github+json" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  "https://api.github.com/repos/${REPO}/branches/main/protection" \
-  -d @- <<JSON
+body=$(cat <<JSON
 {
   "required_status_checks": {
     "strict": true,
@@ -33,6 +28,32 @@ curl -sS -X PUT \
   "allow_deletions": false
 }
 JSON
+)
 
-echo
-echo "Branch protection on ${REPO}@main now requires: ${CHECK}"
+response=$(curl -sS -w $'\n%{http_code}' -X PUT \
+  -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "https://api.github.com/repos/${REPO}/branches/main/protection" \
+  -d "$body")
+
+code=$(printf '%s' "$response" | tail -n1)
+payload=$(printf '%s' "$response" | sed '$d')
+
+if [ "$code" = "200" ]; then
+  echo "OK: ${REPO}@main now requires the '${CHECK}' status check."
+  exit 0
+fi
+
+echo "FAILED (HTTP ${code}): could not set branch protection on ${REPO}@main." >&2
+printf '%s\n' "$payload" >&2
+echo >&2
+echo "If this says 'Resource not accessible by integration', the token is a GitHub" >&2
+echo "App / integration token, which cannot edit branch protection. Re-run with a" >&2
+echo "personal access token from an account with admin on the repo, e.g.:" >&2
+echo "  GITHUB_TOKEN=<personal-admin-pat> REPO=${REPO} bash $0" >&2
+echo >&2
+echo "Or set it by hand: Settings > Branches > add a rule for 'main' >" >&2
+echo "Require status checks to pass > add '${CHECK}'." >&2
+exit 1
+
