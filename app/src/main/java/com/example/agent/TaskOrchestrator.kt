@@ -100,7 +100,9 @@ class TaskOrchestrator(
     private val autoSaveSkills: Boolean = false,
     private val cloudPlannerProvider: CloudPlannerProvider = DisabledCloudPlannerProvider,
     private val nanoSummarizer: com.example.model.NanoSummarizer = com.example.model.UnavailableNanoSummarizer,
-    private val speechOutput: com.example.voice.SpeechOutput? = null
+    private val speechOutput: com.example.voice.SpeechOutput? = null,
+    /** Live opt-in gate for the notification-triage capability (plan 9.9). */
+    private val notificationTriageEnabled: () -> Boolean = { false }
 ) {
     private val TAG = "TaskOrchestrator"
     private val database = AgentDatabase.getInstance(context)
@@ -1602,7 +1604,10 @@ class TaskOrchestrator(
                         probesUsed = progressBudget.exploresUsed,
                         screenSummary = observation.summary,
                         foregroundPackage = observation.packageName,
-                        availableActions = toolRegistry.getRegisteredTools().map { it.name }
+                        availableActions = PlannerPromptBuilder.availableActions(
+                            toolRegistry,
+                            notificationTriageEnabled()
+                        )
                     )
                 )
             }
@@ -1645,11 +1650,15 @@ class TaskOrchestrator(
                     completedStepsSummary = historySummary(),
                     lastActionResult = failureDetail,
                     remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1),
-                    availableActions = toolRegistry.getRegisteredTools().map { it.name },
+                    availableActions = PlannerPromptBuilder.availableActions(
+                        toolRegistry,
+                        notificationTriageEnabled()
+                    ),
                     memorySummary = memoryDigest,
                     retrievedContext = retrievedContext,
                     lessonsSummary = lessonsDigest
-                )
+                ),
+                notificationTriageEnabled()
             )
             val raw = cloudPlannerProvider.complete(prompt, PlannerPromptBuilder.SYSTEM_INSTRUCTION)
             if (raw.isNullOrBlank()) return null

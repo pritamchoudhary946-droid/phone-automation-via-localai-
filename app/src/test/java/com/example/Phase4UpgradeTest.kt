@@ -66,7 +66,39 @@ class Phase4UpgradeTest {
     fun readNotificationsIsAnApprovedTool() {
         val registry = ToolRegistry()
         assertTrue(registry.validateAction(AgentAction.ReadNotifications) is ToolValidationResult.Valid)
-        assertTrue(PlannerPromptBuilder.availableActions(registry).contains(ToolRegistry.TOOL_READ_NOTIFICATIONS))
+        // 9.9: the catalogue only advertises the tool while the opt-in triage capability
+        // is on; with it off the executor refuses the action, so offering it would invite
+        // a plan the loop then rejects.
+        assertTrue(
+            PlannerPromptBuilder.availableActions(registry, notificationTriageEnabled = true)
+                .contains(ToolRegistry.TOOL_READ_NOTIFICATIONS)
+        )
+        assertTrue(
+            !PlannerPromptBuilder.availableActions(registry, notificationTriageEnabled = false)
+                .contains(ToolRegistry.TOOL_READ_NOTIFICATIONS)
+        )
+    }
+
+    // 9.9: the planning prompt's parameter guide (the schema the model actually reads)
+    // must withhold the read_notifications line while triage is off, so the leak is
+    // closed in the catalogue AND the prompt, not just the advertised tool list.
+    @Test
+    fun planningPromptWithholdsReadNotificationsWhileTriageOff() {
+        val registry = ToolRegistry()
+        val request = PlanningRequest(
+            userCommand = "what did I miss?",
+            desiredOutcome = "summarise recent notifications",
+            foregroundPackage = null,
+            screenSummary = "",
+            completedStepsSummary = "",
+            lastActionResult = null,
+            remainingStepBudget = 5,
+            availableActions = PlannerPromptBuilder.availableActions(registry, notificationTriageEnabled = false)
+        )
+        val off = PlannerPromptBuilder.buildPlanningPrompt(request, notificationTriageEnabled = false)
+        val on = PlannerPromptBuilder.buildPlanningPrompt(request, notificationTriageEnabled = true)
+        assertTrue(!off.contains(ToolRegistry.TOOL_READ_NOTIFICATIONS))
+        assertTrue(on.contains(ToolRegistry.TOOL_READ_NOTIFICATIONS))
     }
 
     // 9.9: reading/summarising notifications is an opt-in capability. With triage off
