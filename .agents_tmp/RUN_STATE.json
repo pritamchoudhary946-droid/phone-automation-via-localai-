@@ -1,29 +1,30 @@
 {
   "project_done": false,
-  "sessions_done": 1,
+  "sessions_done": 2,
   "session_cap": 48,
-  "current_milestone": "4.13 skill replay: reconstruct persisted plan + record replayed catalog names",
-  "milestone_status": "done",
+  "current_milestone": "4A bug sweep: fix FailureClassifier permission-dialog operator-precedence defect",
+  "milestone_status": "in_progress",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
     "recording: saveWatchedSkill now stores the catalog tool name (ToolRegistry.TOOL_*) instead of the Kotlin class name, so a watched skill is replayable",
     "regression tests: skill JSON round-trip, legacy-format refusal, unknown-action refusal, orchestrator replays saved skill without re-planning, unreconstructable skill re-plans",
-    "validation 2026-10-10: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 259 tests 0 failures, app-debug.apk produced"
+    "validation 2026-10-10: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 259 tests 0 failures, app-debug.apk produced",
+    "4A fix 2026-10-11: FailureClassifier permission-dialog condition parenthesised (regression: && bound tighter than || so bare 'permission' text hijacked recovery to PRESS_BACK); regression test classifierRequiresBothPermissionAndDialogSignals"
   ],
   "in_progress": {
-    "item": "none",
-    "step": "milestone 4.13 complete and validated; PR #27 open (draft)",
-    "note": "skill replay verified by unit tests + build only; no emulator/real-device run available in sandbox"
+    "item": "4A FINAL BUG SWEEP",
+    "step": "permission-dialog precedence fixed + regression test; running full test/build gate",
+    "note": "unit/build verification only; no emulator/real-device run available in sandbox"
   },
   "next_items": [
-    "Continue item 4A mandatory full bug sweep (all bugs, not only repo-reported) - inspect live execution path for false-success and stale-observation gaps",
+    "Continue item 4A mandatory full bug sweep: inspect live execution path for false-success, stale-observation and remaining operator-precedence/boolean-logic defects (e.g. FloatingAgentDotService command routing, TargetResolver)",
     "Continue Phase 5 (5.1+) remaining acceptance criteria not yet evidenced",
-    "Human: review/merge PR #27 (do not auto-merge)"
+    "Human: review/merge PR (do not auto-merge)"
   ],
-  "branch": "auto/jarvis-autonomy-20261010-2033",
-  "open_pr": "https://github.com/pritamchoudhary946-droid/phone-automation-via-localai-/pull/27",
+  "branch": "auto/jarvis-autonomy-20261011-0030",
+  "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261010T2033Z",
-  "last_updated": "2026-10-10T21:05:00Z"
+  "last_run_id": "internal-20261011T0030Z",
+  "last_updated": "2026-10-11T00:38:00Z"
 }

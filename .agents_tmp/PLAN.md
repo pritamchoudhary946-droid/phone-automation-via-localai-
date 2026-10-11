@@ -1668,6 +1668,31 @@ not just report them):
   blocks (6.1) with the real reason shown (8.2). Also re-verify the phone-hang fix
   (8.9) holds under repeated open/close and memory pressure.
 
+### 4A run log
+
+#### 2026-10-11 - confirmed defect: permission-dialog misclassification (operator precedence)
+
+- **Finding (confirmed defect).** `FailureClassifier.classify` tested
+  `lowerScreen.contains("permission") || lowerScreen.contains("allow") && (contains("dialog") || contains("grant"))`.
+  Kotlin's `&&` binds tighter than `||`, so this parsed as
+  `contains("permission") || (contains("allow") && (contains("dialog") || contains("grant")))`.
+  Any screen whose summary merely contained the bare word `permission` - ordinary
+  Settings copy, Play Store permission descriptions, help articles - was misclassified
+  as `PERMISSION_DIALOG`, whose recovery is `PRESS_BACK_TO_UNBLOCK`. In `recoverFromFailure`
+  that fires a real Back navigation, so the recovery cycle could be triggered by
+  text on the screen and abort the current task surface.
+- **Fix.** Parenthesised the grant-side test so both a permission/allow signal AND a
+  dialog/consent cue (`dialog`, `grant`, `while using`, `deny`) are required; a bare
+  `permission`/`allow` token no longer hijacks recovery. A genuine system dialog is
+  still detected.
+- **Validation (unit/build only).** New regression test
+  `Phase5AutonomyTest.classifierRequiresBothPermissionAndDialogSignals`; full
+  `./gradlew :app:testDebugUnitTest` and `:app:assembleDebug --no-daemon` run this
+  session (JDK 21 Temurin, android-36.1). No emulator/real-device run available in
+  the sandbox.
+- **Not verified.** Real-device behaviour of the permission-dialog recovery path
+  remains unverified (same limitation as the rest of the loop's device-side recovery).
+
 # 5. TESTING AND VALIDATION
 
 Success is defined per phase; each phase must keep the existing behaviour

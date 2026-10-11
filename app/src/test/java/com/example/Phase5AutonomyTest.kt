@@ -114,6 +114,39 @@ class Phase5AutonomyTest {
         assertEquals(FailureType.VALIDATION_REJECTED, rejected.type)
     }
 
+    @Test
+    fun classifierRequiresBothPermissionAndDialogSignals() {
+        // Ordinary settings text containing "permission"/"allow" but no dialog cue must
+        // NOT be misread as a blocking permission dialog (regression: `&&` binds tighter
+        // than `||`, so the old unparenthesised condition matched any screen containing
+        // the bare word "permission").
+        val settings = FailureClassifier.classify(
+            success = false,
+            resultMessage = "ok",
+            resultMethod = "TAP_ACCESSIBILITY",
+            verificationDetail = "target 'Search' not found on screen",
+            screenChanged = false,
+            expectedPackage = null,
+            observedPackage = "com.android.settings",
+            screenText = "App permissions\nCamera permission is allowed for this app\nSearch settings"
+        )
+        assertEquals(FailureType.TARGET_NOT_FOUND, settings.type)
+
+        // A real permission dialog (grant affordance + consent cue) is still detected.
+        val dialog = FailureClassifier.classify(
+            success = false,
+            resultMessage = "ok",
+            resultMethod = "TAP_ACCESSIBILITY",
+            verificationDetail = "no change",
+            screenChanged = false,
+            expectedPackage = null,
+            observedPackage = "com.android.permissioncontroller",
+            screenText = "Allow YouTube to access your photos?\nWhile using the app  Don't allow"
+        )
+        assertEquals(FailureType.PERMISSION_DIALOG, dialog.type)
+        assertEquals(RecoveryStrategy.PRESS_BACK_TO_UNBLOCK, dialog.suggestedRecovery)
+    }
+
     // --- 5.10 Progress budget degradation --------------------------------------
 
     @Test
