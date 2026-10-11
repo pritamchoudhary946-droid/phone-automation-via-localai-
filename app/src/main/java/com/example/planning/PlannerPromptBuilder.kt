@@ -35,6 +35,9 @@ object PlannerPromptBuilder {
           field is often not visible until the search interface is opened.
         - Use open_item with the visible result label to open one observed result.
         - end a plan with report_status only when the goal is fully achieved.
+        - To carry a value between steps/apps, add "captures":["<name>"] to a
+          read_text/read_page_content step and reference it later as {{name}} in a
+          text/url/target field. Only a read_text/read_page_content step can capture.
     """.trimIndent()
 
     /**
@@ -61,6 +64,7 @@ object PlannerPromptBuilder {
         """- find_element: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}   (scroll to a label if needed, then tap it)""",
         """- read_text:   {}   (reads the visible on-screen text back to you)""",
         """- read_page_content: {}   (extracts the visible page/article text)""",
+        """- captures:   add "captures":["<name>"] to a read_text/read_page_content step to store its text as {{name}} for a later step (cross-app data passing)""",
         """- wait_for_text: {"targetText":"<label>","timeoutMs":<int>}""",
         """- adjust_volume: {"stream":"media|ring|alarm|notification|call","steps":<int>,"mute":<optional bool>}   (steps: +raises, -lowers; mute=true silences the stream; one step is one hardware volume press)""",
         """- play_media: {"transport":"play|pause|toggle|stop|next|previous"}   (controls the active media/song: toggle=play/pause; use for "pause the music" / "next song" / "stop playback")""",
@@ -110,6 +114,10 @@ object PlannerPromptBuilder {
             appendLine("Lessons from similar past tasks (avoid repeating these mistakes):")
             appendLine(sanitizeUntrusted(request.lessonsSummary).take(MAX_LESSONS_CHARS))
         }
+        if (request.variableSummary.isNotBlank()) {
+            appendLine("Values captured by earlier steps (use the {{name}} placeholder to reuse one):")
+            appendLine(sanitizeUntrusted(request.variableSummary).take(MAX_VARIABLE_CHARS))
+        }
         appendLine("Current screen (bounded summary, may be truncated):")
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
         appendLine()
@@ -130,6 +138,10 @@ object PlannerPromptBuilder {
         }
         if (!request.lastActionResult.isNullOrBlank()) {
             appendLine("Last action result (act differently if it failed): ${request.lastActionResult.take(300)}")
+        }
+        if (request.variableSummary.isNotBlank()) {
+            appendLine("Values captured by earlier steps (use the {{name}} placeholder to reuse one):")
+            appendLine(sanitizeUntrusted(request.variableSummary).take(MAX_VARIABLE_CHARS))
         }
         appendLine("Current screen (bounded summary, may be truncated):")
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
@@ -232,4 +244,5 @@ object PlannerPromptBuilder {
     const val MAX_MEMORY_CHARS = 600
     const val MAX_RETRIEVED_CHARS = 400
     const val MAX_LESSONS_CHARS = 400
+    const val MAX_VARIABLE_CHARS = 400
 }

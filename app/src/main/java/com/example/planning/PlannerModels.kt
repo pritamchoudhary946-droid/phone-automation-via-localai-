@@ -17,7 +17,9 @@ data class PlanningRequest(
     /** Bounded retrieved context from the user's own notes/history (RAG), or blank. */
     val retrievedContext: String = "",
     /** Bounded lessons from past episodes relevant to this goal (plan 5.9), or blank. */
-    val lessonsSummary: String = ""
+    val lessonsSummary: String = "",
+    /** Values captured by earlier steps (plan 9.4), so later steps can use `{{name}}`. */
+    val variableSummary: String = ""
 )
 
 /** Everything the model needs to pick the single next action during execution. */
@@ -29,7 +31,9 @@ data class StepDecisionRequest(
     val completedStepsSummary: String,
     val lastActionResult: String?,
     val remainingStepBudget: Int,
-    val availableActions: List<String>
+    val availableActions: List<String>,
+    /** Values captured by earlier steps (plan 9.4), so the next action can use `{{name}}`. */
+    val variableSummary: String = ""
 )
 
 /** Why a plan came from the model or from the labelled fallback. */

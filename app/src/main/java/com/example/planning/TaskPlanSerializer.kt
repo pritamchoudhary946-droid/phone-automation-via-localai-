@@ -29,6 +29,7 @@ object TaskPlanSerializer {
                     step.action.toParams()?.let { put("params", it) }
                     if (step.expectedPostcondition.isNotBlank()) put("expect", step.expectedPostcondition)
                     step.action.toVerificationTarget()?.let { put("target", it) }
+                    if (step.captures.isNotEmpty()) put("captures", JSONArray(step.captures))
                 }
             )
         }
@@ -136,7 +137,8 @@ object TaskPlanSerializer {
                     action = action,
                     rawActionName = rawAction,
                     expectedPostcondition = raw.optString("expect", ""),
-                    verification = parseVerification(raw.optString("verify", "NONE"))
+                    verification = parseVerification(raw.optString("verify", "NONE")),
+                    captures = parseCaptures(raw.optJSONArray("captures"))
                 )
             )
         }
@@ -185,6 +187,16 @@ object TaskPlanSerializer {
         is AgentAction.ReadScreen -> com.example.agent.ToolRegistry.TOOL_READ_SCREEN
         is AgentAction.FinishTask -> com.example.agent.ToolRegistry.TOOL_REPORT_STATUS
         else -> null
+    }
+
+    private fun parseCaptures(array: JSONArray?): List<String> {
+        if (array == null) return emptyList()
+        val names = LinkedHashSet<String>()
+        for (i in 0 until array.length()) {
+            val name = PlanVariableStore.normalize(array.optString(i, ""))
+            if (name.isNotEmpty()) names.add(name)
+        }
+        return names.toList()
     }
 
     private fun parseVerification(value: String): VerificationMethod = when (value.trim().uppercase()) {

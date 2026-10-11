@@ -72,6 +72,17 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
 
             val verification = parseVerification(stepObj.optString("verify", "NONE"))
             val dependsOn = parseDependencies(stepObj.optJSONArray("dependsOn"))
+            val captures = parseCaptures(stepObj.optJSONArray("captures"))
+
+            // A capture only means something on a step whose action can read back text;
+            // on any other action the captured value would always be empty, so reject
+            // the plan rather than silently drop the variable.
+            if (captures.isNotEmpty() && !producesReadableText(action)) {
+                return PlanParseResult.Invalid(
+                    "Step $id declares captures $captures but action '$rawAction' produces no readable text",
+                    rawModelOutput
+                )
+            }
 
             parsedSteps.add(
                 PlanStep(
@@ -83,7 +94,8 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                     expectedPostcondition = stepObj.optString("expect", ""),
                     verification = verification,
                     dependsOn = dependsOn,
-                    maxRetries = stepObj.optInt("maxRetries", 1).coerceIn(0, 3)
+                    maxRetries = stepObj.optInt("maxRetries", 1).coerceIn(0, 3),
+                    captures = captures
                 )
             )
         }
@@ -314,7 +326,30 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
         return (0 until array.length()).mapNotNull { array.optInt(it, -1).takeIf { v -> v >= 0 } }
     }
 
+    /**
+     * Variable names a step populates from the text its read action captured
+     * (plan 9.4). Names are normalised to the same form [PlanVariableStore] uses,
+     * de-duplicated and bounded, so a malformed model output cannot mint an
+     * unbounded number of variables.
+     */
+    private fun parseCaptures(array: JSONArray?): List<String> {
+        if (array == null) return emptyList()
+        val names = LinkedHashSet<String>()
+        for (i in 0 until array.length()) {
+            val raw = array.optString(i, "")
+            val name = PlanVariableStore.normalize(raw)
+            if (name.isNotEmpty()) names.add(name)
+            if (names.size >= MAX_CAPTURES) break
+        }
+        return names.toList()
+    }
+
+    /** True for the approved actions that can return a bounded text digest ([ActionResult.readText]). */
+    private fun producesReadableText(action: AgentAction): Boolean =
+        action is AgentAction.ReadText || action is AgentAction.ReadPageContent
+
     companion object {
         const val MAX_STEPS = 12
+        const val MAX_CAPTURES = 4
     }
 }

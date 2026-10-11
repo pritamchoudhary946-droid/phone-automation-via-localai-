@@ -27,6 +27,7 @@ import com.example.planning.PlanSelfReview
 import com.example.planning.PlanSource
 import com.example.planning.PlanStep
 import com.example.planning.PlanStepStatus
+import com.example.planning.PlanVariableStore
 import com.example.planning.PlannerPromptBuilder
 import com.example.planning.ReflectionRequest
 import com.example.planning.TaskPlanSerializer
@@ -165,7 +166,18 @@ class TaskOrchestrator(
     private val conversationMemory = ConversationMemory()
 
     /** 9.4 per-run variable store: a value read in one app is reusable by a later step. */
-    private val planVariables = com.example.planning.PlanVariableStore()
+    private val planVariables = PlanVariableStore()
+
+    /** 9.4: bounded, untrusted-labelled summary of captured variables for the prompt. */
+    private fun variableSummary(): String {
+        val map = planVariables.asMap()
+        if (map.isEmpty()) return ""
+        return map.entries
+            .take(MAX_VARIABLE_ENTRIES)
+            .joinToString("\n") { (name, value) ->
+                "$name = \"${value.replace("\n", " ").take(MAX_VARIABLE_VALUE_CHARS)}\""
+            }
+    }
 
     private val _pendingClarification = MutableStateFlow<String?>(null)
     /** A question Jarvis must ask before it can act (9.3): a follow-up with no context. */
@@ -379,7 +391,8 @@ class TaskOrchestrator(
                             remainingStepBudget = maxSteps,
                             memorySummary = memoryDigest,
                             retrievedContext = retrievedContext,
-                            lessonsSummary = lessonsDigest
+                            lessonsSummary = lessonsDigest,
+                            variableSummary = variableSummary()
                         )
                     }
 
@@ -572,6 +585,7 @@ class TaskOrchestrator(
                                 historySummary = historySummary(),
                                 lastActionVerification = lastActionResult,
                                 remainingStepBudget = maxSteps - completedCount,
+                                variableSummary = variableSummary(),
                                 screenshotBytes = screenshot
                             )
                         }
@@ -825,6 +839,15 @@ class TaskOrchestrator(
 
                     lastActionResult = verdict.detail
                     if (verdict.satisfied) {
+                        // 9.4: only a verified read populates its declared variables. The
+                        // step's postcondition must hold and the action must actually have
+                        // returned captured text, so a failed/empty read never stores a
+                        // bogus value a later step would then paste elsewhere.
+                        if (effectiveStep.captures.isNotEmpty() && execResult.readText != null) {
+                            for (name in effectiveStep.captures) {
+                                planVariables.set(name, execResult.readText)
+                            }
+                        }
                         completedCount++
                         consecutiveFailures = 0
                         stuckDetector.reset()
@@ -996,7 +1019,8 @@ class TaskOrchestrator(
                 remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1),
                 memorySummary = memoryDigest,
                 retrievedContext = retrievedContext,
-                lessonsSummary = lessonsDigest
+                lessonsSummary = lessonsDigest,
+                variableSummary = variableSummary()
             )
         }
         val newPlan = when (outcome) {
@@ -1656,7 +1680,8 @@ class TaskOrchestrator(
                     ),
                     memorySummary = memoryDigest,
                     retrievedContext = retrievedContext,
-                    lessonsSummary = lessonsDigest
+                    lessonsSummary = lessonsDigest,
+                    variableSummary = variableSummary()
                 ),
                 notificationTriageEnabled()
             )
@@ -1747,5 +1772,9 @@ class TaskOrchestrator(
 
         /** Bounded obstacle dismissals per run (plan 9.12), so recovery cannot loop. */
         const val MAX_OBSTACLE_RECOVERIES = 3
+
+        /** 9.4: bounds on the captured-variable summary injected into the planning prompt. */
+        const val MAX_VARIABLE_ENTRIES = 6
+        const val MAX_VARIABLE_VALUE_CHARS = 120
     }
 }
