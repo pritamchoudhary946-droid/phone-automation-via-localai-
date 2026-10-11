@@ -27,6 +27,7 @@ import com.example.planning.PlanSelfReview
 import com.example.planning.PlanSource
 import com.example.planning.PlanStep
 import com.example.planning.PlanStepStatus
+import com.example.planning.PlanVariableStore
 import com.example.planning.PlannerPromptBuilder
 import com.example.planning.ReflectionRequest
 import com.example.planning.TaskPlanSerializer
@@ -165,7 +166,18 @@ class TaskOrchestrator(
     private val conversationMemory = ConversationMemory()
 
     /** 9.4 per-run variable store: a value read in one app is reusable by a later step. */
-    private val planVariables = com.example.planning.PlanVariableStore()
+    private val planVariables = PlanVariableStore()
+
+    /** 9.4: bounded, untrusted-labelled summary of captured variables for the prompt. */
+    private fun variableSummary(): String {
+        val map = planVariables.asMap()
+        if (map.isEmpty()) return ""
+        return map.entries
+            .take(MAX_VARIABLE_ENTRIES)
+            .joinToString("\n") { (name, value) ->
+                "$name = \"${value.replace("\n", " ").take(MAX_VARIABLE_VALUE_CHARS)}\""
+            }
+    }
 
     private val _pendingClarification = MutableStateFlow<String?>(null)
     /** A question Jarvis must ask before it can act (9.3): a follow-up with no context. */
@@ -379,7 +391,8 @@ class TaskOrchestrator(
                             remainingStepBudget = maxSteps,
                             memorySummary = memoryDigest,
                             retrievedContext = retrievedContext,
-                            lessonsSummary = lessonsDigest
+                            lessonsSummary = lessonsDigest,
+                            variableSummary = variableSummary()
                         )
                     }
 
@@ -438,8 +451,7 @@ class TaskOrchestrator(
                         val lastRequired = plan.steps.lastOrNull {
                             it.action !is AgentAction.FinishTask && it.action !is AgentAction.FailTask
                         }
-                        val webToolSatisfied = lastRequired?.status == PlanStepStatus.COMPLETED &&
-                            (lastRequired.action is AgentAction.WebSearch || lastRequired.action is AgentAction.ReadUrl)
+                        val webToolSatisfied = selfEvidencingToolSatisfied(lastRequired)
                         if (goalVerdict.satisfied || webToolSatisfied) {
                             val summary = "Goal achieved: completed ${plan.completedCount()} of ${plan.size} planned steps."
                             complete(task, summary, completedCount)
@@ -572,6 +584,7 @@ class TaskOrchestrator(
                                 historySummary = historySummary(),
                                 lastActionVerification = lastActionResult,
                                 remainingStepBudget = maxSteps - completedCount,
+                                variableSummary = variableSummary(),
                                 screenshotBytes = screenshot
                             )
                         }
@@ -741,8 +754,7 @@ class TaskOrchestrator(
                         // plan whose final required step was a completed web_search/read_url is
                         // satisfied without a UI postcondition.
                         val lastRequired = required.lastOrNull()
-                        val webToolSatisfied = lastRequired?.action is AgentAction.WebSearch ||
-                            lastRequired?.action is AgentAction.ReadUrl
+                        val webToolSatisfied = selfEvidencingToolSatisfied(lastRequired)
                         if (allRequiredCompleted && (goalVerdict.satisfied || webToolSatisfied)) {
                             complete(task, action.summary, completedCount)
                             return@launch
@@ -825,6 +837,26 @@ class TaskOrchestrator(
 
                     lastActionResult = verdict.detail
                     if (verdict.satisfied) {
+                        // 9.4: only a verified read populates its declared variables. The
+                        // step's postcondition must hold and the action must actually have
+                        // returned captured text, so a failed/empty read never stores a
+                        // bogus value a later step would then paste elsewhere.
+                        if (effectiveStep.captures.isNotEmpty()) {
+                            // Drop any prior values for these names first so a re-run of
+                            // the same step can never leave a stale value (9.4 freshness).
+                            for (name in effectiveStep.captures) {
+                                planVariables.remove(name)
+                            }
+                            if (execResult.readText != null) {
+                                for (name in effectiveStep.captures) {
+                                    planVariables.set(
+                                        name,
+                                        execResult.readText,
+                                        source = effectiveStep.rawActionName.ifBlank { action.javaClass.simpleName }
+                                    )
+                                }
+                            }
+                        }
                         completedCount++
                         consecutiveFailures = 0
                         stuckDetector.reset()
@@ -834,6 +866,12 @@ class TaskOrchestrator(
                         // reflect, then rebuild via re-plan/exploration. The step is only
                         // abandoned or retried through that bounded cycle — never blindly
                         // re-executed and never left to spin.
+                        // 9.4: a failed capture step must not leave an earlier value
+                        // reachable under its variable names, so a later {{name}} step
+                        // cannot silently reuse a stale value.
+                        for (name in effectiveStep.captures) {
+                            planVariables.remove(name)
+                        }
                         consecutiveFailures++
                         val recovered = recoverFromFailure(
                             task = task,
@@ -906,6 +944,22 @@ class TaskOrchestrator(
         } catch (e: Exception) {
             Log.e(TAG, "Web tool '${action.getDisplayName()}' failed", e)
             "Web tool error: ${e.localizedMessage}".take(400)
+        }
+    }
+
+    /**
+     * A step whose own completed result is its goal evidence, so no UI postcondition
+     * is required at the goal gate. Web tools return a bounded result digest
+     * (web_search/read_url), and a read action returns the visible-text digest it
+     * captured (9.4) - the read IS the goal for a read-only task.
+     */
+    private fun selfEvidencingToolSatisfied(step: PlanStep?): Boolean {
+        if (step?.status != PlanStepStatus.COMPLETED) return false
+        return when (step.action) {
+            is AgentAction.WebSearch, is AgentAction.ReadUrl,
+            is AgentAction.ReadText, is AgentAction.ReadPageContent,
+            is AgentAction.ReadNotifications -> true
+            else -> false
         }
     }
 
@@ -996,7 +1050,8 @@ class TaskOrchestrator(
                 remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1),
                 memorySummary = memoryDigest,
                 retrievedContext = retrievedContext,
-                lessonsSummary = lessonsDigest
+                lessonsSummary = lessonsDigest,
+                variableSummary = variableSummary()
             )
         }
         val newPlan = when (outcome) {
@@ -1045,6 +1100,22 @@ class TaskOrchestrator(
     ): PostconditionVerdict {
         if (!result.success) {
             return PostconditionVerdict(false, "Failed: ${result.message} [method: ${result.method}]")
+        }
+        // 9.4: a read_text/read_page_content step's success is the text it captured.
+        // Its default verification is NONE, which can never be satisfied on its own,
+        // so a read that declared no explicit postcondition is satisfied by the
+        // non-empty text it returned. Without this the read would be retried forever
+        // and its captured value could never reach a later {{name}} step - i.e. the
+        // whole cross-app variable feature would be dead for the natural case.
+        if (step.verification == VerificationMethod.NONE &&
+            (action is AgentAction.ReadText || action is AgentAction.ReadPageContent)
+        ) {
+            val captured = result.readText
+            return if (!captured.isNullOrBlank()) {
+                PostconditionVerdict(true, "Read ${captured.length} chars of visible text")
+            } else {
+                PostconditionVerdict(false, "Read action returned no visible text to capture")
+            }
         }
         if (action is AgentAction.OpenSearch) {
             // A text-entry step that was re-routed into opening the search interface
@@ -1656,7 +1727,8 @@ class TaskOrchestrator(
                     ),
                     memorySummary = memoryDigest,
                     retrievedContext = retrievedContext,
-                    lessonsSummary = lessonsDigest
+                    lessonsSummary = lessonsDigest,
+                    variableSummary = variableSummary()
                 ),
                 notificationTriageEnabled()
             )
@@ -1747,5 +1819,9 @@ class TaskOrchestrator(
 
         /** Bounded obstacle dismissals per run (plan 9.12), so recovery cannot loop. */
         const val MAX_OBSTACLE_RECOVERIES = 3
+
+        /** 9.4: bounds on the captured-variable summary injected into the planning prompt. */
+        const val MAX_VARIABLE_ENTRIES = 6
+        const val MAX_VARIABLE_VALUE_CHARS = 120
     }
 }

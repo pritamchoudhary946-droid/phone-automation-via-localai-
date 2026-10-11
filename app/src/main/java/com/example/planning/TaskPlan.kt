@@ -35,7 +35,14 @@ data class PlanStep(
     val dependsOn: List<Int> = emptyList(),
     val maxRetries: Int = 1,
     val status: PlanStepStatus = PlanStepStatus.PENDING,
-    val attempts: Int = 0
+    val attempts: Int = 0,
+    /**
+     * Names of task variables (plan 9.4) this step's success populates from the
+     * text its read action captured. A later step references the value with the
+     * placeholder `{{name}}`; the captured text is copied into the task's
+     * [PlanVariableStore] only after the step's postcondition is verified.
+     */
+    val captures: List<String> = emptyList()
 ) {
     fun withStatus(newStatus: PlanStepStatus): PlanStep = copy(status = newStatus)
     fun withAttempt(): PlanStep = copy(attempts = attempts + 1, status = PlanStepStatus.EXECUTING)

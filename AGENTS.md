@@ -287,6 +287,19 @@ The prompt never advertises a capability the executor cannot run.
 - Every Phase 9 capability is OPT-IN and OFF by default: 9.1 proactive awareness,
   9.2 location triggers, 9.7 hands-free, 9.8 briefing, 9.9 triage. Never enable a
   capability implicitly. `CapabilitySettings` is the single home for the flags.
+- 9.4 cross-app data passing (task variables): `PlanVariableStore` is a per-run,
+  never-persisted, tenant-scoped store; a step declares `"captures":["name"]` on a
+  `read_text`/`read_page_content` step and a later step uses `{{name}}`
+  (`substitute` runs just before execution). A capture step's success is the
+  non-empty text it captured — `verifyAction` treats a NONE-verified read as
+  satisfied by its own `readText` (empty -> failure, never a fake success), and the
+  goal gate's `selfEvidencingToolSatisfied(...)` counts a completed
+  ReadText/ReadPageContent/ReadNotifications as goal evidence. A capture step
+  removes its variable names before storing (no stale reuse on re-run) and a failed
+  capture removes them too. `PlanVariableStore.looksSensitive(...)` refuses a value
+  that looks like a secret (13-19 digit card, labelled otp/pin/password/cvv/secret)
+  so it never reaches a later step or the prompt. Do not regress the read's
+  self-satisfaction or the secret guard.
 - 9.1 `ProactiveEngine.Runner` is started once from `OmniAgentApplication`; it only
   *offers* (notification/TTS) and is gated by the toggle AND `BatteryGuard` (9.14).
 - 9.7 `VoiceLoop`/`VoiceLoopController` drive wake -> listen -> confirm -> execute ->

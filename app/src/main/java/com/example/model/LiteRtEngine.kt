@@ -108,7 +108,8 @@ class LiteRtEngine(
         remainingStepBudget: Int,
         memorySummary: String = "",
         retrievedContext: String = "",
-        lessonsSummary: String = ""
+        lessonsSummary: String = "",
+        variableSummary: String = ""
     ): PlanOutcome {
         val request = PlanningRequest(
             userCommand = goal,
@@ -121,7 +122,8 @@ class LiteRtEngine(
             availableActions = planner.availableActions(),
             memorySummary = memorySummary,
             retrievedContext = retrievedContext,
-            lessonsSummary = lessonsSummary
+            lessonsSummary = lessonsSummary,
+            variableSummary = variableSummary
         )
         return planner.plan(request)
     }
@@ -135,6 +137,7 @@ class LiteRtEngine(
         historySummary: String,
         lastActionVerification: String?,
         remainingStepBudget: Int,
+        variableSummary: String = "",
         screenshotBytes: ByteArray? = null
     ): StepDecision {
         val request = StepDecisionRequest(
@@ -145,7 +148,8 @@ class LiteRtEngine(
             completedStepsSummary = historySummary,
             lastActionResult = lastActionVerification,
             remainingStepBudget = remainingStepBudget,
-            availableActions = planner.availableActions()
+            availableActions = planner.availableActions(),
+            variableSummary = variableSummary
         )
         return planner.decideNextAction(request, screenshotBytes)
     }

@@ -32,6 +32,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -567,6 +568,117 @@ class CapabilityUpgradeTest {
 
         assertTrue("a saved media skill must be replayable", restored != null)
         assertEquals(AgentAction.PlayMedia("pause"), restored!!.steps[0].action)
+    }
+
+    // --- 9.4 cross-app variables: a read value must reach a later step's action ---
+
+    @Test
+    fun capturedReadTextReachesALaterStepInAnotherApp() = kotlinx.coroutines.runBlocking {
+        // End-to-end 9.4: a value read in one app must be usable, via {{name}}, by a
+        // later step in another app. This is the acceptance scenario
+        // ("copy that price, open Notes, paste it").
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Notes", 1, editable = true)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.ReadText -> ActionResult(
+                        true, "READ_TEXT", "read 8 chars", readText = "₹1,299"
+                    )
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        // Step 1 reads the price into {{price}}; step 2 (enter_text) types it into the
+        // next app's notes field. read_text keeps its default NONE verification.
+        val engine = modelEngine(
+            """{"steps":[
+                {"id":1,"seq":1,"desc":"Read the price","action":"read_text","params":{},"captures":["price"]},
+                {"id":2,"seq":2,"desc":"Type the price into Notes","action":"enter_text","params":{"text":"price: {{price}}"},"verify":"NONE"}
+            ]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("copy the price into Notes", maxSteps = 6)
+
+        awaitTerminal(orchestrator)
+
+        val typed = automation.executed.filterIsInstance<AgentAction.TypeText>()
+        assertTrue("the read value never reached the later TypeText", typed.isNotEmpty())
+        assertEquals("price: ₹1,299", typed.last().text)
+    }
+
+    @Test
+    fun readTextStepCompletesFromItsOwnCapturedTextWithoutAScreenChange() = kotlinx.coroutines.runBlocking {
+        // The gate that had made 9.4 dead: a read_text step defaults to NONE
+        // verification, which is never satisfiable on its own, so the read could never
+        // complete and could never capture. A read that returns text now satisfies itself.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.settings", "About phone", 5)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.ReadText -> ActionResult(
+                        true, "READ_TEXT", "read 6 chars", readText = "Pixel 8"
+                    )
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Read the device model","action":"read_text","params":{},"captures":["model"]}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("what model is this", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("read step with NONE verification must complete, got $terminal", terminal is OrchestratorState.Completed)
+    }
+
+    @Test
+    fun failedReadDoesNotSatisfyACaptureStepAndTheRunFailsHonestly() = kotlinx.coroutines.runBlocking {
+        // 9.4 freshness: an empty/failed read must not satisfy the capture step, so the
+        // following step can never be handed a stale or blank value.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.ReadText -> ActionResult(true, "READ_TEXT", "no visible text", readText = null)
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[
+                {"id":1,"seq":1,"desc":"Read the price","action":"read_text","params":{},"captures":["price"]},
+                {"id":2,"seq":2,"desc":"Type it","action":"enter_text","params":{"text":"price: {{price}}"},"verify":"NONE"}
+            ]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("copy the price into Notes", maxSteps = 4)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("an unreadable capture must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+        // The blank value must never be typed into the later app.
+        val typed = automation.executed.filterIsInstance<AgentAction.TypeText>()
+        assertTrue("no bogus value may be typed", typed.none { it.text == "price: " })
+    }
+
+    @Test
+    fun variableStoreTracksSourceFreshnessAndRefusesSecrets() {
+        val store = com.example.planning.PlanVariableStore()
+        assertTrue(store.set("price", "₹100", source = "read_text", nowMs = 1_000))
+        assertEquals("₹100", store.get("price"))
+        assertEquals("read_text", store.variable("price")!!.source)
+        assertEquals(1_000L, store.variable("price")!!.capturedAtMs)
+
+        // A re-capture refreshes the value and its timestamp (freshness).
+        assertTrue(store.set("price", "₹200", source = "read_text", nowMs = 2_000))
+        assertEquals("₹200", store.get("price"))
+        assertEquals(2_000L, store.variable("price")!!.capturedAtMs)
+
+        // Sensitive content is refused, never stored, never substituted.
+        assertFalse(store.set("card", "4111 1111 1111 1111"))
+        assertFalse(store.set("pw", "password: hunter2"))
+        assertNull(store.get("card"))
+        assertNull(store.get("pw"))
     }
 
     // --- Helpers ---

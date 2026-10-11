@@ -103,8 +103,19 @@ data class UiObservation(
 data class ActionResult(
     val success: Boolean,
     val method: String,
-    val message: String
-)
+    val message: String,
+    /**
+     * The visible text a *read* action captured, when there was one (plan 9.4).
+     * This is the value a later step can reference as a `{{name}}` variable; it is
+     * null for every action that does not produce readable content. Captured text is
+     * treated as untrusted, bounded by [MAX_CAPTURED_CHARS] and never persisted.
+     */
+    val readText: String? = null
+) {
+    companion object {
+        const val MAX_CAPTURED_CHARS = 2_000
+    }
+}
 
 /**
  * Execution layer boundary. The planning brain never touches Android APIs
@@ -333,7 +344,8 @@ class AndroidDeviceAutomation(
                 ActionResult(
                     success = text.isNotBlank(),
                     method = "READ_TEXT",
-                    message = if (text.isNotBlank()) "Read ${text.length} chars of visible text" else "No visible text found on screen"
+                    message = if (text.isNotBlank()) "Read ${text.length} chars of visible text" else "No visible text found on screen",
+                    readText = text.take(ActionResult.MAX_CAPTURED_CHARS).takeIf { it.isNotBlank() }
                 )
             }
             is AgentAction.WaitForText -> {
@@ -402,7 +414,8 @@ class AndroidDeviceAutomation(
                 ActionResult(
                     success = text.isNotBlank(),
                     method = "READ_PAGE_CONTENT",
-                    message = if (text.isNotBlank()) "Extracted ${text.length} chars of page content" else "No page content found"
+                    message = if (text.isNotBlank()) "Extracted ${text.length} chars of page content" else "No page content found",
+                    readText = text.take(ActionResult.MAX_CAPTURED_CHARS).takeIf { it.isNotBlank() }
                 )
             }
             else -> ActionResult(

@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 16,
+  "sessions_done": 17,
   "session_cap": 48,
-  "current_milestone": "P0 fix-forward: main was BROKEN by the unverified play_media merge (#44). PlannerPromptBuilder.ACTION_CATALOG_LINES had no trailing comma after the new play_media line (line 66), so :app:compileDebugKotlin failed with 'Syntax error: Expecting ,' and NO module could build/test. Fixed forward (one comma) and, with a real toolchain, ran the full unit gate to validate all three previously-unverified merges (#41 adjust_volume, #43 9.9 prompt gating, #44 play_media).",
+  "current_milestone": "PLAN 9.4 cross-app data passing (task variables/slots): make the dead variable-capture feature live so a value read in one app is usable, via {{name}}, by a later step in another app.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -59,7 +59,13 @@
     "main-unbreak 2026-10-11 (session 16) P0: PlannerPromptBuilder.kt:66 (the play_media catalogue line added by PR #44) was missing a trailing comma in the ACTION_CATALOG_LINES list literal. :app:compileDebugKotlin failed: 'PlannerPromptBuilder.kt:66:194 Syntax error: Expecting ','. Got no applicable type argument for ...' - a hard compile error, so main had NO buildable :app module and NO tests could run. Root cause: #44 was merged UNVERIFIED (no toolchain in that sandbox). Fixed by adding the comma.",
     "validation 2026-10-11 (session 16, toolchain present): installed JDK21 (openjdk-21-jdk-headless, /usr/lib/jvm/java-21-openjdk-amd64) + Android SDK 36.1 (platforms;android-36.1, build-tools;36.1.0, platform-tools) into /workspace/android-sdk; ./gradlew :app:compileDebugKotlin --no-daemon reproduced the exact error at PlannerPromptBuilder.kt:66 BEFORE the fix.",
     "validation 2026-10-11 (session 16, toolchain present): AFTER the fix, ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m23s, 288 tests 0 failures 0 errors 0 skipped (19 suites). This also unit-verifies the three merges that had been landed without a toolchain: #41 adjust_volume, #43 9.9 prompt-gating, #44 play_media (all 7 play_media* CapabilityUpgradeTest cases pass, including promptAdvertisesPlayMedia - the line that was broken).",
-    "process note 2026-10-11 (session 16): the prior run's 'NO TOOLCHAIN' blocker is environment-specific, not permanent - every sandbox varies. This run installed the toolchain from scratch (apt openjdk-21 + Google cmdline-tools sdkmanager) and therefore could finally run the deferred gate. Future runs should attempt the same install rather than assume the gate cannot run."
+    "process note 2026-10-11 (session 16): the prior run's 'NO TOOLCHAIN' blocker is environment-specific, not permanent - every sandbox varies. This run installed the toolchain from scratch (apt openjdk-21 + Google cmdline-tools sdkmanager) and therefore could finally run the deferred gate. Future runs should attempt the same install rather than assume the gate cannot run.",
+    "capability 2026-10-11 (session 17) 9.4: PlanVariableStore was a 'written but not working' dead seam - captures were parsed/stored/substituted but a read_text step's default NONE verification could never be satisfied, so the read never completed and could never capture; the goal gate also had no self-evidencing read path. Now TaskOrchestrator.verifyAction treats a completed read_text/read_page_content (NONE verification) as satisfied by the non-empty text it captured (empty -> failure, never a fake success), and the goal gate's selfEvidencingToolSatisfied(...) accepts a completed ReadText/ReadPageContent/ReadNotifications (bounded digest) alongside the existing WebSearch/ReadUrl. Cross-app acceptance scenario now works end to end.",
+    "9.4 freshness/honesty 2026-10-11 (session 17): a capture step now removes its variable names BEFORE storing (so a re-run can never leave a stale value), a failed capture step removes them too (a later {{name}} step can never silently reuse an earlier value), and the store records source + capturedAtMs per value (provenance/freshness).",
+    "9.4 security 2026-10-11 (session 17): PlanVariableStore.set now refuses to store a value that looks sensitive (13-19 digit payment-card shape, or a labelled otp/pin/password/cvv/secret line) via the pure, unit-tested looksSensitive(...) guard, so a captured secret never reaches a later step or the plan prompt. Deliberately conservative: a bare price/quantity/year digit run is NOT refused.",
+    "regression tests 2026-10-11 (session 17, CapabilityUpgradeTest +4): capturedReadTextReachesALaterStepInAnotherApp (end-to-end cross-app {{price}} -> enter_text), readTextStepCompletesFromItsOwnCapturedTextWithoutAScreenChange, failedReadDoesNotSatisfyACaptureStepAndTheRunFailsHonestly, variableStoreTracksSourceFreshnessAndRefusesSecrets.",
+    "fix 2026-10-11 (session 17): the two new cross-app tests originally used the non-catalog action name 'type_text' (the real tool is enter_text, ToolRegistry.TOOL_ENTER_TEXT), so TaskPlanParser correctly rejected the plan ('Unknown action type_text is not in the approved catalog') and the plan never executed - a TEST bug, not a production bug. Corrected to enter_text.",
+    "validation 2026-10-11 (session 17, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 59s, 293 tests 0 failures 0 errors 0 skipped (19 suites; 289 baseline + 4 new 9.4 tests)."
   ],
   "in_progress": {
     "item": "",
@@ -73,12 +79,12 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path.",
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
   ],
-  "branch": "auto/jarvis-autonomy-20261011-2200",
-  "open_pr": 44,
+  "branch": "auto/jarvis-autonomy-20261011-1730",
+  "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261011T1655Z",
-  "last_updated": "2026-10-11T16:55:00Z",
+  "last_run_id": "internal-20261011T1730Z",
+  "last_updated": "2026-10-11T17:33:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,
