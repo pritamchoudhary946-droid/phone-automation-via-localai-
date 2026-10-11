@@ -25,7 +25,8 @@
     "main-unbreak merged 2026-10-11 via PR #32 (squash, branch auto/jarvis-autonomy-20261011-0731 deleted). Merge commit 240b839 on main.",
     "9.9 invariant recorded in AGENTS.md: ReadNotifications is notification-bus backed and must be resolved before the a11y-service gate (TRIAGE_DISABLED when off, else readNotificationDigest); the digest helper stays service-free.",
     "5.7 fix 2026-10-11: StuckLoopDetector.recordStep compared actionName.contains(\"Tap\") case-sensitively, but rawActionName is ALWAYS the lowercase catalog tool name (TaskPlanParser line 52 .lowercase() -> line 82; HeuristicPlanner \"basic_fallback\"; TaskPlanSerializer.toolNameFor returns ToolRegistry.TOOL_* lowercase). The capitalised form \"Tap\" only exists in the UI monitor's display name (AgentLiveMonitorScreen reads actionPayloadJson/display), never in rawActionName. Result: the SCROLL_TO_DISCOVER branch was dead and every stuck tap (streak 2) misrouted to PRESS_BACK_TO_UNBLOCK - a wrong recovery direction on the 10.7 stuck path. Fixed with contains(\"tap\", ignoreCase = true); regression test stuckTapOnFrozenScreenSuggestsScrollNotBack (Phase5AutonomyTest).",
-    "validation 2026-10-11: COULD NOT RUN - ./gradlew :app:testDebugUnitTest --no-daemon -> \"ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH\"; ANDROID_HOME unset, /opt/android-sdk and /usr/lib/jvm absent. Change is 1 line + 1 test, reasoned from source; next run with a toolchain must run ./gradlew :app:testDebugUnitTest --no-daemon."
+    "validation 2026-10-11: COULD NOT RUN - ./gradlew :app:testDebugUnitTest --no-daemon -> \"ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH\"; ANDROID_HOME unset, /opt/android-sdk and /usr/lib/jvm absent. Change is 1 line + 1 test, reasoned from source; next run with a toolchain must run ./gradlew :app:testDebugUnitTest --no-daemon.",
+    "5.7 fix merged 2026-10-11 via PR #34 (squash, branch auto/jarvis-autonomy-20261011-0831 deleted). Merge commit 79bcf94 on main. Gradle gate still COULD NOT RUN - no JDK/SDK in sandbox."
   ],
   "in_progress": {
     "item": "",
@@ -40,7 +41,7 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-0831",
+  "branch": null,
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [
