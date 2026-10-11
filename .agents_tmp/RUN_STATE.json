@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 15,
+  "sessions_done": 16,
   "session_cap": 48,
-  "current_milestone": "Capability: play_media (device media transport control) - section 2.1 'media playback control' was listed but absent. A new MediaController seam + MediaTransport enum (play/pause/toggle/stop/next/previous -> KEYCODE_MEDIA_* ) dispatches a standard media key to the active session via AudioManager.dispatchMediaKeyEvent, verified by an isMusicActive before/after read-back (a dispatch that leaves playback state unchanged is a failure, not a fake success). Wired across every action-vocabulary seam and resolved before the a11y-service gate (media is AudioManager-backed, like adjust_volume/read_notifications).",
+  "current_milestone": "P0 fix-forward: main was BROKEN by the unverified play_media merge (#44). PlannerPromptBuilder.ACTION_CATALOG_LINES had no trailing comma after the new play_media line (line 66), so :app:compileDebugKotlin failed with 'Syntax error: Expecting ,' and NO module could build/test. Fixed forward (one comma) and, with a real toolchain, ran the full unit gate to validate all three previously-unverified merges (#41 adjust_volume, #43 9.9 prompt gating, #44 play_media).",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -55,7 +55,11 @@
     "validation 2026-10-11 (session 15): COULD NOT RUN - this sandbox has no toolchain: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 does not exist, ANDROID_HOME=/opt/android-sdk does not exist, no java/javac on PATH; ./gradlew --version -> 'ERROR: JAVA_HOME is set to an invalid directory'. The change is a pure additive default-preserving signature extension, reasoned from source, with a dedicated prompt-body regression test. A toolchain run MUST execute ./gradlew :app:testDebugUnitTest --no-daemon before this is treated as verified.",
     "merge 2026-10-11 (session 15): merged origin/main (e843028 adjust_volume #41, itself building on clear_text aa62103 #42) into auto/jarvis-autonomy-20261011-1529. One production conflict in PlannerPromptBuilder.kt (the string ACTION_CATALOG vs the line-list ACTION_CATALOG_LINES) was resolved by keeping the line-list form, which is required for the 9.9 prompt gate and already carries the adjust_volume/clear_text catalogue lines. RUN_STATE.json conflict resolved by rebuilding from origin/main plus the session-15 entries.",
     "capability 2026-10-11 (session 15): new AgentAction.PlayMedia + tool play_media (media transport control: play/pause/toggle/stop/next/previous). Closes the section 2.1 'media playback control' gap - a UI tap cannot reach an arbitrary player's transport. Implemented across all action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (const, ToolDefinition, validateAction via MediaTransport.fromKey), TaskPlanParser.mapAction, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, AndroidDeviceAutomation.execute (service-free, before the a11y gate), and TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor).",
-    "capability 2026-10-11 (session 15): new com.example.agent.MediaController interface + MediaTransport enum + AndroidMediaController (AudioManager.dispatchMediaKeyEvent with an isMusicActive before/after read-back so play/pause/toggle/stop report success only when playback state actually moved; next/previous are reported as a delivered key, 'track change not state-verifiable', never a claimed track change). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication."
+    "capability 2026-10-11 (session 15): new com.example.agent.MediaController interface + MediaTransport enum + AndroidMediaController (AudioManager.dispatchMediaKeyEvent with an isMusicActive before/after read-back so play/pause/toggle/stop report success only when playback state actually moved; next/previous are reported as a delivered key, 'track change not state-verifiable', never a claimed track change). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication.",
+    "main-unbreak 2026-10-11 (session 16) P0: PlannerPromptBuilder.kt:66 (the play_media catalogue line added by PR #44) was missing a trailing comma in the ACTION_CATALOG_LINES list literal. :app:compileDebugKotlin failed: 'PlannerPromptBuilder.kt:66:194 Syntax error: Expecting ','. Got no applicable type argument for ...' - a hard compile error, so main had NO buildable :app module and NO tests could run. Root cause: #44 was merged UNVERIFIED (no toolchain in that sandbox). Fixed by adding the comma.",
+    "validation 2026-10-11 (session 16, toolchain present): installed JDK21 (openjdk-21-jdk-headless, /usr/lib/jvm/java-21-openjdk-amd64) + Android SDK 36.1 (platforms;android-36.1, build-tools;36.1.0, platform-tools) into /workspace/android-sdk; ./gradlew :app:compileDebugKotlin --no-daemon reproduced the exact error at PlannerPromptBuilder.kt:66 BEFORE the fix.",
+    "validation 2026-10-11 (session 16, toolchain present): AFTER the fix, ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m23s, 288 tests 0 failures 0 errors 0 skipped (19 suites). This also unit-verifies the three merges that had been landed without a toolchain: #41 adjust_volume, #43 9.9 prompt-gating, #44 play_media (all 7 play_media* CapabilityUpgradeTest cases pass, including promptAdvertisesPlayMedia - the line that was broken).",
+    "process note 2026-10-11 (session 16): the prior run's 'NO TOOLCHAIN' blocker is environment-specific, not permanent - every sandbox varies. This run installed the toolchain from scratch (apt openjdk-21 + Google cmdline-tools sdkmanager) and therefore could finally run the deferred gate. Future runs should attempt the same install rather than assume the gate cannot run."
   ],
   "in_progress": {
     "item": "",
@@ -63,21 +67,18 @@
     "note": ""
   },
   "next_items": [
-    "TOOLCHAIN REQUIRED: run ./gradlew :app:testDebugUnitTest --no-daemon for the play_media milestone (#44), the 9.9 prompt-gating milestone (#43) and the still-unverified adjust_volume milestone (#41). Fix forward if any new CapabilityUpgradeTest case fails.",
-    "Run the full gate with assembleDebug when the milestone needs an APK: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (needs JDK21 + Android SDK 36.1)",
-    "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4. Consider reconciling the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2 intact) in a dedicated toolchain run.",
+    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Candidate: calendar/contacts intent actions (section 2.1) - none exist yet.",
+    "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4. Reconcile the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2).",
     "5.2 (low-risk): FailureClassifier.burnedByWrongPackage is only set when a WRONG_PACKAGE failure precedes TARGET_NOT_FOUND. No change made.",
-    "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining boolean-logic defects.",
-    "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
+    "Continue item 4A mandatory full bug sweep on the live recovery path.",
+    "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
   ],
-  "branch": "auto/jarvis-autonomy-20261011-2108",
+  "branch": "auto/jarvis-autonomy-20261011-2200",
   "open_pr": 44,
   "risky_actions_done": [],
-  "blockers": [
-    "NO TOOLCHAIN in this sandbox (2026-10-11 21:08 IST): ./gradlew cannot run - no java/javac on PATH, JAVA_HOME empty, /usr/lib/jvm absent, ANDROID_HOME empty, /opt/android-sdk absent. play_media (#44) merged unverified; a toolchain run must run the unit gate and fix forward if any play_media* case fails."
-  ],
-  "last_run_id": "internal-20261011T1532Z",
-  "last_updated": "2026-10-11T15:55:00Z",
+  "blockers": [],
+  "last_run_id": "internal-20261011T1655Z",
+  "last_updated": "2026-10-11T16:55:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,
