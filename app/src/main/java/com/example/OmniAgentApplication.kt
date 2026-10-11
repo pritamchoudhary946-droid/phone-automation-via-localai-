@@ -121,7 +121,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             },
             scope = appScope
         )
-        planner = AgentPlanner(inferenceEngine, modelManager)
+        planner = AgentPlanner(
+            inferenceEngine,
+            modelManager,
+            // 9.9: only advertise read_notifications to the planner while triage is on.
+            notificationTriageEnabled = { settings.notificationTriageEnabled }
+        )
         liteRtEngine = LiteRtEngine(this, modelManager, inferenceEngine, planner)
 
         appDirectory = AppDirectory(this)
@@ -167,7 +172,9 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 generate = { prompt, system, max -> inferenceEngine.generate(prompt, system, max) },
                 ready = { inferenceEngine.isReady() }
             ),
-            speechOutput = speechOutput
+            speechOutput = speechOutput,
+            // 9.9: keep the advertised catalogue in step with the executor gate.
+            notificationTriageEnabled = { settings.notificationTriageEnabled }
         )
 
         // 7.8: re-arm (or cancel) any persisted automations according to the current

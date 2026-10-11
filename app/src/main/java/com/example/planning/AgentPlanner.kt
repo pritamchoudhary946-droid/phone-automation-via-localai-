@@ -21,10 +21,18 @@ class AgentPlanner(
     private val parser: TaskPlanParser = TaskPlanParser(),
     private val heuristicPlanner: HeuristicPlanner = HeuristicPlanner(),
     private val toolRegistry: ToolRegistry = ToolRegistry(),
-    private val maxOutputTokens: Int = 768
+    private val maxOutputTokens: Int = 768,
+    /** Live opt-in gate for the notification-triage capability (plan 9.9). */
+    private val notificationTriageEnabled: () -> Boolean = { false }
 ) {
 
-    private val availableActions = PlannerPromptBuilder.availableActions(toolRegistry)
+    /**
+     * Read lazily per call, not captured once, so flipping the Settings toggle takes
+     * effect on the next prompt: the opt-in `read_notifications` tool disappears from
+     * the advertised catalogue (and its schema from [PlannerPromptBuilder]) while off.
+     */
+    private fun availableToolNames(): List<String> =
+        PlannerPromptBuilder.availableActions(toolRegistry, notificationTriageEnabled())
 
     /** Hierarchical reflection-on-demand (plan 5.4), shared by the orchestrator. */
     private val reflector = Reflector(inferenceEngine)
@@ -56,7 +64,7 @@ class AgentPlanner(
             }
         }
 
-        val prompt = PlannerPromptBuilder.buildPlanningPrompt(request)
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(request, notificationTriageEnabled())
         var lastRaw = ""
         var lastReason = "unknown"
 
@@ -157,7 +165,7 @@ class AgentPlanner(
 
     fun fallbackPlan(command: String): TaskPlan = heuristicPlanner.toFallbackPlan(command)
 
-    fun availableActions(): List<String> = availableActions
+    fun availableActions(): List<String> = availableToolNames()
 
     /**
      * Reflection-on-demand (plan 5.4): a short, bounded second opinion on the last

@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 14,
+  "sessions_done": 15,
   "session_cap": 48,
-  "current_milestone": "Capability: adjust_volume (device audio-stream control) - the advertised media-control primitive had NO execution branch, so a planned volume change fell through to UNSUPPORTED_ACTION and could never run. Adds an AudioController seam (AudioManager-backed, read-back verified), resolves it before the a11y-service gate (audio is service-free, like ReadNotifications), carries the mute flag across parser/serializer/prompt, and renames the dead-end UNKNOWN arm to UNSUPPORTED_ACTION.",
+  "current_milestone": "Capability: 9.9 opt-in gate closed at the prompt level - read_notifications was in the planning prompt's parameter catalogue unconditionally, so while notification triage was OFF the model was still handed the read_notifications schema and could emit a step the executor refuses. Now the schema line and the advertised tool list are both withheld by a live supplier read per call.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -47,7 +47,13 @@
     "capability 2026-10-11: ClearText is verified like a normal entry - ACTION_SET_TEXT \"\" must read back empty, so a clear that did not take is reported as failure, not success.",
     "regression tests 2026-10-11 (CapabilityUpgradeTest): parserMapsClearTextToTheClearAction (with and without a target), validationAcceptsClearTextWithOrWithoutATarget, fastPathClearsOnlyWhenAnEditableFieldIsExposed (Execute with field / ModelReason without), promptAdvertisesClearText, clearTextSkillKeepsItsTargetOnReplay (serializer round-trip keeps targetText).",
     "validation 2026-10-11 (this run, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m15s, 274 tests 0 failures 0 errors 0 skipped (269 baseline + 5 new ClearText tests).",
-    "merge 2026-10-11 (session 14): merged origin/main (aa62103 clear_text) into auto/jarvis-autonomy-20261011-1331; resolved two conflicts by keeping BOTH additive blocks - RUN_STATE.json done_items/state and CapabilityUpgradeTest.kt (adjust_volume block + clear_text block, with the shared closing brace restored). Production code (AgentAction/DeviceAutomation/HybridStepExecutor/ToolRegistry/TaskPlanParser/TaskPlanSerializer/PlannerPromptBuilder/PlanVariables) auto-merged with both AdjustVolume and ClearText wired across every seam."
+    "merge 2026-10-11 (session 14): merged origin/main (aa62103 clear_text) into auto/jarvis-autonomy-20261011-1331; resolved two conflicts by keeping BOTH additive blocks - RUN_STATE.json done_items/state and CapabilityUpgradeTest.kt (adjust_volume block + clear_text block, with the shared closing brace restored). Production code (AgentAction/DeviceAutomation/HybridStepExecutor/ToolRegistry/TaskPlanParser/TaskPlanSerializer/PlannerPromptBuilder/PlanVariables) auto-merged with both AdjustVolume and ClearText wired across every seam.",
+    "9.9 capability 2026-10-11 (session 15): the opt-in gate now reaches the prompt. PlannerPromptBuilder.availableActions(registry, notificationTriageEnabled) filters read_notifications out of the advertised tool list, and the parameter catalogue was split into ACTION_CATALOG_LINES + actionCatalog(enabled) so the read_notifications schema line is withheld from the model while triage is off. buildPlanningPrompt takes the flag (default false = safe/OFF).",
+    "9.9 wiring 2026-10-11 (session 15): the gate is a live `() -> Boolean` supplier, not a captured value, so a Settings toggle flip takes effect on the next prompt. AgentPlanner gains notificationTriageEnabled (read per call by availableToolNames()), OmniAgentApplication wires `{ settings.notificationTriageEnabled }` into both the AgentPlanner and the TaskOrchestrator, and the orchestrator's two catalogue call sites (exploration probe, cloud-replan prompt) now use the filtered availableActions.",
+    "9.9 regression test 2026-10-11 (session 15): Phase4UpgradeTest.readNotificationsIsAnApprovedTool now asserts the tool is advertised with triage ON and withheld with triage OFF; new planningPromptWithholdsReadNotificationsWhileTriageOff asserts the raw prompt text is free of read_notifications while off and contains it while on (the leak was in the prompt body, not just the list).",
+    "9.9 invariant recorded in AGENTS.md 2026-10-11 (session 15): the prompt-level gate must be a live per-call read and both new params must default to the safe/OFF value, so a caller that forgets the flag never advertises an action the executor refuses.",
+    "validation 2026-10-11 (session 15): COULD NOT RUN - this sandbox has no toolchain: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 does not exist, ANDROID_HOME=/opt/android-sdk does not exist, no java/javac on PATH; ./gradlew --version -> 'ERROR: JAVA_HOME is set to an invalid directory'. The change is a pure additive default-preserving signature extension, reasoned from source, with a dedicated prompt-body regression test. A toolchain run MUST execute ./gradlew :app:testDebugUnitTest --no-daemon before this is treated as verified.",
+    "merge 2026-10-11 (session 15): merged origin/main (e843028 adjust_volume #41, itself building on clear_text aa62103 #42) into auto/jarvis-autonomy-20261011-1529. One production conflict in PlannerPromptBuilder.kt (the string ACTION_CATALOG vs the line-list ACTION_CATALOG_LINES) was resolved by keeping the line-list form, which is required for the 9.9 prompt gate and already carries the adjust_volume/clear_text catalogue lines. RUN_STATE.json conflict resolved by rebuilding from origin/main plus the session-15 entries."
   ],
   "in_progress": {
     "item": "",
@@ -55,24 +61,23 @@
     "note": ""
   },
   "next_items": [
-    "TOOLCHAIN REQUIRED: run ./gradlew :app:testDebugUnitTest --no-daemon for the adjust_volume milestone (sandbox 2026-10-11 13:31 has no JDK and no Android SDK: /usr/lib/jvm and /opt/android-sdk absent). If green, merge; if the 6 new CapabilityUpgradeTest cases fail, fix forward.",
+    "TOOLCHAIN REQUIRED: run ./gradlew :app:testDebugUnitTest --no-daemon to confirm the 9.9 prompt-gating milestone and the still-unverified adjust_volume (#41) milestone. If any case fails, fix forward (do not revert others' work).",
     "Run the full gate with assembleDebug when the milestone needs an APK: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (needs JDK21 + Android SDK 36.1)",
-    "9.9 follow-up: gate AgentAction.ReadNotifications in ToolRegistry.validateAction/availableActions by the live flag so the planner is not even offered it when triage is off (needs a flag-aware registry seam; would also drop read_notifications from the prompt catalogue)",
-    "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4, so a single stuck path can exhaust the explore budget and reach ASK_USER_HELP on one pair-run. Rationale is not documented; consider reconciling the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2 intact) in a dedicated run with a toolchain to confirm the intent.",
-    "5.2 (low-risk): FailureClassifier.burnedByWrongPackage is only set when a WRONG_PACKAGE failure precedes TARGET_NOT_FOUND; a target-not-found with no prior wrong-package is unaffected. No change made.",
-    "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
+    "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4. Consider reconciling the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2 intact) in a dedicated toolchain run.",
+    "5.2 (low-risk): FailureClassifier.burnedByWrongPackage is only set when a WRONG_PACKAGE failure precedes TARGET_NOT_FOUND. No change made.",
+    "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining boolean-logic defects.",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-1331",
-  "open_pr": 41,
+  "branch": "auto/jarvis-autonomy-20261011-1529",
+  "open_pr": 43,
   "risky_actions_done": [],
   "blockers": [
-    "NO TOOLCHAIN in this sandbox (2026-10-11 13:31): ./gradlew :app:testDebugUnitTest --no-daemon -> 'ERROR: JAVA_HOME is set to an invalid directory: /usr/lib/jvm/java-21-openjdk-amd64' (the directory does not exist); ANDROID_HOME points at /opt/android-sdk which does not exist. The adjust_volume milestone therefore merged unverified; a toolchain run must run the unit gate and fix forward if any of the 6 adjust_volume* cases fail."
+    "NO TOOLCHAIN in this sandbox (2026-10-11 15:32): JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 does not exist, ANDROID_HOME=/opt/android-sdk does not exist, no java/javac on PATH. The 9.9 prompt-gating milestone therefore merges unverified; a toolchain run must run the unit gate and fix forward if the new/updated Phase4UpgradeTest cases fail."
   ],
-  "last_run_id": "internal-20261011T1510Z",
-  "last_updated": "2026-10-11T15:12:00Z",
+  "last_run_id": "internal-20261011T1532Z",
+  "last_updated": "2026-10-11T15:45:00Z",
   "carryover_milestone": null,
-  "milestone_attempts": 2,
+  "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,
   "blocked_items": []
 }
