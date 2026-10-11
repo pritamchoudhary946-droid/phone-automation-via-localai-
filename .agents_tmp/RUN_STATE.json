@@ -3,7 +3,7 @@
   "sessions_done": 10,
   "session_cap": 48,
   "current_milestone": "3.5 permission-prompt safety: a detected runtime permission dialog is no longer auto-granted (ObstacleDetector returns Kind.PERMISSION as unresolvable with no dismiss label; the orchestrator stops honestly)",
-  "milestone_status": "in_progress",
+  "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
     "recording: saveWatchedSkill now stores the catalog tool name (ToolRegistry.TOOL_*) instead of the Kotlin class name, so a watched skill is replayable",
@@ -31,7 +31,8 @@
     "10.7 fix 2026-10-11: TargetResolver.resolve scored candidates without any visibility check, so an off-screen/hidden node that still exposes a strong label (bounds 0x0) could resolve as UNIQUE and be dispatched to. Added an explicit zero-area rejection (bounds.width() > 0 && bounds.height() > 0) matching the a11y dump/tap guards (AgentAccessibilityService lines 199/376/424), so an invisible match now returns NONE. The spec requires invisible/zero-area nodes never be valid tap targets. Regression test zeroAreaTargetIsNotResolved (Phase10AdversarialTest).",
     "10.7 fix merged 2026-10-11 via PR #36 (squash, branch auto/jarvis-autonomy-20261011-1003 deleted). Merge commit 5a6993b on main. Validated in-sandbox: 267 tests 0 failures.",
     "3.5 fix 2026-10-11: ObstacleDetector.detect returned Kind.PERMISSION with a grant-selecting dismissLabel ('while using the app'/'allow'/'ok'); isSafeDismiss accepts 'allow'/'continue', so TaskOrchestrator's 9.12 blocker handler tapped the grant control itself for any real runtime permission request (the class comment claimed the caller decides, the code did not). Now Kind.PERMISSION is returned unresolvable with dismissLabel=null, so the orchestrator's existing unresolvable branch stops the run honestly and never dispatches a tap; detection still needs the deny+grant pair so a Settings > Permissions list stays untouched. Regression tests: Phase9UpgradeTest.detectsAndSafelyDismissesCommonBlockers (updated) and OrchestratorLoopTest.permissionDialogIsNotAutoGranted (new).",
-    "3.5 invariant recorded in AGENTS.md: a detected runtime permission dialog is UNRESOLVABLE and must never be auto-granted; do not restore a grant-selecting dismissLabel."
+    "3.5 invariant recorded in AGENTS.md: a detected runtime permission dialog is UNRESOLVABLE and must never be auto-granted; do not restore a grant-selecting dismissLabel.",
+    "validation 2026-10-11 (this run): COULD NOT RUN - sandbox has no toolchain: JAVA_HOME empty and no java/javac anywhere on the filesystem, /usr/lib/jvm absent, ANDROID_HOME empty, /opt/android-sdk absent. This contradicts the prior run's note that a toolchain sandbox was available; the environment varies per run. The change is 1 return-argument + test edits, reasoned from source. A toolchain run must execute ./gradlew :app:testDebugUnitTest --no-daemon before/after merge; risk is low but UNCONFIRMED by execution."
   ],
   "in_progress": {
     "item": "3.5 permission-prompt safety fix",
