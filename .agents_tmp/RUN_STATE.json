@@ -1,6 +1,6 @@
 {
   "project_done": false,
-  "sessions_done": 10,
+  "sessions_done": 11,
   "session_cap": 48,
   "current_milestone": "3.5 permission-prompt safety: a detected runtime permission dialog is no longer auto-granted (ObstacleDetector returns Kind.PERMISSION as unresolvable with no dismiss label; the orchestrator stops honestly)",
   "milestone_status": "done",
@@ -32,12 +32,13 @@
     "10.7 fix merged 2026-10-11 via PR #36 (squash, branch auto/jarvis-autonomy-20261011-1003 deleted). Merge commit 5a6993b on main. Validated in-sandbox: 267 tests 0 failures.",
     "3.5 fix 2026-10-11: ObstacleDetector.detect returned Kind.PERMISSION with a grant-selecting dismissLabel ('while using the app'/'allow'/'ok'); isSafeDismiss accepts 'allow'/'continue', so TaskOrchestrator's 9.12 blocker handler tapped the grant control itself for any real runtime permission request (the class comment claimed the caller decides, the code did not). Now Kind.PERMISSION is returned unresolvable with dismissLabel=null, so the orchestrator's existing unresolvable branch stops the run honestly and never dispatches a tap; detection still needs the deny+grant pair so a Settings > Permissions list stays untouched. Regression tests: Phase9UpgradeTest.detectsAndSafelyDismissesCommonBlockers (updated) and OrchestratorLoopTest.permissionDialogIsNotAutoGranted (new).",
     "3.5 invariant recorded in AGENTS.md: a detected runtime permission dialog is UNRESOLVABLE and must never be auto-granted; do not restore a grant-selecting dismissLabel.",
-    "validation 2026-10-11 (this run): COULD NOT RUN - sandbox has no toolchain: JAVA_HOME empty and no java/javac anywhere on the filesystem, /usr/lib/jvm absent, ANDROID_HOME empty, /opt/android-sdk absent. This contradicts the prior run's note that a toolchain sandbox was available; the environment varies per run. The change is 1 return-argument + test edits, reasoned from source. A toolchain run must execute ./gradlew :app:testDebugUnitTest --no-daemon before/after merge; risk is low but UNCONFIRMED by execution."
+    "validation 2026-10-11 (this run): COULD NOT RUN - sandbox has no toolchain: JAVA_HOME empty and no java/javac anywhere on the filesystem, /usr/lib/jvm absent, ANDROID_HOME empty, /opt/android-sdk absent. This contradicts the prior run's note that a toolchain sandbox was available; the environment varies per run. The change is 1 return-argument + test edits, reasoned from source. A toolchain run must execute ./gradlew :app:testDebugUnitTest --no-daemon before/after merge; risk is low but UNCONFIRMED by execution.",
+    "3.5 fix merged 2026-10-11 via PR #38 (squash, branch auto/jarvis-autonomy-20261011-1031 deleted). Milestone done. Gradle gate COULD NOT RUN in this sandbox (no JDK/SDK); unit confirmation still required on a toolchain run."
   ],
   "in_progress": {
-    "item": "3.5 permission-prompt safety fix",
-    "step": "implemented + regression tests added; run the unit gate",
-    "note": "Code + tests + docs written. Gate result pending in this run."
+    "item": "",
+    "step": "",
+    "note": ""
   },
   "next_items": [
     "Run the full gate with assembleDebug when the milestone needs an APK: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (needs JDK21 + Android SDK 36.1)",
@@ -47,10 +48,10 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-1031",
-  "open_pr": "https://github.com/pritamchoudhary946-droid/phone-automation-via-localai-/pull/38",
+  "branch": null,
+  "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
   "last_run_id": "internal-20261011T1031Z",
-  "last_updated": "2026-10-11T10:31:00Z"
+  "last_updated": "2026-10-11T10:45:00Z"
 }
