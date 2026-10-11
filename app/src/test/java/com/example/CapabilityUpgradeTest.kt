@@ -11,6 +11,9 @@ import com.example.agent.AudioController
 import com.example.agent.AudioStream
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
+import com.example.agent.MediaControlResult
+import com.example.agent.MediaController
+import com.example.agent.MediaTransport
 import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
 import com.example.agent.ToolRegistry
@@ -447,6 +450,125 @@ class CapabilityUpgradeTest {
         assertEquals(AgentAction.ClearText("Search"), restored!!.steps[0].action)
     }
 
+    // --- play_media: the transport-control primitive (no UI tap can reach an
+    // arbitrary player's pause/next) ---
+
+    @Test
+    fun parserMapsPlayMediaToTheTransportAction() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Pause the music","action":"play_media","params":{"transport":"pause"},"expect":"paused","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Next track","action":"play_media","params":{},"expect":"next","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "pause the music")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.PlayMedia("pause"), steps[0].action)
+        // Missing transport defaults to toggle (the safe, state-flipping default).
+        assertEquals(AgentAction.PlayMedia("toggle"), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsPlayMedia() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.PlayMedia("play")) is ToolValidationResult.Valid)
+    }
+
+    @Test
+    fun playMediaExecutesWithoutAnAccessibilityService() {
+        // Media transport dispatches a standard media key through the AudioManager, so it
+        // is service-free: a planned "pause" must run even with no bound a11y service.
+        val recorder = RecordingMediaController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            mediaController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.PlayMedia("pause"))
+        }
+        assertTrue("media control must succeed without a bound a11y service: $result", result.success)
+        assertEquals("MEDIA_KEY_VERIFIED", result.method)
+        assertEquals(listOf(MediaTransport.PAUSE), recorder.calls)
+    }
+
+    @Test
+    fun playMediaRefusesHonestlyWhenMediaIsUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            mediaController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.PlayMedia("play"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("MEDIA_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun playMediaRejectsAnUnknownTransport() {
+        val recorder = RecordingMediaController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            mediaController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.PlayMedia("rewind"))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_TRANSPORT", result.method)
+        assertTrue("an invalid transport must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun promptAdvertisesPlayMedia() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue("advertised actions are missing ${ToolRegistry.TOOL_PLAY_MEDIA}", actions.contains(ToolRegistry.TOOL_PLAY_MEDIA))
+
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "pause the music",
+                desiredOutcome = "playback paused",
+                foregroundPackage = "com.android.settings",
+                screenSummary = "Now playing",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing play_media", prompt.contains("play_media"))
+    }
+
+    @Test
+    fun playMediaSkillKeepsItsTransportOnReplay() {
+        // A learned skill that pauses must not replay as the default toggle: the
+        // serializer has to persist the transport.
+        val plan = com.example.planning.TaskPlan(
+            goal = "pause the music",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "pause playback",
+                    action = AgentAction.PlayMedia("pause"),
+                    rawActionName = "play_media", expectedPostcondition = "paused",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+
+        assertTrue("a saved media skill must be replayable", restored != null)
+        assertEquals(AgentAction.PlayMedia("pause"), restored!!.steps[0].action)
+    }
+
     // --- Helpers ---
 
     private class RecordingAudioController : AudioController {
@@ -454,6 +576,14 @@ class CapabilityUpgradeTest {
         override fun adjust(stream: AudioStream, steps: Int, mute: Boolean): AudioAdjustResult {
             calls += Triple(stream, steps, mute)
             return AudioAdjustResult(true, stream.name, "ok")
+        }
+    }
+
+    private class RecordingMediaController : MediaController {
+        val calls = mutableListOf<MediaTransport>()
+        override fun control(transport: MediaTransport): MediaControlResult {
+            calls += transport
+            return MediaControlResult(true, "MEDIA_KEY_VERIFIED", "ok")
         }
     }
 

@@ -137,7 +137,12 @@ class AndroidDeviceAutomation(
     // tree, so the volume primitive is resolved before the a11y-service gate (like
     // ReadNotifications). A caller that does not wire a controller gets an honest
     // "unavailable" result rather than a silent no-op.
-    private val audioController: AudioController? = null
+    private val audioController: AudioController? = null,
+    // Media transport is likewise service-free: it dispatches a standard media key
+    // through the AudioManager to the active media session, so it is resolved before
+    // the a11y-service gate (a UI tap cannot reach an arbitrary player's transport).
+    // An unwired controller gets an honest "unavailable" result, never a silent no-op.
+    private val mediaController: MediaController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -226,6 +231,17 @@ class AndroidDeviceAutomation(
             val controller = audioController
                 ?: return@withContext ActionResult(false, "AUDIO_UNAVAILABLE", "Device audio control is not available")
             val result = controller.adjust(stream, action.steps, action.mute)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Media transport control is the playback primitive behind "pause the music" /
+        // "next track": a standard media key to the active session, service-free like the
+        // audio stream above.
+        if (action is AgentAction.PlayMedia) {
+            val transport = MediaTransport.fromKey(action.transport)
+                ?: return@withContext ActionResult(false, "INVALID_TRANSPORT", "Unknown media transport '${action.transport}'")
+            val controller = mediaController
+                ?: return@withContext ActionResult(false, "MEDIA_UNAVAILABLE", "Media control is not available")
+            val result = controller.control(transport)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

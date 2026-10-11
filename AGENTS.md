@@ -72,7 +72,14 @@ as `ReadNotifications`). The final `else` is now `UNSUPPORTED_ACTION` (not `UNKN
 and names the action, so a missing executor is diagnosable. `AdjustVolume` carries
 `stream`/`steps`/`mute` through parser, serializer `toParams` (skill replay) and the
 prompt catalogue; the controller read-backs the level and reports `AUDIO_UNCHANGED`
-(never a fake success) when the device ignores the request.
+(never a fake success) when the device ignores the request. `play_media`
+(`AgentAction.PlayMedia` + `MediaController`/`MediaTransport`) follows the same rule:
+a media transport key (`KEYCODE_MEDIA_*`) is dispatched through `AudioManager`
+service-free, resolved before the a11y gate; `AndroidMediaController` read-backs
+`isMusicActive()` so play/pause/toggle/stop report success only when the playback
+state actually moved (`MEDIA_UNCHANGED`/`MEDIA_NOT_PLAYING` otherwise), while
+next/previous are an honest delivered-key (track change is not state-verifiable).
+The prompt never advertises a capability the executor cannot run.
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a

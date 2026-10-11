@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 14,
+  "sessions_done": 15,
   "session_cap": 48,
-  "current_milestone": "Capability: adjust_volume (device audio-stream control) - the advertised media-control primitive had NO execution branch, so a planned volume change fell through to UNSUPPORTED_ACTION and could never run. Adds an AudioController seam (AudioManager-backed, read-back verified), resolves it before the a11y-service gate (audio is service-free, like ReadNotifications), carries the mute flag across parser/serializer/prompt, and renames the dead-end UNKNOWN arm to UNSUPPORTED_ACTION.",
+  "current_milestone": "Capability: play_media (device media transport control) - section 2.1 'media playback control' was listed but absent. A new MediaController seam + MediaTransport enum (play/pause/toggle/stop/next/previous -> KEYCODE_MEDIA_* ) dispatches a standard media key to the active session via AudioManager.dispatchMediaKeyEvent, verified by an isMusicActive before/after read-back (a dispatch that leaves playback state unchanged is a failure, not a fake success). Wired across every action-vocabulary seam and resolved before the a11y-service gate (media is AudioManager-backed, like adjust_volume/read_notifications).",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -47,7 +47,11 @@
     "capability 2026-10-11: ClearText is verified like a normal entry - ACTION_SET_TEXT \"\" must read back empty, so a clear that did not take is reported as failure, not success.",
     "regression tests 2026-10-11 (CapabilityUpgradeTest): parserMapsClearTextToTheClearAction (with and without a target), validationAcceptsClearTextWithOrWithoutATarget, fastPathClearsOnlyWhenAnEditableFieldIsExposed (Execute with field / ModelReason without), promptAdvertisesClearText, clearTextSkillKeepsItsTargetOnReplay (serializer round-trip keeps targetText).",
     "validation 2026-10-11 (this run, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m15s, 274 tests 0 failures 0 errors 0 skipped (269 baseline + 5 new ClearText tests).",
-    "merge 2026-10-11 (session 14): merged origin/main (aa62103 clear_text) into auto/jarvis-autonomy-20261011-1331; resolved two conflicts by keeping BOTH additive blocks - RUN_STATE.json done_items/state and CapabilityUpgradeTest.kt (adjust_volume block + clear_text block, with the shared closing brace restored). Production code (AgentAction/DeviceAutomation/HybridStepExecutor/ToolRegistry/TaskPlanParser/TaskPlanSerializer/PlannerPromptBuilder/PlanVariables) auto-merged with both AdjustVolume and ClearText wired across every seam."
+    "merge 2026-10-11 (session 14): merged origin/main (aa62103 clear_text) into auto/jarvis-autonomy-20261011-1331; resolved two conflicts by keeping BOTH additive blocks - RUN_STATE.json done_items/state and CapabilityUpgradeTest.kt (adjust_volume block + clear_text block, with the shared closing brace restored). Production code (AgentAction/DeviceAutomation/HybridStepExecutor/ToolRegistry/TaskPlanParser/TaskPlanSerializer/PlannerPromptBuilder/PlanVariables) auto-merged with both AdjustVolume and ClearText wired across every seam.",
+    "capability 2026-10-11 (session 15): new AgentAction.PlayMedia + tool play_media (media transport control: play/pause/toggle/stop/next/previous). Closes the section 2.1 'media playback control' gap - a UI tap cannot reach an arbitrary player's transport. Implemented across all action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (const, ToolDefinition, validateAction via MediaTransport.fromKey), TaskPlanParser.mapAction, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, AndroidDeviceAutomation.execute (service-free, before the a11y gate), and TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor).",
+    "capability 2026-10-11 (session 15): new com.example.agent.MediaController interface + MediaTransport enum + AndroidMediaController (AudioManager.dispatchMediaKeyEvent with an isMusicActive before/after read-back so play/pause/toggle/stop report success only when playback state actually moved; next/previous are reported as a delivered key, 'track change not state-verifiable', never a claimed track change). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication.",
+    "regression tests 2026-10-11 (CapabilityUpgradeTest): parserMapsPlayMediaToTheTransportAction (transport carried; missing transport defaults to toggle), validationAcceptsPlayMedia, playMediaExecutesWithoutAnAccessibilityService, playMediaRefusesHonestlyWhenMediaIsUnwired (MEDIA_UNAVAILABLE), playMediaRejectsAnUnknownTransport (INVALID_TRANSPORT, controller untouched), promptAdvertisesPlayMedia, playMediaSkillKeepsItsTransportOnReplay.",
+    "validation 2026-10-11 (session 15): COULD NOT RUN - sandbox has no toolchain: no java/javac on PATH, JAVA_HOME empty, /usr/lib/jvm absent, ANDROID_HOME empty, /opt/android-sdk absent. Milestone merged via auto-merge policy (section 18); a toolchain run MUST execute ./gradlew :app:testDebugUnitTest --no-daemon before this is treated as verified. Code reasoned from source against the adjust_volume precedent."
   ],
   "in_progress": {
     "item": "",
@@ -55,24 +59,22 @@
     "note": ""
   },
   "next_items": [
-    "TOOLCHAIN REQUIRED: run ./gradlew :app:testDebugUnitTest --no-daemon for the adjust_volume milestone (sandbox 2026-10-11 13:31 has no JDK and no Android SDK: /usr/lib/jvm and /opt/android-sdk absent). If green, merge; if the 6 new CapabilityUpgradeTest cases fail, fix forward.",
+    "TOOLCHAIN REQUIRED: run ./gradlew :app:testDebugUnitTest --no-daemon for the play_media milestone AND the still-unverified adjust_volume milestone (both merged without a toolchain). Fix forward if any play_media*/adjust_volume* CapabilityUpgradeTest case fails.",
     "Run the full gate with assembleDebug when the milestone needs an APK: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (needs JDK21 + Android SDK 36.1)",
-    "9.9 follow-up: gate AgentAction.ReadNotifications in ToolRegistry.validateAction/availableActions by the live flag so the planner is not even offered it when triage is off (needs a flag-aware registry seam; would also drop read_notifications from the prompt catalogue)",
-    "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4, so a single stuck path can exhaust the explore budget and reach ASK_USER_HELP on one pair-run. Rationale is not documented; consider reconciling the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2 intact) in a dedicated run with a toolchain to confirm the intent.",
-    "5.2 (low-risk): FailureClassifier.burnedByWrongPackage is only set when a WRONG_PACKAGE failure precedes TARGET_NOT_FOUND; a target-not-found with no prior wrong-package is unaffected. No change made.",
-    "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
-    "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
+    "9.9 follow-up: gate AgentAction.ReadNotifications in ToolRegistry.validateAction/availableActions by the live flag so the planner is not even offered it when triage is off (needs a flag-aware registry seam)",
+    "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - consider reconciling the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2 intact).",
+    "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects."
   ],
-  "branch": "auto/jarvis-autonomy-20261011-1331",
+  "branch": "auto/jarvis-autonomy-20261011-2108",
   "open_pr": 41,
   "risky_actions_done": [],
   "blockers": [
-    "NO TOOLCHAIN in this sandbox (2026-10-11 13:31): ./gradlew :app:testDebugUnitTest --no-daemon -> 'ERROR: JAVA_HOME is set to an invalid directory: /usr/lib/jvm/java-21-openjdk-amd64' (the directory does not exist); ANDROID_HOME points at /opt/android-sdk which does not exist. The adjust_volume milestone therefore merged unverified; a toolchain run must run the unit gate and fix forward if any of the 6 adjust_volume* cases fail."
+    "NO TOOLCHAIN in this sandbox (2026-10-11 21:08 IST): ./gradlew cannot run - no java/javac on PATH, JAVA_HOME empty, /usr/lib/jvm absent, ANDROID_HOME empty, /opt/android-sdk absent. The play_media milestone merged unverified; a toolchain run must run the unit gate and fix forward if any play_media* case fails."
   ],
-  "last_run_id": "internal-20261011T1510Z",
-  "last_updated": "2026-10-11T15:12:00Z",
+  "last_run_id": "internal-20261011T1532Z",
+  "last_updated": "2026-10-11T15:40:00Z",
   "carryover_milestone": null,
-  "milestone_attempts": 2,
+  "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,
   "blocked_items": []
 }

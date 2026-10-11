@@ -247,6 +247,9 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 steps = params.optInt("steps", params.optInt("delta", 1)),
                 mute = params.optBoolean("mute", false)
             )
+            ToolRegistry.TOOL_PLAY_MEDIA -> AgentAction.PlayMedia(
+                transport = str(params, "transport", "command", "action").ifBlank { "toggle" }
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
             ToolRegistry.TOOL_OPEN_QUICK_SETTINGS -> AgentAction.OpenQuickSettings

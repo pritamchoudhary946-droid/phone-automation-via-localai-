@@ -198,6 +198,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic device audio-stream adjustment"
             )
 
+            is AgentAction.PlayMedia -> FastPathDecision.Execute(
+                action,
+                "deterministic media transport control"
+            )
+
             AgentAction.ReadText,
             AgentAction.OpenNotifications,
             AgentAction.OpenQuickSettings,
