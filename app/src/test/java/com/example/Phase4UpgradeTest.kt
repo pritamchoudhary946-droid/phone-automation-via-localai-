@@ -132,6 +132,9 @@ class Phase4UpgradeTest {
         assertTrue(result.success)
         assertEquals("READ_NOTIFICATIONS", result.method)
         assertTrue(result.message.contains("Ping"))
+        // The digest must be carried as readText so a read_notifications step is
+        // self-evidencing in the orchestrator (otherwise it can never complete).
+        assertTrue("digest must be carried as readText", result.readText?.contains("Ping") == true)
         NotificationBus.clear()
     }
 

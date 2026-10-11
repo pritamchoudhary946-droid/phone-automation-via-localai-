@@ -1,0 +1,5 @@
+# The autonomy loop rewrites its run-state log every session. Merging `main`
+# into a long-lived autonomy branch repeatedly conflicted on this one file and
+# forced manual resolutions. Keep the branch's own (newest) state on merge.
+# Requires a one-time `git config merge.ours.driver true` (see AGENTS.md).
+.agents_tmp/RUN_STATE.json merge=ours

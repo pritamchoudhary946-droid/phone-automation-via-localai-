@@ -633,6 +633,33 @@ class CapabilityUpgradeTest {
     }
 
     @Test
+    fun readNotificationsStepCompletesFromItsOwnDigestWithoutAScreenChange() = kotlinx.coroutines.runBlocking {
+        // 9.9 capability loss: read_notifications defaults to NONE verification, and the
+        // executor's digest was not carried as readText, so verifyAction could never
+        // satisfy the step. The step retried to exhaustion and every triage read failed,
+        // making the goal gate's ReadNotifications allowance unreachable. The digest a
+        // read returns must be its own evidence, exactly like read_text/read_page_content.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.ReadNotifications ->
+                        ActionResult(true, "READ_NOTIFICATIONS", "com.app: Ping — hello", readText = "com.app: Ping — hello")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Read notifications","action":"read_notifications","params":{}}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("what notifications do I have", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("read_notifications with NONE verification must complete, got $terminal", terminal is OrchestratorState.Completed)
+    }
+
+    @Test
     fun failedReadDoesNotSatisfyACaptureStepAndTheRunFailsHonestly() = kotlinx.coroutines.runBlocking {
         // 9.4 freshness: an empty/failed read must not satisfy the capture step, so the
         // following step can never be handed a stale or blank value.

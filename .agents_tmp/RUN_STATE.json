@@ -2,7 +2,7 @@
   "project_done": false,
   "sessions_done": 18,
   "session_cap": 48,
-  "current_milestone": "Make service-backed device-control actions (adjust_volume, play_media, read_notifications) genuinely completable: their default NONE verification was unsatisfiable from a fresh observation, so a planned 'pause the music'/'turn the volume up'/'read my notifications' step could never complete and the run always failed.",
+  "current_milestone": "Make the two remaining service-backed device-control actions (adjust_volume, play_media) genuinely completable: their default NONE verification was unsatisfiable from a fresh observation, so a planned 'pause the music'/'turn the volume up' step could never complete. (read_notifications, the third member of this class, was landed separately in PR #48.)",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -69,7 +69,11 @@
     "capability/fix 2026-10-11 (session 18): adjust_volume, play_media and read_notifications were each registered, validated, parsed, fast-pathed, prompt-advertised AND given a real executor branch - yet a step using them could never COMPLETE. Root cause: their default verification is NONE, and TaskOrchestrator.verifyAction had a self-evidencing carve-out only for ReadText/ReadPageContent (the 9.4 fix), so a NONE-verified adjust_volume/play_media/read_notifications step was retried until maxRetries and failed - and the goal gate (selfEvidencingToolSatisfied) had no branch for them either. They were 'written but not working' in the same class the 9.4 read defect belonged to. verifyAction now accepts a successful result for these three as the step evidence, and selfEvidencingToolSatisfied counts a completed one as goal evidence.",
     "safety 2026-10-11 (session 18): the self-evidencing carve-out only accepts a genuinely successful ActionResult (the `!result.success` guard runs first), so it is safe only because the executor reports success honestly - AndroidAudioController/AndroidMediaController read the stream level / isMusicActive() back and return AUDIO_UNCHANGED/MEDIA_UNCHANGED when nothing moved. It must never be widened to an action whose success is not independently read back. Recorded in AGENTS.md.",
     "regression tests 2026-10-11 (session 18, CapabilityUpgradeTest +3): playMediaStepCompletesFromItsOwnHonestResult (play_media NONE step -> Completed), adjustVolumeStepCompletesFromItsOwnHonestResult (adjust_volume NONE step -> Completed), playMediaFailureIsNotMaskedByTheSelfEvidencingRule (MEDIA_UNCHANGED failure -> Failed, never a fake success). Both positive tests FAILED before the verifyAction+goal-gate change and PASS after.",
-    "validation 2026-10-11 (session 18, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m40s, 295 tests 0 failures 0 errors 0 skipped (292 baseline + 3 new)."
+    "validation 2026-10-11 (session 18, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 1m40s, 295 tests 0 failures 0 errors 0 skipped (292 baseline + 3 new).",
+    "9.9 capability-loss fix 2026-10-11 (session 18): read_notifications could never complete in the live loop. AndroidDeviceAutomation.readNotificationDigest() returned success=true with method=READ_NOTIFICATIONS but NO readText, and TaskOrchestrator.verifyAction self-satisfied only ReadText/ReadPageContent for a NONE verification, so the step's default NONE postcondition could never be satisfied: it retried to exhaustion and every triage read failed. The goal gate's selfEvidencingToolSatisfied(ReadNotifications) allowance was therefore unreachable dead code. Fix: (1) readNotificationDigest carries the digest as ActionResult.readText (capped at MAX_CAPTURED_CHARS, null when blank); (2) verifyAction treats a NONE-verified ReadNotifications as satisfied by that non-empty digest (empty -> failure, never a fake success), with an honest 'Read N chars of notification digest' detail.",
+    "regression tests 2026-10-11 (session 18): CapabilityUpgradeTest.readNotificationsStepCompletesFromItsOwnDigestWithoutAScreenChange (orchestrator completes a read_notifications step with NONE verification) and Phase4UpgradeTest.readNotificationsReadsDigestWhenTriageOn now asserts the digest is carried as readText. Fails-before evidence: with DeviceAutomation.kt+TaskOrchestrator.kt stashed, the new test FAILED (AssertionError CapabilityUpgradeTest.kt:636); with the fix restored it passes.",
+    "validation 2026-10-11 (session 18, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 293 tests 0 failures 0 errors 0 skipped (19 suites; main baseline 292 @Test + 1 new).",
+    "merge 2026-10-11 (session 18): read_notifications self-evidencing fix merged via PR #48 (squash, branch auto/jarvis-autonomy-20261011-2131 deleted). Merge commit cf3cc2634 on main. Validated in-sandbox before merge: 293 tests 0 failures."
   ],
   "in_progress": {
     "item": "",
@@ -81,8 +85,7 @@
     "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4. Reconcile the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2).",
     "5.2 (low-risk): FailureClassifier.burnedByWrongPackage is only set when a WRONG_PACKAGE failure precedes TARGET_NOT_FOUND. No change made.",
     "Continue item 4A mandatory full bug sweep on the live recovery path.",
-    "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session.",
-    "Add an orchestration-level read_notifications completion test (the 9.9 gate is unit-tested at the executor level; a step-level test needs a triageEnabled=true orchestrator, not wired in the shared test helper)."
+    "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
   ],
   "branch": "auto/jarvis-autonomy-20261011-2031",
   "open_pr": null,
