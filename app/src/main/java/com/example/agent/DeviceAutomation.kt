@@ -432,14 +432,19 @@ class AndroidDeviceAutomation(
      */
     private fun readNotificationDigest(): ActionResult {
         val items = notificationSource.recent(NotificationSource.DEFAULT_LIMIT)
+        val digest = items.joinToString(" | ") { "${it.packageName}: ${it.title} — ${it.text}".take(120) }
         return ActionResult(
             success = items.isNotEmpty(),
             method = "READ_NOTIFICATIONS",
             message = if (items.isEmpty()) {
                 "No recent notifications available (grant notification access to enable this)"
             } else {
-                items.joinToString(" | ") { "${it.packageName}: ${it.title} — ${it.text}".take(120) }
-            }
+                digest
+            },
+            // Carry the digest like the other read actions so a read_notifications
+            // step is self-evidencing (its own non-empty text is the goal evidence)
+            // rather than stuck at a NONE postcondition it can never satisfy.
+            readText = digest.take(ActionResult.MAX_CAPTURED_CHARS).takeIf { it.isNotBlank() }
         )
     }
 

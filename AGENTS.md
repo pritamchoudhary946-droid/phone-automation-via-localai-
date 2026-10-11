@@ -190,6 +190,15 @@ The prompt never advertises a capability the executor cannot run.
   check, then `readNotificationDigest()`) *before* `serviceProvider()`, so an
   opted-in read works without a bound a11y service and is never misreported as
   `NO_SERVICE`. Keep the digest helper service-free.
+- A `read_notifications` step must be self-evidencing, exactly like
+  `read_text`/`read_page_content`: the digest `readNotificationDigest()` reads is
+  carried as `ActionResult.readText`, and `TaskOrchestrator.verifyAction` treats a
+  NONE-verified `ReadNotifications` as satisfied by that non-empty digest (empty ->
+  failure). Regression found 2026-10-11: without the carried digest the step could
+  never satisfy its NONE postcondition, so it retried to exhaustion and failed — the
+  goal gate's `selfEvidencingToolSatisfied(ReadNotifications)` allowance was
+  unreachable and every triage read failed. Do not drop the `readText` carry or the
+  self-satisfaction branch.
 
 ## Jarvis Phase 5 autonomy & self-healing (do not regress)
 - The execution loop replaces "retry the same action N times then fail" with a

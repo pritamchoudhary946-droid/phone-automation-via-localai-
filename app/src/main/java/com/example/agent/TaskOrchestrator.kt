@@ -1107,12 +1107,17 @@ class TaskOrchestrator(
         // non-empty text it returned. Without this the read would be retried forever
         // and its captured value could never reach a later {{name}} step - i.e. the
         // whole cross-app variable feature would be dead for the natural case.
+        // read_notifications is the same shape: the notification digest it reads back
+        // IS the goal evidence, so it must self-satisfy too (otherwise the goal gate's
+        // ReadNotifications allowance is unreachable and every triage read fails).
         if (step.verification == VerificationMethod.NONE &&
-            (action is AgentAction.ReadText || action is AgentAction.ReadPageContent)
+            (action is AgentAction.ReadText || action is AgentAction.ReadPageContent ||
+                action is AgentAction.ReadNotifications)
         ) {
             val captured = result.readText
+            val what = if (action is AgentAction.ReadNotifications) "notification digest" else "visible text"
             return if (!captured.isNullOrBlank()) {
-                PostconditionVerdict(true, "Read ${captured.length} chars of visible text")
+                PostconditionVerdict(true, "Read ${captured.length} chars of $what")
             } else {
                 PostconditionVerdict(false, "Read action returned no visible text to capture")
             }
