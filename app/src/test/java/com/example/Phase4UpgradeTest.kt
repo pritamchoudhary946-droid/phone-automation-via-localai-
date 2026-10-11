@@ -1,7 +1,11 @@
 package com.example
 
 import android.graphics.Bitmap
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import com.example.agent.AgentAction
+import com.example.agent.AndroidDeviceAutomation
+import com.example.agent.AppDirectory
 import com.example.agent.ToolRegistry
 import com.example.agent.ToolValidationResult
 import com.example.automation.AutomationGate
@@ -63,6 +67,40 @@ class Phase4UpgradeTest {
         val registry = ToolRegistry()
         assertTrue(registry.validateAction(AgentAction.ReadNotifications) is ToolValidationResult.Valid)
         assertTrue(PlannerPromptBuilder.availableActions(registry).contains(ToolRegistry.TOOL_READ_NOTIFICATIONS))
+    }
+
+    // 9.9: reading/summarising notifications is an opt-in capability. With triage off
+    // (the default) the executor must refuse honestly and must not touch the user's
+    // notifications, even when the accessibility service is unavailable.
+    @Test
+    fun readNotificationsRefusedWhenTriageOff() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val automation = AndroidDeviceAutomation(
+            AppDirectory(context),
+            serviceProvider = { null },
+            triageEnabled = { false }
+        )
+        val result = automation.execute(AgentAction.ReadNotifications)
+        assertFalse(result.success)
+        assertEquals("TRIAGE_DISABLED", result.method)
+    }
+
+    // 9.9: with triage explicitly opted in, the executor reads the bounded digest.
+    @Test
+    fun readNotificationsReadsDigestWhenTriageOn() = runBlocking {
+        NotificationBus.clear()
+        NotificationBus.offer(AgentNotification("com.app", "Ping", "hello", 1L, false))
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val automation = AndroidDeviceAutomation(
+            AppDirectory(context),
+            serviceProvider = { null },
+            triageEnabled = { true }
+        )
+        val result = automation.execute(AgentAction.ReadNotifications)
+        assertTrue(result.success)
+        assertEquals("READ_NOTIFICATIONS", result.method)
+        assertTrue(result.message.contains("Ping"))
+        NotificationBus.clear()
     }
 
     // --- Plan 4.1/4.2/4.3: vision + OCR fallbacks ---

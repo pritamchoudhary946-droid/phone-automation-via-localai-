@@ -55,7 +55,10 @@ class DailyBriefingWorker(
 
     override fun doWork(): Result {
         val settings = CapabilitySettings(applicationContext)
-        if (!settings.briefingEnabled) {
+        // 9.9: the briefing digest IS notification triage, so it needs the triage opt-in
+        // as well as the briefing switch. Never summarise the user's notifications unless
+        // both are on.
+        if (!settings.briefingEnabled || !settings.notificationTriageEnabled) {
             // Not opted in: nothing to do (and nothing spoken).
             return Result.success()
         }
