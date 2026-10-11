@@ -28,7 +28,8 @@
     "validation 2026-10-11: COULD NOT RUN - ./gradlew :app:testDebugUnitTest --no-daemon -> \"ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH\"; ANDROID_HOME unset, /opt/android-sdk and /usr/lib/jvm absent. Change is 1 line + 1 test, reasoned from source; next run with a toolchain must run ./gradlew :app:testDebugUnitTest --no-daemon.",
     "5.7 fix merged 2026-10-11 via PR #34 (squash, branch auto/jarvis-autonomy-20261011-0831 deleted). Merge commit 79bcf94 on main. Gradle gate still COULD NOT RUN - no JDK/SDK in sandbox.",
     "validation 2026-10-11 (toolchain sandbox confirmed): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 267 tests 0 failures 0 errors 0 skipped (19 suites). JDK21 (/usr/lib/jvm/java-21-openjdk-amd64) + ANDROID_HOME=/opt/android-sdk present, so the Gradle gate now runs here.",
-    "10.7 fix 2026-10-11: TargetResolver.resolve scored candidates without any visibility check, so an off-screen/hidden node that still exposes a strong label (bounds 0x0) could resolve as UNIQUE and be dispatched to. Added an explicit zero-area rejection (bounds.width() > 0 && bounds.height() > 0) matching the a11y dump/tap guards (AgentAccessibilityService lines 199/376/424), so an invisible match now returns NONE. The spec requires invisible/zero-area nodes never be valid tap targets. Regression test zeroAreaTargetIsNotResolved (Phase10AdversarialTest)."
+    "10.7 fix 2026-10-11: TargetResolver.resolve scored candidates without any visibility check, so an off-screen/hidden node that still exposes a strong label (bounds 0x0) could resolve as UNIQUE and be dispatched to. Added an explicit zero-area rejection (bounds.width() > 0 && bounds.height() > 0) matching the a11y dump/tap guards (AgentAccessibilityService lines 199/376/424), so an invisible match now returns NONE. The spec requires invisible/zero-area nodes never be valid tap targets. Regression test zeroAreaTargetIsNotResolved (Phase10AdversarialTest).",
+    "10.7 fix merged 2026-10-11 via PR #36 (squash, branch auto/jarvis-autonomy-20261011-1003 deleted). Merge commit 5a6993b on main. Validated in-sandbox: 267 tests 0 failures."
   ],
   "in_progress": {
     "item": "",
@@ -43,10 +44,10 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-1003",
+  "branch": null,
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
   "last_run_id": "internal-20261011T1003Z",
-  "last_updated": "2026-10-11T10:05:00Z"
+  "last_updated": "2026-10-11T10:06:00Z"
 }
