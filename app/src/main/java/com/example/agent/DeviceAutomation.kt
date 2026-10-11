@@ -132,7 +132,12 @@ class AndroidDeviceAutomation(
     // 9.9: reading posted notifications is the smart-triage capability, so it is gated
     // by the opt-in flag. Default OFF means the flag is only read when a caller passes a
     // live supplier; the built-in path wires the real setting.
-    private val triageEnabled: () -> Boolean = { false }
+    private val triageEnabled: () -> Boolean = { false },
+    // Device audio is controlled through the system AudioManager, not the accessibility
+    // tree, so the volume primitive is resolved before the a11y-service gate (like
+    // ReadNotifications). A caller that does not wire a controller gets an honest
+    // "unavailable" result rather than a silent no-op.
+    private val audioController: AudioController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -210,6 +215,18 @@ class AndroidDeviceAutomation(
                 )
             }
             return@withContext readNotificationDigest()
+        }
+        // Device audio is likewise service-free: it changes a system stream through the
+        // AudioManager, so it is resolved before the a11y-service gate. This is the media
+        // control primitive the planner advertises; without it the model could plan a
+        // volume change that the execution layer silently refused as UNKNOWN.
+        if (action is AgentAction.AdjustVolume) {
+            val stream = AudioStream.fromKey(action.stream)
+                ?: return@withContext ActionResult(false, "INVALID_STREAM", "Unknown audio stream '${action.stream}'")
+            val controller = audioController
+                ?: return@withContext ActionResult(false, "AUDIO_UNAVAILABLE", "Device audio control is not available")
+            val result = controller.adjust(stream, action.steps, action.mute)
+            return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()
             ?: return@withContext ActionResult(false, "NO_SERVICE", "Accessibility Service unavailable")
@@ -362,7 +379,11 @@ class AndroidDeviceAutomation(
                     message = if (text.isNotBlank()) "Extracted ${text.length} chars of page content" else "No page content found"
                 )
             }
-            else -> ActionResult(false, "UNKNOWN", "Unsupported action for execution layer")
+            else -> ActionResult(
+                false,
+                "UNSUPPORTED_ACTION",
+                "Action '${action.getDisplayName()}' has no native executor; the model must not have been offered it"
+            )
         }
     }
 

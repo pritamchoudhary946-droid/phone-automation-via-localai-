@@ -61,6 +61,17 @@ digest), `WaitForText` (bounded wait), `OpenNotifications`, `OpenQuickSettings`,
    learned skill would replay with the wrong defaults.
 An action the native layer cannot execute must not appear in the catalogue
 (see the `ask_confirmation` exclusion in `PlannerPromptBuilder.availableActions`).
+Corollary (regression found 2026-10-11): every advertised tool needs a real branch
+in `AndroidDeviceAutomation.execute`. `adjust_volume` was catalogued/registered/
+validated/parsed/fast-pathed but had no execute branch, so a planned volume change
+hit the final `else` and could never run. `AndroidAudioController` now backs it
+(`AudioStream` enum -> real `AudioManager` stream constants), resolved *before* the
+a11y-service gate because audio is `AudioManager`-backed, not tree-backed (same rule
+as `ReadNotifications`). The final `else` is now `UNSUPPORTED_ACTION` (not `UNKNOWN`)
+and names the action, so a missing executor is diagnosable. `AdjustVolume` carries
+`stream`/`steps`/`mute` through parser, serializer `toParams` (skill replay) and the
+prompt catalogue; the controller read-backs the level and reports `AUDIO_UNCHANGED`
+(never a fake success) when the device ignores the request.
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a

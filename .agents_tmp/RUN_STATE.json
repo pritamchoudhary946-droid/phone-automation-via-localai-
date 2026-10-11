@@ -2,8 +2,8 @@
   "project_done": false,
   "sessions_done": 12,
   "session_cap": 48,
-  "current_milestone": "Capability: find_element (bounded scroll-to-find-and-tap) - the general 'reveal an off-screen item then press it' primitive, plus TaskPlanSerializer.toParams for ScrollUntilFound so a learned scroll skill replays with its real direction/budget",
-  "milestone_status": "done",
+  "current_milestone": "Capability: adjust_volume (device audio-stream control) - the advertised media-control primitive had NO execution branch, so a planned volume change fell through to UNKNOWN and could never run. Adds an AudioController seam (AudioManager-backed, read-back verified), resolves it before the a11y-service gate (audio is service-free), carries the mute flag across parser/serializer/prompt, and renames the dead-end UNKNOWN arm to UNSUPPORTED_ACTION.",
+  "milestone_status": "in_progress",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
     "recording: saveWatchedSkill now stores the catalog tool name (ToolRegistry.TOOL_*) instead of the Kotlin class name, so a watched skill is replayable",
@@ -38,14 +38,19 @@
     "capability 2026-10-11: DeviceAutomation refactored the scroll loop into a shared revealByScrolling() used by both executeScrollUntilFound and executeFindElement; executeFindElement taps only after a fresh observation and verifies the tap against the screen fingerprint at tap time (a dispatched gesture that leaves the screen identical is reported as failure, not success).",
     "fix 2026-10-11: TaskPlanSerializer.toParams had no ScrollUntilFound branch, so a learned skill's direction/maxSwipes were silently dropped on replay (a scroll-UP skill would replay scrolling DOWN with the default 6 swipes). Added the branch; regression test Phase4UpgradeTest.scrollUntilFoundSkillKeepsDirectionAndBudgetOnReplay.",
     "AGENTS.md 2026-10-11: action-vocabulary checklist now includes step 7 TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor) - the omitted seam that caused the ScrollUntilFound replay defect.",
-    "validation 2026-10-11 (this run, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m8s, 269 tests 0 failures 0 errors 0 skipped (19 suites)."
+    "validation 2026-10-11 (this run, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m8s, 269 tests 0 failures 0 errors 0 skipped (19 suites).",
+    "capability 2026-10-11 (session 13): adjust_volume execution-layer fix. The tool was in the catalogue (PlannerPromptBuilder.ACTION_CATALOG), registered (TOOL_ADJUST_VOLUME), validated (ToolRegistry), parsed (TaskPlanParser) and fast-pathed (HybridStepExecutor) - but AndroidDeviceAutomation.execute had NO AdjustVolume branch, so every planned volume change hit the final else and returned method=UNKNOWN. It could never run. Now resolved before the a11y-service gate (audio is AudioManager-backed, not tree-backed, exactly like ReadNotifications): invalid stream -> INVALID_STREAM, no controller -> AUDIO_UNAVAILABLE, else AudioController.adjust(...).",
+    "capability 2026-10-11 (session 13): new com.example.agent.AudioController seam + AudioStream enum (media/ring/alarm/notification/call -> real AudioManager stream constants) + AndroidAudioController (adjustStreamVolume per step, read-back level/mute comparison so an ignored request is AUDIO_UNCHANGED failure, not a fake success; SecurityException -> AUDIO_PERMISSION). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication. MODIFY_AUDIO_SETTINGS added to the manifest.",
+    "capability 2026-10-11 (session 13): AgentAction.AdjustVolume gains an explicit mute flag (silence intent distinct from steps==0); parser, serializer toParams (replay), and the prompt catalogue all carry stream/steps/mute. AndroidDeviceAutomation's dead-end else arm renamed UNKNOWN -> UNSUPPORTED_ACTION with the action's display name, so a missing executor is diagnosable rather than a bare 'Unknown'.",
+    "validation 2026-10-11 (session 13): COULD NOT RUN - sandbox has no toolchain: JAVA_HOME env is set but /usr/lib/jvm does not exist; ANDROID_HOME is set but /opt/android-sdk does not exist; no java/javac on PATH; no ~/.gradle cache. This is a regression-only change reasoned from source plus 6 new CapabilityUpgradeTest cases (adjustVolumeExecutesWithoutAnAccessibilityService, adjustVolumeMuteFlagReachesTheController, adjustVolumeRefusesHonestlyWhenAudioIsUnwired, adjustVolumeRejectsAnUnknownStream, adjustVolumeParserCarriesStreamStepsAndMute, adjustVolumeSkillKeepsStreamStepsAndMuteOnReplay). A toolchain run MUST execute ./gradlew :app:testDebugUnitTest --no-daemon before this is treated as verified."
   ],
   "in_progress": {
-    "item": "",
-    "step": "",
-    "note": ""
+    "item": "adjust_volume execution-layer capability",
+    "step": "Implementation complete (AudioController seam + AudioStream enum + execute branch before the a11y gate + parser/serializer/prompt mute plumbing + UNSUPPORTED_ACTION rename + 6 regression tests). Remaining: run ./gradlew :app:testDebugUnitTest --no-daemon on a toolchain run, then merge.",
+    "note": "Continuation run: prior agent (session 13, branch auto/jarvis-autonomy-20261011-1331) left the branch with all edits applied but uncommitted and RUN_STATE stale. Verified the edits against the code, completed the missing execution-layer branch + honest fallback + tests, and checkpointing now."
   },
   "next_items": [
+    "TOOLCHAIN REQUIRED: run ./gradlew :app:testDebugUnitTest --no-daemon for the adjust_volume milestone (sandbox 2026-10-11 13:31 has no JDK and no Android SDK: /usr/lib/jvm and /opt/android-sdk absent). If green, merge; if the 6 new CapabilityUpgradeTest cases fail, fix forward.",
     "Run the full gate with assembleDebug when the milestone needs an APK: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (needs JDK21 + Android SDK 36.1)",
     "9.9 follow-up: gate AgentAction.ReadNotifications in ToolRegistry.validateAction/availableActions by the live flag so the planner is not even offered it when triage is off (needs a flag-aware registry seam; would also drop read_notifications from the prompt catalogue)",
     "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4, so a single stuck path can exhaust the explore budget and reach ASK_USER_HELP on one pair-run. Rationale is not documented; consider reconciling the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2 intact) in a dedicated run with a toolchain to confirm the intent.",

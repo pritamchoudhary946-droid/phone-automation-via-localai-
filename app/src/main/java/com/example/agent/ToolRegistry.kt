@@ -42,6 +42,7 @@ open class ToolRegistry {
         const val TOOL_FIND_ELEMENT = "find_element"
         const val TOOL_READ_TEXT = "read_text"
         const val TOOL_WAIT_FOR_TEXT = "wait_for_text"
+        const val TOOL_ADJUST_VOLUME = "adjust_volume"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
         const val TOOL_OPEN_QUICK_SETTINGS = "open_quick_settings"
@@ -171,6 +172,12 @@ open class ToolRegistry {
             description = "Waits until a target label appears on screen, bounded by timeoutMs",
             requiredParameters = listOf("targetText"),
             optionalParameters = listOf("timeoutMs")
+        ),
+        TOOL_ADJUST_VOLUME to ToolDefinition(
+            name = TOOL_ADJUST_VOLUME,
+            description = "Changes a device audio stream (media/ring/alarm/notification/call) by a signed number of steps; negative lowers, positive raises; set mute=true to silence it",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("stream", "steps", "mute")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -356,6 +363,16 @@ open class ToolRegistry {
                     ToolValidationResult.Invalid("wait_for_text timeout must be between 200ms and 30000ms: ${action.timeoutMs}")
                 } else {
                     ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.AdjustVolume -> {
+                val validStreams = AudioStream.keys()
+                when {
+                    AudioStream.fromKey(action.stream) == null ->
+                        ToolValidationResult.Invalid("adjust_volume stream must be one of $validStreams: ${action.stream}")
+                    action.steps < -15 || action.steps > 15 ->
+                        ToolValidationResult.Invalid("adjust_volume steps must be between -15 and 15: ${action.steps}")
+                    else -> ToolValidationResult.Valid
                 }
             }
             is AgentAction.Wait -> {

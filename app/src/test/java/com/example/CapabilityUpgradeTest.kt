@@ -4,7 +4,11 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.agent.ActionResult
 import com.example.agent.AgentAction
+import com.example.agent.AndroidDeviceAutomation
 import com.example.agent.AppDirectory
+import com.example.agent.AudioAdjustResult
+import com.example.agent.AudioController
+import com.example.agent.AudioStream
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.OrchestratorState
@@ -15,12 +19,16 @@ import com.example.model.LiteRtEngine
 import com.example.planning.PlanParseResult
 import com.example.planning.PlannerPromptBuilder
 import com.example.planning.PlanningRequest
+import com.example.planning.TaskPlan
 import com.example.planning.TaskPlanParser
+import com.example.planning.TaskPlanSerializer
+import com.example.planning.VerificationMethod
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -243,7 +251,123 @@ class CapabilityUpgradeTest {
         assertTrue("expected completion after replan, got $terminal", terminal is OrchestratorState.Completed)
     }
 
+    // --- adjust_volume: the advertised media-control primitive must actually execute ---
+
+    @Test
+    fun adjustVolumeExecutesWithoutAnAccessibilityService() {
+        // Regression: adjust_volume was advertised to the model and validated by the
+        // registry but had NO execution branch, so a planned volume change fell through
+        // to the UNKNOWN arm and could never run. Audio is service-free (AudioManager),
+        // so it must resolve before the a11y gate.
+        val recorder = RecordingAudioController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            audioController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AdjustVolume("media", steps = 2, mute = false))
+        }
+
+        assertTrue("volume change must succeed without a bound a11y service: $result", result.success)
+        assertEquals("MEDIA", result.method)
+        assertEquals(1, recorder.calls.size)
+        assertEquals(AudioStream.MEDIA to 2, recorder.calls[0].first to recorder.calls[0].second)
+        assertFalse(recorder.calls[0].third)
+    }
+
+    @Test
+    fun adjustVolumeMuteFlagReachesTheController() {
+        val recorder = RecordingAudioController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            audioController = recorder
+        )
+
+        kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AdjustVolume("ring", steps = 0, mute = true))
+        }
+
+        assertEquals(AudioStream.RING, recorder.calls[0].first)
+        assertTrue("mute=true must be honoured", recorder.calls[0].third)
+    }
+
+    @Test
+    fun adjustVolumeRefusesHonestlyWhenAudioIsUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            audioController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AdjustVolume("media", 1))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("AUDIO_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun adjustVolumeRejectsAnUnknownStream() {
+        val recorder = RecordingAudioController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            audioController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AdjustVolume("telepathy", 1))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_STREAM", result.method)
+        assertTrue("an invalid stream must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun adjustVolumeParserCarriesStreamStepsAndMute() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"mute the ringer","action":"adjust_volume","params":{"stream":"ring","steps":0,"mute":true},"expect":"silent","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "silence the phone")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val action = (result as PlanParseResult.Success).plan.steps[0].action
+        assertEquals(AgentAction.AdjustVolume("ring", 0, mute = true), action)
+    }
+
+    @Test
+    fun adjustVolumeSkillKeepsStreamStepsAndMuteOnReplay() {
+        val plan = TaskPlan(
+            goal = "silence the phone",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "mute ringer",
+                    action = AgentAction.AdjustVolume("ring", 0, mute = true),
+                    rawActionName = "adjust_volume", expectedPostcondition = "silent",
+                    verification = VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = TaskPlanSerializer.fromJson(
+            TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved volume skill must be replayable", restored != null)
+        assertEquals(AgentAction.AdjustVolume("ring", 0, mute = true), restored!!.steps[0].action)
+    }
+
     // --- Helpers ---
+
+    private class RecordingAudioController : AudioController {
+        val calls = mutableListOf<Triple<AudioStream, Int, Boolean>>()
+        override fun adjust(stream: AudioStream, steps: Int, mute: Boolean): AudioAdjustResult {
+            calls += Triple(stream, steps, mute)
+            return AudioAdjustResult(true, stream.name, "ok")
+        }
+    }
 
     private fun planStep(id: Int, action: AgentAction, rawName: String) = com.example.planning.PlanStep(
         id = id,

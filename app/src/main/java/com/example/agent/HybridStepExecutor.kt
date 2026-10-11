@@ -185,6 +185,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic wait for text"
             )
 
+            is AgentAction.AdjustVolume -> FastPathDecision.Execute(
+                action,
+                "deterministic device audio-stream adjustment"
+            )
+
             AgentAction.ReadText,
             AgentAction.OpenNotifications,
             AgentAction.OpenQuickSettings,
