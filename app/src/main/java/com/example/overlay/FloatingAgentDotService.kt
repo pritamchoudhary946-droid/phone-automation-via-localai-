@@ -476,8 +476,12 @@ class FloatingAgentDotService : Service() {
     private fun executeDirectPhoneAction(name: String, action: () -> Boolean?) {
         val a11y = AgentAccessibilityService.instance
         if (a11y != null) {
+            // Report the real result: a global action can return false (e.g. the
+            // screenshot path when the platform refuses it), so a blanket "executed"
+            // toast would claim success that did not happen.
             val success = action() == true
-            Toast.makeText(this, "Jarvis: $name executed", Toast.LENGTH_SHORT).show()
+            val msg = if (success) "Jarvis: $name executed" else "Jarvis: $name nahi ho paya"
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(this, "Accessibility Service enable karein Settings me", Toast.LENGTH_SHORT).show()
         }

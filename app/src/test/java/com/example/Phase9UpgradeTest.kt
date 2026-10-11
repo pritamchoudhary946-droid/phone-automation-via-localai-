@@ -365,6 +365,28 @@ class Phase9UpgradeTest {
         assertFalse("nothing runs while hands-free is off", ran)
     }
 
+    @Test
+    fun voiceLoopReportsNotRanWhenCommandCannotStart() = kotlinx.coroutines.runBlocking {
+        val spoken = mutableListOf<String>()
+        val controller = com.example.voice.VoiceLoopController(
+            optIn = { true },
+            micPermission = { true },
+            recognizer = object : com.example.voice.SpeechRecognizer {
+                override fun isAvailable() = true
+                override suspend fun listenOnce(timeoutMs: Long) = "jarvis do the thing"
+            },
+            speak = { text, _ -> spoken.add(text) },
+            runCommand = { false },
+            stopCurrent = {}
+        )
+        val result = controller.cycle()
+        assertEquals("not_ran", result.action)
+        assertTrue(
+            "a failed start must not be acknowledged as running: $spoken",
+            spoken.any { it.contains("couldn't", ignoreCase = true) }
+        )
+    }
+
     // ---- 9.8 daily briefing ----
 
     @Test

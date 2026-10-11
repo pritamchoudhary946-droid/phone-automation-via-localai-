@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 4,
+  "sessions_done": 5,
   "session_cap": 48,
-  "current_milestone": "4A bug sweep: ObstacleDetector ad & permission false positives + FailureClassifier precedence",
+  "current_milestone": "9.7/9.10 truthful reporting: voice loop no longer acknowledges a command it could not start; overlay direct-action toast reflects the real boolean result",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -13,7 +13,10 @@
     "4A fix 2026-10-11: ObstacleDetector no longer treats a bare 'skip'/'close'/'x' as an ad cue (false positive auto-tapped any 'Skip' control and derailed the task); firstPresent now returns the real on-screen label; regression test genericSkipControlIsNotMisreadAsAnAd",
     "validation 2026-10-11: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 261 tests 0 failures 0 errors, app-debug.apk produced (115 MB)",
     "4A fix 2026-10-11: ObstacleDetector permission branch no longer treats an ordinary Settings > Permissions screen (title contains 'permission', row 'Allow access to ...') as a runtime permission dialog; a real request is recognised by its deny+grant choice pair; regression test settingsPermissionsScreenIsNotMisreadAsAPermissionDialog",
-    "validation 2026-10-11: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 262 tests 0 failures 0 errors 0 skipped, app-debug.apk produced (115 MB)"
+    "validation 2026-10-11: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 262 tests 0 failures 0 errors 0 skipped, app-debug.apk produced (115 MB)",
+    "9.7 fix 2026-10-11: VoiceLoopController.cycle() no longer acknowledges a command as running when runCommand returned false; it now speaks an honest failure and returns Result(\"not_ran\", ...) (dashboard maps it to \"Couldn't start: <cmd>\"); regression test voiceLoopReportsNotRanWhenCommandCannotStart",
+    "9.10 fix 2026-10-11: FloatingAgentDotService.executeDirectPhoneAction now reports the real Boolean result (\"<name> executed\" vs \"<name> nahi ho paya\") instead of a blanket success toast",
+    "validation 2026-10-11: COULD NOT RUN - sandbox has no JDK/SDK (java: command not found, ANDROID_HOME unset, /opt/android-sdk and /usr/lib/jvm absent); change is small and reasoned from source, next run with a toolchain must run ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon"
   ],
   "in_progress": {
     "item": "",
@@ -21,14 +24,16 @@
     "note": ""
   },
   "next_items": [
-    "Continue item 4A mandatory full bug sweep on the live recovery path: investigate stale-observation handling after Back/obstacle dismissal, false-success gates, and remaining operator-precedence/boolean-logic defects (e.g. FloatingAgentDotService command routing, TargetResolver)",
-    "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced",
-    "Human: review/merge PR #28 (do not auto-merge)"
+    "Run the Gradle gate in a toolchain sandbox: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (this run could not run it - no JDK/SDK)",
+    "9.9 notification triage: verify NotificationTriage.digest/priority are surfaced only when triage is opted in, and that the briefing digest is bounded",
+    "9.10 overlay HUD: review onDoubleTap screen readout and command-panel routing for any remaining false-success or stale-observation handling",
+    "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
+    "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-0030",
-  "open_pr": "https://github.com/pritamchoudhary946-droid/phone-automation-via-localai-/pull/28",
+  "branch": "auto/jarvis-autonomy-20261011-0554",
+  "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261011T0345Z",
-  "last_updated": "2026-10-11T03:50:51Z"
+  "last_run_id": "internal-20261011T0554Z",
+  "last_updated": "2026-10-11T05:54:08Z"
 }

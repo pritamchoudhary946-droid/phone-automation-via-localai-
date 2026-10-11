@@ -294,6 +294,7 @@ fun AgentDashboardScreen(
             val result = voiceLoop.cycle()
             voiceStatus = when (result.action) {
                 "ran" -> "Running: ${result.detail}"
+                "not_ran" -> "Couldn't start: ${result.detail}"
                 "stopped" -> "Stopped the current task"
                 "ignored" -> "Say \"Jarvis\" followed by your command"
                 "wake_only" -> "Listening for your command after \"Jarvis\""
