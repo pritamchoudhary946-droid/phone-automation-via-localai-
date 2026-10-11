@@ -118,9 +118,15 @@ class VoiceLoopController(
                 if (u.command.isBlank()) return Result("wake_only")
                 val hindi = LanguageDetector.prefersHindi(u.command)
                 val started = runCommand(u.command)
-                val ack = if (hindi) "Theek hai." else "Okay."
+                // Speak the truth: a command that could not start (no plan, model not
+                // ready, or a clarifying question) must not be acknowledged as running.
+                val ack = when {
+                    !started -> if (hindi) "Maaf kijiye, main yeh nahi kar paya." else "Sorry, I couldn't start that."
+                    hindi -> "Theek hai."
+                    else -> "Okay."
+                }
                 speak(ack, if (hindi) "hi" else "")
-                Result("ran", u.command)
+                return if (started) Result("ran", u.command) else Result("not_ran", u.command)
             }
         }
     }
