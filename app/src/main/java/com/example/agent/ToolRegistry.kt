@@ -44,6 +44,7 @@ open class ToolRegistry {
         const val TOOL_READ_TEXT = "read_text"
         const val TOOL_WAIT_FOR_TEXT = "wait_for_text"
         const val TOOL_ADJUST_VOLUME = "adjust_volume"
+        const val TOOL_PLAY_MEDIA = "play_media"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
         const val TOOL_OPEN_QUICK_SETTINGS = "open_quick_settings"
@@ -185,6 +186,12 @@ open class ToolRegistry {
             description = "Changes a device audio stream (media/ring/alarm/notification/call) by a signed number of steps; negative lowers, positive raises; set mute=true to silence it",
             requiredParameters = emptyList(),
             optionalParameters = listOf("stream", "steps", "mute")
+        ),
+        TOOL_PLAY_MEDIA to ToolDefinition(
+            name = TOOL_PLAY_MEDIA,
+            description = "Controls the active media session's transport: play, pause, toggle (play/pause), stop, next or previous track",
+            requiredParameters = listOf("transport"),
+            optionalParameters = emptyList()
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -381,6 +388,15 @@ open class ToolRegistry {
                     action.steps < -15 || action.steps > 15 ->
                         ToolValidationResult.Invalid("adjust_volume steps must be between -15 and 15: ${action.steps}")
                     else -> ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.PlayMedia -> {
+                if (MediaTransport.fromKey(action.transport) == null) {
+                    ToolValidationResult.Invalid(
+                        "play_media transport must be one of ${MediaTransport.keys()}: ${action.transport}"
+                    )
+                } else {
+                    ToolValidationResult.Valid
                 }
             }
             is AgentAction.Wait -> {

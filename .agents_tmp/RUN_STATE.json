@@ -2,7 +2,7 @@
   "project_done": false,
   "sessions_done": 15,
   "session_cap": 48,
-  "current_milestone": "Capability: 9.9 opt-in gate closed at the prompt level - read_notifications was in the planning prompt's parameter catalogue unconditionally, so while notification triage was OFF the model was still handed the read_notifications schema and could emit a step the executor refuses. Now the schema line and the advertised tool list are both withheld by a live supplier read per call.",
+  "current_milestone": "Capability: play_media (device media transport control) - section 2.1 'media playback control' was listed but absent. A new MediaController seam + MediaTransport enum (play/pause/toggle/stop/next/previous -> KEYCODE_MEDIA_* ) dispatches a standard media key to the active session via AudioManager.dispatchMediaKeyEvent, verified by an isMusicActive before/after read-back (a dispatch that leaves playback state unchanged is a failure, not a fake success). Wired across every action-vocabulary seam and resolved before the a11y-service gate (media is AudioManager-backed, like adjust_volume/read_notifications).",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -53,7 +53,9 @@
     "9.9 regression test 2026-10-11 (session 15): Phase4UpgradeTest.readNotificationsIsAnApprovedTool now asserts the tool is advertised with triage ON and withheld with triage OFF; new planningPromptWithholdsReadNotificationsWhileTriageOff asserts the raw prompt text is free of read_notifications while off and contains it while on (the leak was in the prompt body, not just the list).",
     "9.9 invariant recorded in AGENTS.md 2026-10-11 (session 15): the prompt-level gate must be a live per-call read and both new params must default to the safe/OFF value, so a caller that forgets the flag never advertises an action the executor refuses.",
     "validation 2026-10-11 (session 15): COULD NOT RUN - this sandbox has no toolchain: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 does not exist, ANDROID_HOME=/opt/android-sdk does not exist, no java/javac on PATH; ./gradlew --version -> 'ERROR: JAVA_HOME is set to an invalid directory'. The change is a pure additive default-preserving signature extension, reasoned from source, with a dedicated prompt-body regression test. A toolchain run MUST execute ./gradlew :app:testDebugUnitTest --no-daemon before this is treated as verified.",
-    "merge 2026-10-11 (session 15): merged origin/main (e843028 adjust_volume #41, itself building on clear_text aa62103 #42) into auto/jarvis-autonomy-20261011-1529. One production conflict in PlannerPromptBuilder.kt (the string ACTION_CATALOG vs the line-list ACTION_CATALOG_LINES) was resolved by keeping the line-list form, which is required for the 9.9 prompt gate and already carries the adjust_volume/clear_text catalogue lines. RUN_STATE.json conflict resolved by rebuilding from origin/main plus the session-15 entries."
+    "merge 2026-10-11 (session 15): merged origin/main (e843028 adjust_volume #41, itself building on clear_text aa62103 #42) into auto/jarvis-autonomy-20261011-1529. One production conflict in PlannerPromptBuilder.kt (the string ACTION_CATALOG vs the line-list ACTION_CATALOG_LINES) was resolved by keeping the line-list form, which is required for the 9.9 prompt gate and already carries the adjust_volume/clear_text catalogue lines. RUN_STATE.json conflict resolved by rebuilding from origin/main plus the session-15 entries.",
+    "capability 2026-10-11 (session 15): new AgentAction.PlayMedia + tool play_media (media transport control: play/pause/toggle/stop/next/previous). Closes the section 2.1 'media playback control' gap - a UI tap cannot reach an arbitrary player's transport. Implemented across all action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (const, ToolDefinition, validateAction via MediaTransport.fromKey), TaskPlanParser.mapAction, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, AndroidDeviceAutomation.execute (service-free, before the a11y gate), and TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor).",
+    "capability 2026-10-11 (session 15): new com.example.agent.MediaController interface + MediaTransport enum + AndroidMediaController (AudioManager.dispatchMediaKeyEvent with an isMusicActive before/after read-back so play/pause/toggle/stop report success only when playback state actually moved; next/previous are reported as a delivered key, 'track change not state-verifiable', never a claimed track change). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication."
   ],
   "in_progress": {
     "item": "",
@@ -61,21 +63,21 @@
     "note": ""
   },
   "next_items": [
-    "TOOLCHAIN REQUIRED: run ./gradlew :app:testDebugUnitTest --no-daemon to confirm the 9.9 prompt-gating milestone and the still-unverified adjust_volume (#41) milestone. If any case fails, fix forward (do not revert others' work).",
+    "TOOLCHAIN REQUIRED: run ./gradlew :app:testDebugUnitTest --no-daemon for the play_media milestone (#44), the 9.9 prompt-gating milestone (#43) and the still-unverified adjust_volume milestone (#41). Fix forward if any new CapabilityUpgradeTest case fails.",
     "Run the full gate with assembleDebug when the milestone needs an APK: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon (needs JDK21 + Android SDK 36.1)",
     "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4. Consider reconciling the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2 intact) in a dedicated toolchain run.",
     "5.2 (low-risk): FailureClassifier.burnedByWrongPackage is only set when a WRONG_PACKAGE failure precedes TARGET_NOT_FOUND. No change made.",
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining boolean-logic defects.",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": "auto/jarvis-autonomy-20261011-1529",
-  "open_pr": 43,
+  "branch": "auto/jarvis-autonomy-20261011-2108",
+  "open_pr": 44,
   "risky_actions_done": [],
   "blockers": [
-    "NO TOOLCHAIN in this sandbox (2026-10-11 15:32): JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 does not exist, ANDROID_HOME=/opt/android-sdk does not exist, no java/javac on PATH. The 9.9 prompt-gating milestone therefore merges unverified; a toolchain run must run the unit gate and fix forward if the new/updated Phase4UpgradeTest cases fail."
+    "NO TOOLCHAIN in this sandbox (2026-10-11 21:08 IST): ./gradlew cannot run - no java/javac on PATH, JAVA_HOME empty, /usr/lib/jvm absent, ANDROID_HOME empty, /opt/android-sdk absent. play_media (#44) merged unverified; a toolchain run must run the unit gate and fix forward if any play_media* case fails."
   ],
   "last_run_id": "internal-20261011T1532Z",
-  "last_updated": "2026-10-11T15:45:00Z",
+  "last_updated": "2026-10-11T15:55:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,

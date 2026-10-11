@@ -157,7 +157,8 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // 9.9: live opt-in gate for reading/summarising notifications.
                 triageEnabled = { settings.notificationTriageEnabled },
                 // Media control primitive: changes a system audio stream directly.
-                audioController = com.example.agent.AndroidAudioController(this)
+                audioController = com.example.agent.AndroidAudioController(this),
+                mediaController = com.example.agent.AndroidMediaController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

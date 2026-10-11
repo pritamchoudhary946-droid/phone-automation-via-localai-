@@ -115,6 +115,15 @@ sealed class AgentAction {
      * contract stays unambiguous for the model.
      */
     data class AdjustVolume(val stream: String = "media", val steps: Int = 1, val mute: Boolean = false) : AgentAction()
+    /**
+     * Controls the active media session's transport: play/pause/stop or skip to the
+     * next/previous track. This is the playback-control primitive no UI tap can reach
+     * on an arbitrary screen ("pause the music", "play the next song"). [transport] is
+     * one of the [MediaTransport] keys. A dispatch is a delivered media key, not a
+     * claim that a specific track is now playing; precise playback state is verified
+     * separately by the PLAYBACK postcondition.
+     */
+    data class PlayMedia(val transport: String = "toggle") : AgentAction()
     object ReadNotifications : AgentAction()
     object OpenNotifications : AgentAction()
     object OpenQuickSettings : AgentAction()
@@ -160,6 +169,7 @@ sealed class AgentAction {
                 mute || steps == 0 -> "Mute $stream volume"
                 else -> "Turn $stream volume ${if (steps > 0) "up" else "down"} $steps step(s)"
             }
+            is PlayMedia -> "Media ${transport}: control playback"
             is ReadNotifications -> "Read notifications"
             is OpenNotifications -> "Open notification shade"
             is OpenQuickSettings -> "Open quick settings"
