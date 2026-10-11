@@ -116,6 +116,16 @@ sealed class AgentAction {
      */
     data class AdjustVolume(val stream: String = "media", val steps: Int = 1, val mute: Boolean = false) : AgentAction()
     /**
+     * Switches the device ringer mode between "silent", "vibrate" and "normal" — the
+     * "put my phone on silent" / "unmute my phone" primitive. The ringer mode is a
+     * system audio setting that no accessibility-tree read or UI tap can change
+     * reliably on an arbitrary screen, so like [AdjustVolume] it is resolved before the
+     * accessibility-service gate. It is distinct from muting an audio *stream*: it
+     * changes the whole device's ring/vibrate behaviour, not one stream's level.
+     * [mode] is one of the [RingerMode] keys.
+     */
+    data class SetRingerMode(val mode: String = "silent") : AgentAction()
+    /**
      * Controls the active media session's transport: play/pause/stop or skip to the
      * next/previous track. This is the playback-control primitive no UI tap can reach
      * on an arbitrary screen ("pause the music", "play the next song"). [transport] is
@@ -177,6 +187,7 @@ sealed class AgentAction {
                 mute || steps == 0 -> "Mute $stream volume"
                 else -> "Turn $stream volume ${if (steps > 0) "up" else "down"} $steps step(s)"
             }
+            is SetRingerMode -> "Set ringer mode to $mode"
             is PlayMedia -> "Media ${transport}: control playback"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"

@@ -159,6 +159,9 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // Media control primitive: changes a system audio stream directly.
                 audioController = com.example.agent.AndroidAudioController(this),
                 mediaController = com.example.agent.AndroidMediaController(this),
+                // Ringer-mode primitive: switches the whole device's ring/vibrate/silent
+                // state directly, service-free like the audio/media controllers.
+                ringerModeController = com.example.agent.AndroidRingerModeController(this),
                 // Device-status read primitive: battery/screen/ringer/connectivity,
                 // read fresh from system services on each call.
                 deviceStatusReader = com.example.agent.AndroidDeviceStatusReader(this)

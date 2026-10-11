@@ -81,6 +81,7 @@ object TaskPlanSerializer {
             put("steps", steps)
             if (mute) put("mute", true)
         }
+        is AgentAction.SetRingerMode -> JSONObject().put("mode", mode)
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
         else -> null
     }
@@ -175,6 +176,7 @@ object TaskPlanSerializer {
         is AgentAction.ReadText -> com.example.agent.ToolRegistry.TOOL_READ_TEXT
         is AgentAction.WaitForText -> com.example.agent.ToolRegistry.TOOL_WAIT_FOR_TEXT
         is AgentAction.AdjustVolume -> com.example.agent.ToolRegistry.TOOL_ADJUST_VOLUME
+        is AgentAction.SetRingerMode -> com.example.agent.ToolRegistry.TOOL_SET_RINGER_MODE
         is AgentAction.PlayMedia -> com.example.agent.ToolRegistry.TOOL_PLAY_MEDIA
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS
         is AgentAction.ReadDeviceStatus -> com.example.agent.ToolRegistry.TOOL_READ_DEVICE_STATUS
