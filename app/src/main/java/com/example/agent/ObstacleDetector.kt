@@ -47,16 +47,20 @@ object ObstacleDetector {
         // Settings > Permissions surface, which shows "Permissions" and an "Allow access
         // to ..." row but no deny control. The old keyword rule matched that screen, so
         // the agent auto-tapped its "Allow" row - derailing the task and potentially
-        // granting access the user never asked for (4A false positive). The caller still
-        // decides whether to tap the grant control; we only surface the blocker.
+        // granting access the user never asked for (4A false positive).
+        //
+        // A detected runtime permission dialog is UNRESOLVABLE on purpose (3.5, master
+        // prompt): granting access is the user's decision, so the agent must never tap a
+        // grant control on the user's behalf - not even "While using the app". The caller
+        // stops the run honestly and asks the user to grant the permission themselves.
         val hasDenyChoice = signals.containsAny("deny", "don't allow", "do not allow")
         val hasGrantChoice = signals.containsAny("allow", "while using", "only this time", "grant")
         if (hasDenyChoice && hasGrantChoice) {
-            val label = firstPresent(signals, listOf("while using the app", "while using", "allow", "ok"))
             return Blocker(
                 Kind.PERMISSION,
-                label,
-                "A permission dialog is asking for access."
+                dismissLabel = null,
+                explanation = "A runtime permission dialog is asking for access; granting it is the user's decision.",
+                unresolvable = true
             )
         }
 

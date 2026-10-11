@@ -253,6 +253,10 @@ class Phase9UpgradeTest {
         )
         assertNotNull(permission)
         assertEquals(ObstacleDetector.Kind.PERMISSION, permission!!.kind)
+        // A runtime permission dialog is never auto-granted (3.5): it is reported as an
+        // unresolvable blocker so the caller stops honestly and asks the user instead.
+        assertTrue(permission.unresolvable)
+        assertNull(permission.dismissLabel)
 
         assertNull(
             ObstacleDetector.detect(ObstacleDetector.ScreenSignals("com.app", listOf("Home", "Search")))

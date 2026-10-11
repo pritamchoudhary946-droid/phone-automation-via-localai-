@@ -588,6 +588,35 @@ class OrchestratorLoopTest {
         assertTrue("expected an honest failure, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // 3.5: a detected runtime permission dialog must never be auto-granted. The agent
+    // stops honestly and does not tap a "While using the app"/"Allow" control on the
+    // user's behalf, even though that label would otherwise look like a safe dismiss.
+
+    @Test
+    fun permissionDialogIsNotAutoGranted() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observationText(
+                "com.android.permissioncontroller",
+                "Allow YouTube to access your photos?",
+                6,
+                labels = listOf("Allow YouTube to access your photos?", "While using the app", "Don't allow")
+            )
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open camera","action":"tap","params":{"targetText":"Camera"},"expect":"camera","verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("Open the camera", maxSteps = 3)
+        val terminal = awaitTerminal(orchestrator)
+
+        assertTrue("expected an honest stop, got $terminal", terminal is OrchestratorState.Failed)
+        // No grant control was ever tapped on the user's behalf.
+        val granted = automation.executed.any {
+            it is AgentAction.Tap && it.targetText.orEmpty().contains("using the app", ignoreCase = true)
+        }
+        assertFalse("the agent must not auto-grant a permission dialog", granted)
+    }
+
     // ---- helpers ----
 
     private class AlwaysRejectRegistry : ToolRegistry() {
