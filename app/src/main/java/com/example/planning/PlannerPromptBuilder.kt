@@ -63,7 +63,7 @@ object PlannerPromptBuilder {
         """- read_page_content: {}   (extracts the visible page/article text)""",
         """- wait_for_text: {"targetText":"<label>","timeoutMs":<int>}""",
         """- adjust_volume: {"stream":"media|ring|alarm|notification|call","steps":<int>,"mute":<optional bool>}   (steps: +raises, -lowers; mute=true silences the stream; one step is one hardware volume press)""",
-        """- play_media: {"transport":"play|pause|toggle|stop|next|previous"}   (controls the active media/song: toggle=play/pause; use for "pause the music" / "next song" / "stop playback")"""
+        """- play_media: {"transport":"play|pause|toggle|stop|next|previous"}   (controls the active media/song: toggle=play/pause; use for "pause the music" / "next song" / "stop playback")""",
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",
         """- open_notifications: {}   open_quick_settings: {}   open_recents: {}""",
