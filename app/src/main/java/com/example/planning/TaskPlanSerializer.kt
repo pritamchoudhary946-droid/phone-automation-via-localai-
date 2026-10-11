@@ -75,6 +75,11 @@ object TaskPlanSerializer {
             put("direction", direction)
             put("maxSwipes", maxSwipes)
         }
+        is AgentAction.AdjustVolume -> JSONObject().apply {
+            put("stream", stream)
+            put("steps", steps)
+            if (mute) put("mute", true)
+        }
         else -> null
     }
 
@@ -166,6 +171,7 @@ object TaskPlanSerializer {
         is AgentAction.FindElement -> com.example.agent.ToolRegistry.TOOL_FIND_ELEMENT
         is AgentAction.ReadText -> com.example.agent.ToolRegistry.TOOL_READ_TEXT
         is AgentAction.WaitForText -> com.example.agent.ToolRegistry.TOOL_WAIT_FOR_TEXT
+        is AgentAction.AdjustVolume -> com.example.agent.ToolRegistry.TOOL_ADJUST_VOLUME
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS
         is AgentAction.OpenNotifications -> com.example.agent.ToolRegistry.TOOL_OPEN_NOTIFICATIONS
         is AgentAction.OpenQuickSettings -> com.example.agent.ToolRegistry.TOOL_OPEN_QUICK_SETTINGS

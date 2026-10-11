@@ -242,6 +242,11 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 targetText = str(params, "targetText", "text", "element", "label"),
                 timeoutMs = params.optLong("timeoutMs", 5_000L)
             )
+            ToolRegistry.TOOL_ADJUST_VOLUME -> AgentAction.AdjustVolume(
+                stream = str(params, "stream", "channel", "type").ifBlank { "media" },
+                steps = params.optInt("steps", params.optInt("delta", 1)),
+                mute = params.optBoolean("mute", false)
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
             ToolRegistry.TOOL_OPEN_QUICK_SETTINGS -> AgentAction.OpenQuickSettings

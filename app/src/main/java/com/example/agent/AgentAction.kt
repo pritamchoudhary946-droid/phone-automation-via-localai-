@@ -102,6 +102,19 @@ sealed class AgentAction {
      * slow-loading surfaces where a fixed [Wait] is either too short or wasteful.
      */
     data class WaitForText(val targetText: String, val timeoutMs: Long = 5_000L) : AgentAction()
+    /**
+     * Changes a device audio stream by [steps] from its current level, where one step
+     * is the platform's own volume increment for that stream (e.g. one media-volume
+     * press). A negative [steps] lowers it; a positive one raises it. This is the
+     * media-playback control primitive: "turn the volume up/down" or "mute the music"
+     * is not reachable through any UI tap on an arbitrary screen.
+     *
+     * [stream] is one of "media" (default), "ring", "alarm", "notification" or "call".
+     * [mute] is an explicit "mute this stream" intent; a request to unmute is expressed
+     * as a positive [steps] raise. It is kept separate from `steps == 0` so the tool
+     * contract stays unambiguous for the model.
+     */
+    data class AdjustVolume(val stream: String = "media", val steps: Int = 1, val mute: Boolean = false) : AgentAction()
     object ReadNotifications : AgentAction()
     object OpenNotifications : AgentAction()
     object OpenQuickSettings : AgentAction()
@@ -143,6 +156,10 @@ sealed class AgentAction {
             is ClearText -> if (targetText != null) "Clear text in '$targetText'" else "Clear focused text"
             is ReadText -> "Read screen text"
             is WaitForText -> "Wait for text '$targetText' (up to ${timeoutMs}ms)"
+            is AdjustVolume -> when {
+                mute || steps == 0 -> "Mute $stream volume"
+                else -> "Turn $stream volume ${if (steps > 0) "up" else "down"} $steps step(s)"
+            }
             is ReadNotifications -> "Read notifications"
             is OpenNotifications -> "Open notification shade"
             is OpenQuickSettings -> "Open quick settings"
