@@ -63,9 +63,13 @@ object ObstacleDetector {
             )
         }
 
-        // Full-screen ads: only cleared when an obvious close/dismiss control exists.
-        if (signals.containsAny("skip ad", "skip", "close ad", "advertisement", "sponsored")) {
-            val label = firstPresent(signals, listOf("skip ad", "skip", "close ad", "close", "x"))
+        // Full-screen ads: require a real ad cue. A generic "Skip"/"Close"/"X" control is
+        // an ordinary app affordance (onboarding, tutorial, dialog), NOT an ad cue, so it
+        // must never be auto-tapped as if it dismissed an ad (4A: false positive on any
+        // screen that merely had a "Skip" button). The dismiss control is matched loosely
+        // (a bare "x" is deliberately excluded - it substring-matches unrelated labels).
+        if (signals.containsAny("advertisement", "sponsored", "skip ad", "close ad", "dismiss ad")) {
+            val label = firstPresent(signals, listOf("skip ad", "close ad", "dismiss ad", "skip", "close"))
             return Blocker(
                 Kind.AD,
                 label,
@@ -102,6 +106,10 @@ object ObstacleDetector {
         return DISMISS_WORDS.any { l.contains(it) } && DENY_WORDS.none { l.contains(it) }
     }
 
+    /** The actual on-screen label that matches the first candidate, not the candidate
+     *  token itself - the caller taps this text, so it must be the real label. */
     private fun firstPresent(signals: ScreenSignals, candidates: List<String>): String? =
-        candidates.firstOrNull { c -> signals.labels.any { it.contains(c, ignoreCase = true) } }
+        candidates.firstNotNullOfOrNull { c ->
+            signals.labels.firstOrNull { it.contains(c, ignoreCase = true) }
+        }
 }

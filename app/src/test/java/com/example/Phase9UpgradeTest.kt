@@ -266,6 +266,26 @@ class Phase9UpgradeTest {
         assertFalse(ObstacleDetector.isSafeDismiss(null))
     }
 
+    @Test
+    fun genericSkipControlIsNotMisreadAsAnAd() {
+        // Regression (4A): a bare "Skip"/"Close" is an ordinary app affordance (onboarding,
+        // tutorial, dialog). Treating it as an ad cue made the orchestrator tap it as if it
+        // dismissed an ad, derailing the task surface. Only a real ad cue may trigger AD.
+        assertNull(
+            ObstacleDetector.detect(ObstacleDetector.ScreenSignals("com.app", listOf("Skip", "Next")))
+        )
+        assertNull(
+            ObstacleDetector.detect(ObstacleDetector.ScreenSignals("com.app", listOf("Skip for now")))
+        )
+        // The detected control is the real on-screen label, not the candidate token, and a
+        // single-letter "x" candidate must not substring-match an unrelated label like "Next".
+        val ad = ObstacleDetector.detect(
+            ObstacleDetector.ScreenSignals("com.game", listOf("Next", "Skip Ad"))
+        )
+        assertEquals(ObstacleDetector.Kind.AD, ad!!.kind)
+        assertEquals("Skip Ad", ad.dismissLabel)
+    }
+
     // ---- 9.14 battery guard + defaults ----
 
     @Test
