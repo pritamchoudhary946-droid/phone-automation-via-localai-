@@ -39,6 +39,7 @@ open class ToolRegistry {
         const val TOOL_SCROLL = "scroll"
         const val TOOL_LONG_PRESS = "long_press"
         const val TOOL_SCROLL_UNTIL_FOUND = "scroll_until_found"
+        const val TOOL_FIND_ELEMENT = "find_element"
         const val TOOL_READ_TEXT = "read_text"
         const val TOOL_WAIT_FOR_TEXT = "wait_for_text"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
@@ -151,6 +152,12 @@ open class ToolRegistry {
         TOOL_SCROLL_UNTIL_FOUND to ToolDefinition(
             name = TOOL_SCROLL_UNTIL_FOUND,
             description = "Scrolls the current list until a target label becomes visible, bounded by maxSwipes",
+            requiredParameters = listOf("targetText"),
+            optionalParameters = listOf("direction", "maxSwipes")
+        ),
+        TOOL_FIND_ELEMENT to ToolDefinition(
+            name = TOOL_FIND_ELEMENT,
+            description = "Finds a target label on the current surface (scrolling if needed) and taps it once",
             requiredParameters = listOf("targetText"),
             optionalParameters = listOf("direction", "maxSwipes")
         ),
@@ -327,6 +334,18 @@ open class ToolRegistry {
                         ToolValidationResult.Invalid("scroll_until_found direction must be 'up' or 'down': ${action.direction}")
                     action.maxSwipes < 1 || action.maxSwipes > 20 ->
                         ToolValidationResult.Invalid("scroll_until_found maxSwipes must be between 1 and 20: ${action.maxSwipes}")
+                    else -> ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.FindElement -> {
+                val validDirs = setOf("up", "down")
+                when {
+                    action.targetText.isBlank() ->
+                        ToolValidationResult.Invalid("find_element requires a non-blank target label")
+                    !validDirs.contains(action.direction.lowercase()) ->
+                        ToolValidationResult.Invalid("find_element direction must be 'up' or 'down': ${action.direction}")
+                    action.maxSwipes < 1 || action.maxSwipes > 20 ->
+                        ToolValidationResult.Invalid("find_element maxSwipes must be between 1 and 20: ${action.maxSwipes}")
                     else -> ToolValidationResult.Valid
                 }
             }

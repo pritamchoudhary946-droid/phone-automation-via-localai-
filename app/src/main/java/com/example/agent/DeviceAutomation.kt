@@ -284,6 +284,7 @@ class AndroidDeviceAutomation(
                 )
             }
             is AgentAction.ScrollUntilFound -> executeScrollUntilFound(action, service)
+            is AgentAction.FindElement -> executeFindElement(action, service)
             is AgentAction.ReadText -> {
                 val text = service.readVisibleText()
                 ActionResult(
@@ -414,25 +415,78 @@ class AndroidDeviceAutomation(
         action: AgentAction.ScrollUntilFound,
         service: AgentAccessibilityService
     ): ActionResult {
-        if (service.isTextVisible(action.targetText)) {
-            return ActionResult(true, "ALREADY_VISIBLE", "'${action.targetText}' is already visible")
+        return when (val reveal = revealByScrolling(service, action.targetText, action.direction, action.maxSwipes)) {
+            is RevealResult.AlreadyVisible ->
+                ActionResult(true, "ALREADY_VISIBLE", "'${action.targetText}' is already visible")
+            is RevealResult.Revealed ->
+                ActionResult(true, "SCROLL_UNTIL_FOUND", "Found '${action.targetText}' after ${reveal.swipes} swipe(s)")
+            is RevealResult.Exhausted ->
+                ActionResult(false, "SCROLL_EXHAUSTED", reveal.reason)
         }
+    }
+
+    /**
+     * The general "find and press" primitive: reveal [AgentAction.FindElement.targetText]
+     * (scrolling if necessary, bounded) and tap it once from a fresh observation, so a
+     * target that is scrolled off-screen is reachable in a single step. A tap that is
+     * dispatched but cannot be confirmed is reported honestly rather than as success.
+     */
+    private suspend fun executeFindElement(
+        action: AgentAction.FindElement,
+        service: AgentAccessibilityService
+    ): ActionResult {
+        val reveal = revealByScrolling(service, action.targetText, action.direction, action.maxSwipes)
+        if (reveal is RevealResult.Exhausted) {
+            return ActionResult(false, "FIND_EXHAUSTED", reveal.reason)
+        }
+        // Verify the tap against the screen state at the moment of the tap: a dispatched
+        // gesture that leaves the screen identical is not proof the element was activated.
+        val before = service.dumpHierarchy().getFingerprint()
+        val tap = service.performTap(action.targetText, null, null) {
+            delay(250)
+            service.dumpHierarchy().getFingerprint() != before
+        }
+        if (!tap.success) {
+            return ActionResult(false, tap.method, tap.failureReason ?: "Found '${action.targetText}' but could not tap it")
+        }
+        return ActionResult(
+            success = true,
+            method = "FIND_TAP_${tap.method}",
+            message = "Found and tapped '${action.targetText}' via ${tap.method}"
+        )
+    }
+
+    private sealed class RevealResult {
+        object AlreadyVisible : RevealResult()
+        data class Revealed(val swipes: Int) : RevealResult()
+        data class Exhausted(val reason: String) : RevealResult()
+    }
+
+    /**
+     * Reveals a label by scrolling [direction] up to [maxSwipes] times. Stops as soon
+     * as the label is visible, and stops early when a swipe no longer moves the screen
+     * (the end of the list has been reached), so a missing label cannot scroll forever.
+     */
+    private suspend fun revealByScrolling(
+        service: AgentAccessibilityService,
+        targetText: String,
+        direction: String,
+        maxSwipes: Int
+    ): RevealResult {
+        if (service.isTextVisible(targetText)) return RevealResult.AlreadyVisible
         var swipes = 0
-        while (swipes < action.maxSwipes) {
+        while (swipes < maxSwipes) {
             val before = service.dumpHierarchy().getFingerprint()
-            service.scroll(action.direction)
+            service.scroll(direction)
             delay(350)
-            if (service.isTextVisible(action.targetText)) {
-                return ActionResult(true, "SCROLL_UNTIL_FOUND", "Found '${action.targetText}' after ${swipes + 1} swipe(s)")
-            }
+            if (service.isTextVisible(targetText)) return RevealResult.Revealed(swipes + 1)
             val after = service.dumpHierarchy().getFingerprint()
             swipes++
             if (before == after) {
-                // The list did not move: further swipes in this direction are pointless.
-                return ActionResult(false, "SCROLL_EXHAUSTED", "Reached the end of the list without finding '${action.targetText}'")
+                return RevealResult.Exhausted("Reached the end of the list without finding '$targetText'")
             }
         }
-        return ActionResult(false, "SCROLL_EXHAUSTED", "'${action.targetText}' not found after ${action.maxSwipes} swipes")
+        return RevealResult.Exhausted("'$targetText' not found after $maxSwipes swipes")
     }
 
     private suspend fun executeOpenApp(

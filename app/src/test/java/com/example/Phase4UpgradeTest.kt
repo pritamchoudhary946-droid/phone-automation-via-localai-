@@ -295,6 +295,34 @@ class Phase4UpgradeTest {
         assertEquals(com.example.planning.VerificationMethod.FOREGROUND_PACKAGE, steps[0].verification)
     }
 
+    // --- 4.13 replay: a bounded scroll-to-find keeps its direction and swipe budget ---
+
+    @Test
+    fun scrollUntilFoundSkillKeepsDirectionAndBudgetOnReplay() {
+        // A learned skill that scrolls UP to reveal a row must not replay scrolling DOWN:
+        // the serializer has to persist direction/maxSwipes, not just the target label.
+        val plan = com.example.planning.TaskPlan(
+            goal = "reveal older rows",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "scroll up to Settings",
+                    action = AgentAction.ScrollUntilFound("Settings", "up", 3),
+                    rawActionName = "scroll_until_found", expectedPostcondition = "Settings visible",
+                    verification = com.example.planning.VerificationMethod.TEXT_PRESENT
+                )
+            )
+        )
+
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+
+        assertTrue("a saved scroll-to-find skill must be replayable", restored != null)
+        assertEquals(AgentAction.ScrollUntilFound("Settings", "up", 3), restored!!.steps[0].action)
+    }
+
     // --- 4.13 replay: unreconstructable / unsafe stored plans are refused ---
 
     @Test

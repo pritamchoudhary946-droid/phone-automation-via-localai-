@@ -52,6 +52,7 @@ object PlannerPromptBuilder {
         - copy_text:   {"targetText":"<optional label>"}   paste_text: {"targetText":"<optional>"}
         - scroll:      {"direction":"up|down|left|right"}
         - scroll_until_found: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}
+        - find_element: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}   (scroll to a label if needed, then tap it)
         - read_text:   {}   (reads the visible on-screen text back to you)
         - read_page_content: {}   (extracts the visible page/article text)
         - wait_for_text: {"targetText":"<label>","timeoutMs":<int>}

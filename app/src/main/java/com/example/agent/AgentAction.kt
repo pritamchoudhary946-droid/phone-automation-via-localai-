@@ -73,6 +73,18 @@ sealed class AgentAction {
         val maxSwipes: Int = 6
     ) : AgentAction()
     /**
+     * Locates [targetText] anywhere on the current surface by scrolling one direction
+     * until the label is visible, then taps it once. This is the general
+     * "find and press a thing" primitive: a [Tap] cannot reach an item that is
+     * scrolled off-screen, and [ScrollUntilFound] only reveals it without acting.
+     * Bounded by [maxSwipes] so a missing label cannot scroll forever.
+     */
+    data class FindElement(
+        val targetText: String,
+        val direction: String = "down",
+        val maxSwipes: Int = 6
+    ) : AgentAction()
+    /**
      * Reads the visible text of the current screen back to the agent loop. Unlike
      * [ReadScreen] (which only refreshes the tree), this exposes a bounded text
      * digest that can be summarised or acted on.
@@ -120,6 +132,7 @@ sealed class AgentAction {
             is Scroll -> "Scroll $direction"
             is LongPress -> "Long press: '${targetText ?: "($durationMs ms)"}'"
             is ScrollUntilFound -> "Scroll $direction until '$targetText' (max $maxSwipes)"
+            is FindElement -> "Find and tap '$targetText' ($direction, max $maxSwipes swipes)"
             is ReadText -> "Read screen text"
             is WaitForText -> "Wait for text '$targetText' (up to ${timeoutMs}ms)"
             is ReadNotifications -> "Read notifications"

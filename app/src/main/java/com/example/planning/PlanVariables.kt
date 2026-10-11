@@ -54,6 +54,7 @@ class PlanVariableStore {
         is AgentAction.ReadUrl -> action.copy(url = substitute(action.url))
         is AgentAction.OpenItem -> action.copy(targetText = substitute(action.targetText))
         is AgentAction.ScrollUntilFound -> action.copy(targetText = substitute(action.targetText))
+        is AgentAction.FindElement -> action.copy(targetText = substitute(action.targetText))
         is AgentAction.WaitForText -> action.copy(targetText = substitute(action.targetText))
         is AgentAction.CopyText -> action.copy(targetText = action.targetText?.let(::substitute))
         is AgentAction.PasteText -> action.copy(targetText = action.targetText?.let(::substitute))

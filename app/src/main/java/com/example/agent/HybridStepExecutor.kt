@@ -175,6 +175,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic bounded scroll-to-find"
             )
 
+            is AgentAction.FindElement -> FastPathDecision.Execute(
+                action,
+                "deterministic bounded find-and-tap"
+            )
+
             is AgentAction.WaitForText -> FastPathDecision.Execute(
                 action,
                 "deterministic wait for text"
