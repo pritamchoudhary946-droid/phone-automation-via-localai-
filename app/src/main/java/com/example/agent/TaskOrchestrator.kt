@@ -960,9 +960,10 @@ class TaskOrchestrator(
             is AgentAction.ReadText, is AgentAction.ReadPageContent,
             is AgentAction.ReadNotifications, is AgentAction.ReadDeviceStatus,
             // Device-control actions act on a system service no screen reflects; a
-            // completed, honestly-read-back volume/media command is its own evidence,
-            // exactly like the read actions above.
-            is AgentAction.AdjustVolume, is AgentAction.PlayMedia -> true
+            // completed, honestly-read-back volume/media/ringer command is its own
+            // evidence, exactly like the read actions above.
+            is AgentAction.AdjustVolume, is AgentAction.PlayMedia,
+            is AgentAction.SetRingerMode -> true
             else -> false
         }
     }
@@ -1144,6 +1145,7 @@ class TaskOrchestrator(
         if (step.verification == VerificationMethod.NONE &&
             (action is AgentAction.AdjustVolume ||
                 action is AgentAction.PlayMedia ||
+                action is AgentAction.SetRingerMode ||
                 action is AgentAction.ReadNotifications)
         ) {
             val detail = if (action is AgentAction.ReadNotifications) {

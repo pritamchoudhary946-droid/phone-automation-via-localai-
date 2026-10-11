@@ -198,6 +198,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic device audio-stream adjustment"
             )
 
+            is AgentAction.SetRingerMode -> FastPathDecision.Execute(
+                action,
+                "deterministic device ringer-mode switch"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"

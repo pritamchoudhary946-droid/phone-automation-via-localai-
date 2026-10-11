@@ -44,6 +44,7 @@ open class ToolRegistry {
         const val TOOL_READ_TEXT = "read_text"
         const val TOOL_WAIT_FOR_TEXT = "wait_for_text"
         const val TOOL_ADJUST_VOLUME = "adjust_volume"
+        const val TOOL_SET_RINGER_MODE = "set_ringer_mode"
         const val TOOL_PLAY_MEDIA = "play_media"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
@@ -192,6 +193,12 @@ open class ToolRegistry {
             name = TOOL_PLAY_MEDIA,
             description = "Controls the active media session's transport: play, pause, toggle (play/pause), stop, next or previous track",
             requiredParameters = listOf("transport"),
+            optionalParameters = emptyList()
+        ),
+        TOOL_SET_RINGER_MODE to ToolDefinition(
+            name = TOOL_SET_RINGER_MODE,
+            description = "Switches the device ringer mode between silent, vibrate and normal. Use for 'put my phone on silent', 'set it to vibrate', 'unmute my phone' - no tap or volume change does this reliably",
+            requiredParameters = listOf("mode"),
             optionalParameters = emptyList()
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
@@ -400,6 +407,15 @@ open class ToolRegistry {
                 if (MediaTransport.fromKey(action.transport) == null) {
                     ToolValidationResult.Invalid(
                         "play_media transport must be one of ${MediaTransport.keys()}: ${action.transport}"
+                    )
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.SetRingerMode -> {
+                if (RingerMode.fromKey(action.mode) == null) {
+                    ToolValidationResult.Invalid(
+                        "set_ringer_mode mode must be one of ${RingerMode.keys()}: ${action.mode}"
                     )
                 } else {
                     ToolValidationResult.Valid

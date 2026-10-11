@@ -104,7 +104,13 @@ service-free, resolved before the a11y gate; `AndroidMediaController` read-backs
 `isMusicActive()` so play/pause/toggle/stop report success only when the playback
 state actually moved (`MEDIA_UNCHANGED`/`MEDIA_NOT_PLAYING` otherwise), while
 next/previous are an honest delivered-key (track change is not state-verifiable).
-The prompt never advertises a capability the executor cannot run.
+`set_ringer_mode` (`AgentAction.SetRingerMode` + `RingerModeController`/`RingerMode`
+enum -> real `AudioManager.RINGER_MODE_*`) follows the same rule: the ringer mode is a
+system audio setting no tap or stream-volume change sets reliably, so it is resolved
+before the a11y gate; `AndroidRingerModeController` read-backs `AudioManager.ringerMode`
+and reports `RINGER_UNCHANGED` (or `RINGER_PERMISSION` when the platform denies it for
+lack of notification-policy access) rather than a fake success. It is distinct from
+muting a stream. The prompt never advertises a capability the executor cannot run.
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
@@ -334,16 +340,17 @@ The prompt never advertises a capability the executor cannot run.
   that looks like a secret (13-19 digit card, labelled otp/pin/password/cvv/secret)
   so it never reaches a later step or the prompt. Do not regress the read's
   self-satisfaction or the secret guard.
-- Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`
-  and `read_notifications` act on a system service (`AudioManager`, the
-  notification bus) that no accessibility screen reflects, so their default NONE
-  verification can never be satisfied from a fresh observation. `verifyAction`
-  therefore accepts a *successful* result for these three as the step's evidence,
-  and `selfEvidencingToolSatisfied(...)` counts a completed one as goal evidence
-  (same rule as the reads). This is safe only because the executor reports success
-  honestly: the audio/media controllers read the stream level / `isMusicActive()`
-  back and return `AUDIO_UNCHANGED`/`MEDIA_UNCHANGED` when nothing moved. Never
-  widen this to an action whose success is not independently read back.
+- Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
+  `set_ringer_mode` and `read_notifications` act on a system service
+  (`AudioManager`, the notification bus) that no accessibility screen reflects, so
+  their default NONE verification can never be satisfied from a fresh observation.
+  `verifyAction` therefore accepts a *successful* result for these as the step's
+  evidence, and `selfEvidencingToolSatisfied(...)` counts a completed one as goal
+  evidence (same rule as the reads). This is safe only because the executor reports
+  success honestly: the audio/media/ringer controllers read the stream level /
+  `isMusicActive()` / `ringerMode` back and return `AUDIO_UNCHANGED` /
+  `MEDIA_UNCHANGED` / `RINGER_UNCHANGED` when nothing moved. Never widen this to an
+  action whose success is not independently read back.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
   the device-state read primitive: battery level/charging, screen on/off, ringer
   mode and connectivity live on system services (`BatteryManager`, `PowerManager`/

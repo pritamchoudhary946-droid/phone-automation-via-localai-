@@ -17,6 +17,9 @@ import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
 import com.example.agent.MediaController
 import com.example.agent.MediaTransport
+import com.example.agent.RingerMode
+import com.example.agent.RingerModeController
+import com.example.agent.RingerModeResult
 import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
 import com.example.agent.ToolRegistry
@@ -365,6 +368,175 @@ class CapabilityUpgradeTest {
         assertTrue("a saved volume skill must be replayable", restored != null)
         assertEquals(AgentAction.AdjustVolume("ring", 0, mute = true), restored!!.steps[0].action)
     }
+
+    // --- set_ringer_mode: the "put my phone on silent" primitive must execute ---
+
+    @Test
+    fun setRingerModeExecutesWithoutAnAccessibilityService() {
+        // The ringer mode is a system audio setting (AudioManager), so like adjust_volume
+        // it is service-free and must resolve before the a11y gate.
+        val recorder = RecordingRingerModeController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            ringerModeController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetRingerMode("vibrate"))
+        }
+
+        assertTrue("ringer change must succeed without a bound a11y service: $result", result.success)
+        assertEquals("RINGER_MODE", result.method)
+        assertEquals(listOf(RingerMode.VIBRATE), recorder.calls)
+    }
+
+    @Test
+    fun setRingerModeRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            ringerModeController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetRingerMode("silent"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("RINGER_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setRingerModeRejectsAnUnknownMode() {
+        val recorder = RecordingRingerModeController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            ringerModeController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetRingerMode("loud"))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_RINGER_MODE", result.method)
+        assertTrue("an invalid mode must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun setRingerModeParserCarriesTheMode() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Silence the phone","action":"set_ringer_mode","params":{"mode":"silent"},"expect":"silent","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "silence the phone")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val action = (result as PlanParseResult.Success).plan.steps[0].action
+        assertEquals(AgentAction.SetRingerMode("silent"), action)
+    }
+
+    @Test
+    fun validationAcceptsSetRingerModeAndRejectsAnUnknownMode() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetRingerMode("vibrate")) is ToolValidationResult.Valid)
+        assertTrue(
+            "an unknown ringer mode must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.SetRingerMode("loud")) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun setRingerModeSkillKeepsItsModeOnReplay() {
+        // A learned skill that silences the phone must not replay as the default mode.
+        val plan = com.example.planning.TaskPlan(
+            goal = "silence the phone",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "silence the ringer",
+                    action = AgentAction.SetRingerMode("silent"),
+                    rawActionName = "set_ringer_mode", expectedPostcondition = "silent",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved ringer-mode skill must be replayable", restored != null)
+        assertEquals(AgentAction.SetRingerMode("silent"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesSetRingerMode() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_SET_RINGER_MODE}",
+            actions.contains(ToolRegistry.TOOL_SET_RINGER_MODE)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "put my phone on silent",
+                desiredOutcome = "phone silent",
+                foregroundPackage = "com.android.settings",
+                screenSummary = "Sound settings",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing set_ringer_mode", prompt.contains("set_ringer_mode"))
+    }
+
+    @Test
+    fun setRingerModeStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The ringer-mode switch acts on the AudioManager, not the accessibility tree, so
+        // its default NONE verification can never be satisfied from a fresh screen. The
+        // executor's honest read-back result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetRingerMode -> ActionResult(true, "RINGER_MODE", "Ringer mode set to silent")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Silence the phone","action":"set_ringer_mode","params":{"mode":"silent"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("put my phone on silent", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("set_ringer_mode must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.SetRingerMode })
+    }
+
+    @Test
+    fun setRingerModeFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a switch
+        // the device ignored (RINGER_UNCHANGED / RINGER_PERMISSION) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetRingerMode -> ActionResult(false, "RINGER_UNCHANGED", "ringer mode stayed at normal")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Silence the phone","action":"set_ringer_mode","params":{"mode":"silent"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("put my phone on silent", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a refused ringer change must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- clear_text: the "empty the field before retyping" primitive ---
 
     @Test
@@ -932,6 +1104,14 @@ class CapabilityUpgradeTest {
         override fun control(transport: MediaTransport): MediaControlResult {
             calls += transport
             return MediaControlResult(true, "MEDIA_KEY_VERIFIED", "ok")
+        }
+    }
+
+    private class RecordingRingerModeController : RingerModeController {
+        val calls = mutableListOf<RingerMode>()
+        override fun set(mode: RingerMode): RingerModeResult {
+            calls += mode
+            return RingerModeResult(true, "RINGER_MODE", "Ringer mode set to ${mode.key}")
         }
     }
 

@@ -262,6 +262,9 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_PLAY_MEDIA -> AgentAction.PlayMedia(
                 transport = str(params, "transport", "command", "action").ifBlank { "toggle" }
             )
+            ToolRegistry.TOOL_SET_RINGER_MODE -> AgentAction.SetRingerMode(
+                mode = str(params, "mode", "state", "ringer").ifBlank { "silent" }
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications

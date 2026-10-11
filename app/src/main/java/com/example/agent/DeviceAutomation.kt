@@ -154,6 +154,11 @@ class AndroidDeviceAutomation(
     // the a11y-service gate (a UI tap cannot reach an arbitrary player's transport).
     // An unwired controller gets an honest "unavailable" result, never a silent no-op.
     private val mediaController: MediaController? = null,
+    // The device ringer mode is a system audio setting (AudioManager), not an
+    // accessibility-tree control, so like the stream/media primitives it is resolved
+    // before the a11y-service gate. An unwired controller gets an honest "unavailable"
+    // result, never a silent no-op.
+    private val ringerModeController: RingerModeController? = null,
     // Device status (battery/screen/ringer/connectivity) is read from system services,
     // not the accessibility tree, so it is resolved before the a11y-service gate (same
     // rule as ReadNotifications/AdjustVolume/PlayMedia). An unwired reader returns an
@@ -258,6 +263,17 @@ class AndroidDeviceAutomation(
             val controller = mediaController
                 ?: return@withContext ActionResult(false, "MEDIA_UNAVAILABLE", "Media control is not available")
             val result = controller.control(transport)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Ringer mode is likewise service-free: it changes a system audio setting through
+        // the AudioManager, so it is resolved before the a11y-service gate. This is the
+        // "put my phone on silent" primitive the planner advertises.
+        if (action is AgentAction.SetRingerMode) {
+            val mode = RingerMode.fromKey(action.mode)
+                ?: return@withContext ActionResult(false, "INVALID_RINGER_MODE", "Unknown ringer mode '${action.mode}'")
+            val controller = ringerModeController
+                ?: return@withContext ActionResult(false, "RINGER_UNAVAILABLE", "Ringer mode control is not available")
+            val result = controller.set(mode)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         // Device status is likewise service-free: it reads system services, so it is
