@@ -76,8 +76,15 @@ object FailureClassifier {
                 RecoveryStrategy.RETRY_WITH_COORDINATES
             )
         }
-        if (lowerScreen.contains("permission") || lowerScreen.contains("allow") &&
-            (lowerScreen.contains("dialog") || lowerScreen.contains("grant"))
+        // A permission dialog is only diagnosed when the screen really shows BOTH a
+        // permission grant affordance and a dialog/consent cue. "allow"/"permission"
+        // alone appears in ordinary UI text (e.g. "Allow notifications" in settings),
+        // so a bare keyword must not hijack recovery. Parenthesised so `&&` binds
+        // correctly — Kotlin's `&&` has higher precedence than `||`, and the
+        // unparenthesised form would match any screen merely containing "permission".
+        if ((lowerScreen.contains("permission") || lowerScreen.contains("allow")) &&
+            (lowerScreen.contains("dialog") || lowerScreen.contains("grant") ||
+                lowerScreen.contains("while using") || lowerScreen.contains("deny"))
         ) {
             return FailureDiagnosis(
                 FailureType.PERMISSION_DIALOG,

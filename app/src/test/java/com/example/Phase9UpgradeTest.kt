@@ -260,10 +260,60 @@ class Phase9UpgradeTest {
     }
 
     @Test
+    fun settingsPermissionsScreenIsNotMisreadAsAPermissionDialog() {
+        // Regression (4A): an ordinary Settings > Permissions surface shows "Permissions"
+        // and an "Allow access to ..." row but no deny control. The old keyword rule
+        // (allow/permission) matched it, so the orchestrator auto-tapped the "Allow" row -
+        // derailing the task and possibly granting access the user never requested. A real
+        // request always carries a deny affordance, so this screen must be left alone.
+        assertNull(
+            ObstacleDetector.detect(
+                ObstacleDetector.ScreenSignals(
+                    "com.android.settings",
+                    listOf("Permissions", "Camera", "Allow access to camera", "Location")
+                )
+            )
+        )
+        assertNull(
+            ObstacleDetector.detect(
+                ObstacleDetector.ScreenSignals("com.app", listOf("Allow notifications", "Allow"))
+            )
+        )
+        // A genuine runtime dialog still has both a grant and a deny choice.
+        val real = ObstacleDetector.detect(
+            ObstacleDetector.ScreenSignals(
+                "com.app",
+                listOf("Allow app to access your location?", "While using the app", "Don't allow")
+            )
+        )
+        assertEquals(ObstacleDetector.Kind.PERMISSION, real!!.kind)
+    }
+
+    @Test
     fun denyLabelsAreNeverSafeDismiss() {
         assertFalse(ObstacleDetector.isSafeDismiss("Don't allow"))
         assertFalse(ObstacleDetector.isSafeDismiss("Cancel"))
         assertFalse(ObstacleDetector.isSafeDismiss(null))
+    }
+
+    @Test
+    fun genericSkipControlIsNotMisreadAsAnAd() {
+        // Regression (4A): a bare "Skip"/"Close" is an ordinary app affordance (onboarding,
+        // tutorial, dialog). Treating it as an ad cue made the orchestrator tap it as if it
+        // dismissed an ad, derailing the task surface. Only a real ad cue may trigger AD.
+        assertNull(
+            ObstacleDetector.detect(ObstacleDetector.ScreenSignals("com.app", listOf("Skip", "Next")))
+        )
+        assertNull(
+            ObstacleDetector.detect(ObstacleDetector.ScreenSignals("com.app", listOf("Skip for now")))
+        )
+        // The detected control is the real on-screen label, not the candidate token, and a
+        // single-letter "x" candidate must not substring-match an unrelated label like "Next".
+        val ad = ObstacleDetector.detect(
+            ObstacleDetector.ScreenSignals("com.game", listOf("Next", "Skip Ad"))
+        )
+        assertEquals(ObstacleDetector.Kind.AD, ad!!.kind)
+        assertEquals("Skip Ad", ad.dismissLabel)
     }
 
     // ---- 9.14 battery guard + defaults ----

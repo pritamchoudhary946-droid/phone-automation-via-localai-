@@ -1668,6 +1668,80 @@ not just report them):
   blocks (6.1) with the real reason shown (8.2). Also re-verify the phone-hang fix
   (8.9) holds under repeated open/close and memory pressure.
 
+### 4A run log
+
+#### 2026-10-11 - confirmed defect: permission-dialog misclassification (operator precedence)
+
+- **Finding (confirmed defect).** `FailureClassifier.classify` tested
+  `lowerScreen.contains("permission") || lowerScreen.contains("allow") && (contains("dialog") || contains("grant"))`.
+  Kotlin's `&&` binds tighter than `||`, so this parsed as
+  `contains("permission") || (contains("allow") && (contains("dialog") || contains("grant")))`.
+  Any screen whose summary merely contained the bare word `permission` - ordinary
+  Settings copy, Play Store permission descriptions, help articles - was misclassified
+  as `PERMISSION_DIALOG`, whose recovery is `PRESS_BACK_TO_UNBLOCK`. In `recoverFromFailure`
+  that fires a real Back navigation, so the recovery cycle could be triggered by
+  text on the screen and abort the current task surface.
+- **Fix.** Parenthesised the grant-side test so both a permission/allow signal AND a
+  dialog/consent cue (`dialog`, `grant`, `while using`, `deny`) are required; a bare
+  `permission`/`allow` token no longer hijacks recovery. A genuine system dialog is
+  still detected.
+- **Validation (unit/build only).** New regression test
+  `Phase5AutonomyTest.classifierRequiresBothPermissionAndDialogSignals`; full
+  `./gradlew :app:testDebugUnitTest` and `:app:assembleDebug --no-daemon` run this
+  session (JDK 21 Temurin, android-36.1). No emulator/real-device run available in
+  the sandbox.
+- **Not verified.** Real-device behaviour of the permission-dialog recovery path
+  remains unverified (same limitation as the rest of the loop's device-side recovery).
+
+#### 2026-10-11 - confirmed defect: generic Skip/Close misread as a full-screen ad
+
+- **Finding (confirmed defect).** `ObstacleDetector.detect` used a bare
+  `skip`/`close`/`x` label as the ad cue, and its dismiss matcher included a bare
+  `x`. `isSafeDismiss("skip")` is true, so `TaskOrchestrator` (L472-489) actually
+  **tapped** the control as if it dismissed an ad. Any ordinary screen with a
+  "Skip" affordance - onboarding, a tutorial, "Skip for now" on a login sheet -
+  was classified `Kind.AD` and auto-tapped mid-task. Separately, `firstPresent`
+  returned the *candidate token* rather than the real on-screen label, so the
+  orchestrator could tap text that was not on screen; the `x` candidate also
+  substring-matched unrelated labels such as "Next".
+- **Fix.** AD now requires a real ad cue (`advertisement`, `sponsored`, `skip ad`,
+  `close ad`, `dismiss ad`); the loose dismiss matcher no longer includes a bare
+  `x`. `firstPresent` returns the actual matching on-screen label.
+- **Validation (unit/build only).** New regression test
+  `Phase9UpgradeTest.genericSkipControlIsNotMisreadAsAnAd` (a bare "Skip" /
+  "Skip for now" is NOT an ad; a real "Skip Ad" cue is still detected and the
+  dismiss label is the real label). Full gate
+  `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon` -> BUILD
+  SUCCESSFUL, 261 tests 0 failures 0 errors, `app-debug.apk` produced. No
+  emulator/real-device run available in the sandbox.
+- **Not verified.** Real-device ad/dialog handling remains unverified.
+
+#### 2026-10-11 - confirmed defect: Settings > Permissions screen misread as a permission dialog
+
+- **Finding (confirmed defect).** `ObstacleDetector.detect`'s permission branch required
+  `containsAny("allow", "while using the app") && containsAny("permission", "access", "deny", "don't allow")`.
+  An ordinary Android Settings > Apps > [app] > **Permissions** screen exposes a title
+  containing `permission` and per-permission rows such as `Allow access to camera` /
+  `Allow`. Both sub-conditions were satisfied, so `detect` returned `Kind.PERMISSION` with
+  `dismissLabel` = the real `Allow` row. In `TaskOrchestrator` (L468-503) the blocker is
+  then **tapped** (`isSafeDismiss("Allow")` is true), derailing the current task surface
+  and potentially granting access the user never requested. Same false-positive class as
+  the already-fixed bare-`Skip` ad cue in this file.
+- **Root cause.** The rule keyed on loose keywords (`allow`/`permission`/`access`) that
+  appear on non-dialog screens. A genuine runtime request always offers a *deny* affordance
+  alongside the grant choice; an informational permissions list does not.
+- **Fix.** `detect` now requires BOTH a deny choice (`deny`, `don't allow`, `do not allow`)
+  AND a grant choice (`allow`, `while using`, `only this time`, `grant`). The Settings
+  Permissions list (no deny control) no longer matches; a real dialog still does.
+- **Validation (unit/build only).** New regression test
+  `Phase9UpgradeTest.settingsPermissionsScreenIsNotMisreadAsAPermissionDialog` (Settings
+  Permissions list + "Allow notifications" are not blockers; a real dialog is). Full gate
+  `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon` -> BUILD SUCCESSFUL,
+  262 tests 0 failures 0 errors, `app-debug.apk` (115 MB) produced. No emulator/real-device
+  run available in the sandbox.
+- **Not verified.** Real-device behaviour of the permission-dialog blocker path remains
+  unverified.
+
 # 5. TESTING AND VALIDATION
 
 Success is defined per phase; each phase must keep the existing behaviour
