@@ -1742,6 +1742,32 @@ not just report them):
 - **Not verified.** Real-device behaviour of the permission-dialog blocker path remains
   unverified.
 
+#### 2026-10-11 - confirmed defect: a detected permission dialog was auto-granted
+
+- **Finding (confirmed defect, safety).** The previous fix correctly narrowed
+  `ObstacleDetector.detect`'s permission branch to a deny-AND-grant affordance pair, but
+  it still returned `dismissLabel = firstPresent(..., "while using the app", "allow", "ok")`.
+  In `TaskOrchestrator` (L468-503) that label is a *grant* control, and
+  `isSafeDismiss("While using the app")` is true (`DISMISS_WORDS` contains "allow" and
+  "continue"; no contradiction with `DENY_WORDS`), so the orchestrator **tapped the grant
+  button itself** for any real runtime permission request. The master prompt (3.5) forbids
+  bypassing permission prompts; the task's own comment ("The caller still decides whether
+  to tap the grant control") contradicts the code.
+- **Root cause.** `ObstacleDetector`'s permission handling was lumped in with ads/consent
+  banners, which are safe to auto-dismiss. A permission prompt is not: granting it is the
+  user's decision, not a blocker to clear.
+- **Fix.** `Kind.PERMISSION` is now returned with `dismissLabel = null` and
+  `unresolvable = true`. The orchestrator's existing unresolvable branch stops the run
+  with an honest message ("Blocked by PERMISSION ... I won't guess at dismissing it") and
+  never dispatches a tap. Detection still requires the deny+grant pair, so a Settings
+  Permissions list remains untouched.
+- **Validation (unit only).** Updated `Phase9UpgradeTest.detectsAndSafelyDismissesCommonBlockers`
+  (permission now asserts `unresolvable` and `dismissLabel == null`); new
+  `OrchestratorLoopTest.permissionDialogIsNotAutoGranted` drives the live loop against a
+  permission dialog and asserts `Failed` with no grant tap. See the run log entry below for
+  the exact gate result (toolchain-dependent).
+- **Not verified.** Real-device behaviour remains unverified.
+
 # 5. TESTING AND VALIDATION
 
 Success is defined per phase; each phase must keep the existing behaviour

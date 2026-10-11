@@ -268,6 +268,15 @@ An action the native layer cannot execute must not appear in the catalogue
   behavior.
 - Notification ids are deliberately distinct (`CompletionNotifier`): 4210 task
   result, 4211 briefing, 4212 suggestion. Do not collapse them.
+- A detected runtime permission dialog is UNRESOLVABLE and must never be
+  auto-granted. `ObstacleDetector.detect` marks `Kind.PERMISSION` with
+  `dismissLabel = null, unresolvable = true` (a request still needs a deny AND a
+  grant affordance, which is what tells it apart from a Settings list); the
+  orchestrator's 9.12 handler therefore stops the run honestly and asks the user
+  to grant access. Do NOT restore a grant-selecting `dismissLabel` (section 3.5:
+  the agent must not tap a grant control or bypass a permission prompt on the
+  user's behalf). Regression: `OrchestratorLoopTest.permissionDialogIsNotAutoGranted`,
+  `Phase9UpgradeTest.detectsAndSafelyDismissesCommonBlockers`.
 
 ## Build gotcha (found in the Phase 9 lint gate)
 - Android Lint (`lintAnalyzeDebug`) can CRASH with
