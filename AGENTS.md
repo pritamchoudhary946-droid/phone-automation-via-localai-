@@ -294,3 +294,11 @@ An action the native layer cannot execute must not appear in the catalogue
   releases only at `TRIM_MEMORY_COMPLETE`; `onLowMemory()` is advisory and keeps the
   engine. A release bumps `trimGeneration`; the next explicit use reloads.
 
+## Phase 10.7 target resolution invariant (do not regress)
+- `perception/TargetResolver.resolve(...)` must reject any invisible node before
+  scoring: a zero-area node (`bounds.width() > 0 && bounds.height() > 0`) can still
+  expose a strong label but cannot be tapped, so it must return `NONE`, never
+  `UNIQUE`. This mirrors the a11y dump/tap guards in `AgentAccessibilityService`
+  (lines 199/376/424). Disabled nodes are already excluded; keep both filters.
+  Regression test: `Phase10AdversarialTest.zeroAreaTargetIsNotResolved`.
+

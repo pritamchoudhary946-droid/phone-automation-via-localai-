@@ -218,6 +218,31 @@ class Phase10AdversarialTest {
     }
 
     @Test
+    fun zeroAreaTargetIsNotResolved() {
+        // An off-screen/hidden node can expose a strong label but zero drawing bounds;
+        // it must never be resolvable, even when it is the only candidate (10.7).
+        val invisible = UiNode(
+            id = "ghost_wifi",
+            text = "Wi-Fi",
+            contentDescription = null,
+            className = "android.widget.TextView",
+            packageName = "com.android.settings",
+            bounds = Rect(0, 0, 0, 0),
+            isClickable = true,
+            isScrollable = false,
+            isEditable = false,
+            isCheckable = false,
+            isChecked = false,
+            isFocused = false
+        )
+        val resolution = TargetResolver.resolve(
+            listOf(invisible), "Wi-Fi", "com.android.settings", requireActivatable = true
+        )
+        assertEquals(TargetResolver.Outcome.NONE, resolution.outcome)
+        assertFalse(resolution.actionable)
+    }
+
+    @Test
     fun ambiguousOpenItemDefersToModel() {
         val steps = listOf(step(2, AgentAction.OpenItem("lo-fi beats"), VerificationMethod.TEXT_PRESENT))
         val a = node("lo-fi beats mix", null, "r1", "com.google.android.youtube", clickable = true)

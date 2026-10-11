@@ -63,6 +63,9 @@ object TargetResolver {
 
         val scored = inScope
             .filter { it.isEnabled }
+            // A zero-area node cannot be tapped (10.7): reject it up front so it can
+            // never be dispatched to, even when its label is otherwise a strong match.
+            .filter { it.bounds.width() > 0 && it.bounds.height() > 0 }
             .filter { allowEditable || !it.isEditable }
             .filter { !requireActivatable || isActivatable(it, inScope) }
             .mapNotNull { node -> score(node, clean, hintTokens)?.let { it to node } }
