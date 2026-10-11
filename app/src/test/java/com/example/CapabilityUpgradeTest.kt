@@ -708,6 +708,78 @@ class CapabilityUpgradeTest {
         assertNull(store.get("pw"))
     }
 
+    @Test
+    fun playMediaStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // A media transport command acts on the AudioManager, not the accessibility
+        // tree, so its default NONE verification can never be satisfied from a fresh
+        // screen. The executor's honest read-back result is the step's evidence; without
+        // this the step would be retried forever and the run could never complete.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.spotify.music", "Now playing", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.PlayMedia -> ActionResult(true, "MEDIA_PLAY", "playback started")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Play the music","action":"play_media","params":{"transport":"play"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("play the music", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("play_media must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.PlayMedia })
+    }
+
+    @Test
+    fun adjustVolumeStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.AdjustVolume -> ActionResult(true, "AUDIO_MEDIA", "raised media volume by 2")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Turn it up","action":"adjust_volume","params":{"stream":"media","steps":2}}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("turn the volume up", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("adjust_volume must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.AdjustVolume })
+    }
+
+    @Test
+    fun playMediaFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule must only accept a genuinely successful result: a
+        // transport command whose playback state did not move is reported as a failure
+        // by the executor and must fail the step, never a fabricated success.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.spotify.music", "Paused", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.PlayMedia -> ActionResult(false, "MEDIA_UNCHANGED", "playback state did not change")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Play the music","action":"play_media","params":{"transport":"play"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("play the music", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed media command must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- Helpers ---
 
     private class RecordingAudioController : AudioController {

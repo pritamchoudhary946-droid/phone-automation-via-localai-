@@ -334,6 +334,16 @@ The prompt never advertises a capability the executor cannot run.
   that looks like a secret (13-19 digit card, labelled otp/pin/password/cvv/secret)
   so it never reaches a later step or the prompt. Do not regress the read's
   self-satisfaction or the secret guard.
+- Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`
+  and `read_notifications` act on a system service (`AudioManager`, the
+  notification bus) that no accessibility screen reflects, so their default NONE
+  verification can never be satisfied from a fresh observation. `verifyAction`
+  therefore accepts a *successful* result for these three as the step's evidence,
+  and `selfEvidencingToolSatisfied(...)` counts a completed one as goal evidence
+  (same rule as the reads). This is safe only because the executor reports success
+  honestly: the audio/media controllers read the stream level / `isMusicActive()`
+  back and return `AUDIO_UNCHANGED`/`MEDIA_UNCHANGED` when nothing moved. Never
+  widen this to an action whose success is not independently read back.
 - 9.1 `ProactiveEngine.Runner` is started once from `OmniAgentApplication`; it only
   *offers* (notification/TTS) and is gated by the toggle AND `BatteryGuard` (9.14).
 - 9.7 `VoiceLoop`/`VoiceLoopController` drive wake -> listen -> confirm -> execute ->
