@@ -19,6 +19,31 @@ export PATH=$PATH:$JAVA_HOME/bin
 ./gradlew :app:assembleDebug       # debug APK
 ```
 
+### Pre-merge verification (mandatory)
+Before opening or merging a PR, run the same gate CI runs:
+
+```bash
+bash .github/scripts/verify.sh        # unit tests + debug APK; fails closed
+SKIP_APK=1 bash .github/scripts/verify.sh   # unit tests only (faster)
+```
+
+`verify.sh` exits non-zero when the build fails AND when no JDK/SDK is present.
+"Do not merge on a red build" means: never merge when this could not be run or
+did not pass. A sandbox with no toolchain is not a pass — install the toolchain
+(`openjdk-21-jdk-headless` + Android SDK platform 36.1 / build-tools 36.1.0) or
+stop and report. A one-character typo merged unverified broke `main` once
+already (`PlannerPromptBuilder` missing comma, PR #44).
+
+## Delivery rules (do not regress)
+- Work on a branch; open a PR; let the **Verify (unit tests + APK)** check go
+  green before merge. Branch protection on `main` requires it. Do NOT self-merge
+  a red PR — PR #44 was merged 35 seconds after its check failed, which broke
+  `main`. Admin-only setup: `.github/scripts/protect-main.sh`.
+- `.agents_tmp/RUN_STATE.json` is the loop's run log and is rewritten every
+  session, so it is excluded from merge conflicts via a `merge=ours` driver in
+  `.gitattributes`. Enable the driver once per clone:
+  `git config merge.ours.driver true`.
+
 Notes:
 - Use `--no-daemon` in CI-like sandboxes; the daemon can be flaky.
 - Tests are Robolectric (`@Config(sdk = [34])`). To make `AppDirectory` resolve
