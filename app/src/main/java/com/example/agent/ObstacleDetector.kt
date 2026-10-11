@@ -41,12 +41,18 @@ object ObstacleDetector {
 
     /** Returns the first blocker worth handling, or null when the screen is clear. */
     fun detect(signals: ScreenSignals): Blocker? {
-        // Permission dialogs: prefer the least-invasive dismissal, never "deny" a
-        // permission the task may actually need - the caller decides; we surface it.
-        if (signals.containsAny("allow", "while using the app") &&
-            signals.containsAny("permission", "access", "deny", "don't allow")
-        ) {
-            val label = firstPresent(signals, listOf("while using the app", "allow", "ok"))
+        // Permission dialogs: a runtime request always offers a way to GRANT *and* a way
+        // to DENY (or the canonical "While using the app / Don't allow" button set).
+        // Requiring the deny affordance is what separates a real request from an ordinary
+        // Settings > Permissions surface, which shows "Permissions" and an "Allow access
+        // to ..." row but no deny control. The old keyword rule matched that screen, so
+        // the agent auto-tapped its "Allow" row - derailing the task and potentially
+        // granting access the user never asked for (4A false positive). The caller still
+        // decides whether to tap the grant control; we only surface the blocker.
+        val hasDenyChoice = signals.containsAny("deny", "don't allow", "do not allow")
+        val hasGrantChoice = signals.containsAny("allow", "while using", "only this time", "grant")
+        if (hasDenyChoice && hasGrantChoice) {
+            val label = firstPresent(signals, listOf("while using the app", "while using", "allow", "ok"))
             return Blocker(
                 Kind.PERMISSION,
                 label,

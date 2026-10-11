@@ -1716,6 +1716,32 @@ not just report them):
   emulator/real-device run available in the sandbox.
 - **Not verified.** Real-device ad/dialog handling remains unverified.
 
+#### 2026-10-11 - confirmed defect: Settings > Permissions screen misread as a permission dialog
+
+- **Finding (confirmed defect).** `ObstacleDetector.detect`'s permission branch required
+  `containsAny("allow", "while using the app") && containsAny("permission", "access", "deny", "don't allow")`.
+  An ordinary Android Settings > Apps > [app] > **Permissions** screen exposes a title
+  containing `permission` and per-permission rows such as `Allow access to camera` /
+  `Allow`. Both sub-conditions were satisfied, so `detect` returned `Kind.PERMISSION` with
+  `dismissLabel` = the real `Allow` row. In `TaskOrchestrator` (L468-503) the blocker is
+  then **tapped** (`isSafeDismiss("Allow")` is true), derailing the current task surface
+  and potentially granting access the user never requested. Same false-positive class as
+  the already-fixed bare-`Skip` ad cue in this file.
+- **Root cause.** The rule keyed on loose keywords (`allow`/`permission`/`access`) that
+  appear on non-dialog screens. A genuine runtime request always offers a *deny* affordance
+  alongside the grant choice; an informational permissions list does not.
+- **Fix.** `detect` now requires BOTH a deny choice (`deny`, `don't allow`, `do not allow`)
+  AND a grant choice (`allow`, `while using`, `only this time`, `grant`). The Settings
+  Permissions list (no deny control) no longer matches; a real dialog still does.
+- **Validation (unit/build only).** New regression test
+  `Phase9UpgradeTest.settingsPermissionsScreenIsNotMisreadAsAPermissionDialog` (Settings
+  Permissions list + "Allow notifications" are not blockers; a real dialog is). Full gate
+  `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon` -> BUILD SUCCESSFUL,
+  262 tests 0 failures 0 errors, `app-debug.apk` (115 MB) produced. No emulator/real-device
+  run available in the sandbox.
+- **Not verified.** Real-device behaviour of the permission-dialog blocker path remains
+  unverified.
+
 # 5. TESTING AND VALIDATION
 
 Success is defined per phase; each phase must keep the existing behaviour

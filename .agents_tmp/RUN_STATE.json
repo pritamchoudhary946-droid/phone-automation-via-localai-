@@ -1,6 +1,6 @@
 {
   "project_done": false,
-  "sessions_done": 3,
+  "sessions_done": 4,
   "session_cap": 48,
   "current_milestone": "4A bug sweep: fix ObstacleDetector ad false-positive + FailureClassifier precedence",
   "milestone_status": "in_progress",
@@ -11,11 +11,13 @@
     "validation 2026-10-10: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 259 tests 0 failures, app-debug.apk produced",
     "4A fix 2026-10-11: FailureClassifier permission-dialog condition parenthesised (regression: && bound tighter than || so bare 'permission' text hijacked recovery to PRESS_BACK); regression test classifierRequiresBothPermissionAndDialogSignals",
     "4A fix 2026-10-11: ObstacleDetector no longer treats a bare 'skip'/'close'/'x' as an ad cue (false positive auto-tapped any 'Skip' control and derailed the task); firstPresent now returns the real on-screen label; regression test genericSkipControlIsNotMisreadAsAnAd",
-    "validation 2026-10-11: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 261 tests 0 failures 0 errors, app-debug.apk produced (115 MB)"
+    "validation 2026-10-11: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 261 tests 0 failures 0 errors, app-debug.apk produced (115 MB)",
+    "4A fix 2026-10-11: ObstacleDetector permission branch no longer treats an ordinary Settings > Permissions screen (title contains 'permission', row 'Allow access to ...') as a runtime permission dialog; a real request is recognised by its deny+grant choice pair; regression test settingsPermissionsScreenIsNotMisreadAsAPermissionDialog",
+    "validation 2026-10-11: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, 262 tests 0 failures 0 errors 0 skipped, app-debug.apk produced (115 MB)"
   ],
   "in_progress": {
     "item": "4A FINAL BUG SWEEP",
-    "step": "ObstacleDetector + FailureClassifier defects fixed with regression tests; full gate green",
+    "step": "ObstacleDetector (ad + permission false positives) and FailureClassifier precedence fixed with regression tests; full gate green (262 tests)",
     "note": "unit/build verification only; no emulator/real-device run available in sandbox"
   },
   "next_items": [
@@ -27,6 +29,6 @@
   "open_pr": "https://github.com/pritamchoudhary946-droid/phone-automation-via-localai-/pull/28",
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261011T0150Z",
-  "last_updated": "2026-10-11T01:50:00Z"
+  "last_run_id": "internal-20261011T0345Z",
+  "last_updated": "2026-10-11T03:47:33Z"
 }

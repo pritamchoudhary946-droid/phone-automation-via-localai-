@@ -260,6 +260,36 @@ class Phase9UpgradeTest {
     }
 
     @Test
+    fun settingsPermissionsScreenIsNotMisreadAsAPermissionDialog() {
+        // Regression (4A): an ordinary Settings > Permissions surface shows "Permissions"
+        // and an "Allow access to ..." row but no deny control. The old keyword rule
+        // (allow/permission) matched it, so the orchestrator auto-tapped the "Allow" row -
+        // derailing the task and possibly granting access the user never requested. A real
+        // request always carries a deny affordance, so this screen must be left alone.
+        assertNull(
+            ObstacleDetector.detect(
+                ObstacleDetector.ScreenSignals(
+                    "com.android.settings",
+                    listOf("Permissions", "Camera", "Allow access to camera", "Location")
+                )
+            )
+        )
+        assertNull(
+            ObstacleDetector.detect(
+                ObstacleDetector.ScreenSignals("com.app", listOf("Allow notifications", "Allow"))
+            )
+        )
+        // A genuine runtime dialog still has both a grant and a deny choice.
+        val real = ObstacleDetector.detect(
+            ObstacleDetector.ScreenSignals(
+                "com.app",
+                listOf("Allow app to access your location?", "While using the app", "Don't allow")
+            )
+        )
+        assertEquals(ObstacleDetector.Kind.PERMISSION, real!!.kind)
+    }
+
+    @Test
     fun denyLabelsAreNeverSafeDismiss() {
         assertFalse(ObstacleDetector.isSafeDismiss("Don't allow"))
         assertFalse(ObstacleDetector.isSafeDismiss("Cancel"))
