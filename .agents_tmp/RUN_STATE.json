@@ -68,7 +68,8 @@
     "validation 2026-10-11 (session 17, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 59s, 293 tests 0 failures 0 errors 0 skipped (19 suites; 289 baseline + 4 new 9.4 tests).",
     "9.9 capability-loss fix 2026-10-11 (session 18): read_notifications could never complete in the live loop. AndroidDeviceAutomation.readNotificationDigest() returned success=true with method=READ_NOTIFICATIONS but NO readText, and TaskOrchestrator.verifyAction self-satisfied only ReadText/ReadPageContent for a NONE verification, so the step's default NONE postcondition could never be satisfied: it retried to exhaustion and every triage read failed. The goal gate's selfEvidencingToolSatisfied(ReadNotifications) allowance was therefore unreachable dead code. Fix: (1) readNotificationDigest carries the digest as ActionResult.readText (capped at MAX_CAPTURED_CHARS, null when blank); (2) verifyAction treats a NONE-verified ReadNotifications as satisfied by that non-empty digest (empty -> failure, never a fake success), with an honest 'Read N chars of notification digest' detail.",
     "regression tests 2026-10-11 (session 18): CapabilityUpgradeTest.readNotificationsStepCompletesFromItsOwnDigestWithoutAScreenChange (orchestrator completes a read_notifications step with NONE verification) and Phase4UpgradeTest.readNotificationsReadsDigestWhenTriageOn now asserts the digest is carried as readText. Fails-before evidence: with DeviceAutomation.kt+TaskOrchestrator.kt stashed, the new test FAILED (AssertionError CapabilityUpgradeTest.kt:636); with the fix restored it passes.",
-    "validation 2026-10-11 (session 18, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 293 tests 0 failures 0 errors 0 skipped (19 suites; main baseline 292 @Test + 1 new)."
+    "validation 2026-10-11 (session 18, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 293 tests 0 failures 0 errors 0 skipped (19 suites; main baseline 292 @Test + 1 new).",
+    "merge 2026-10-11 (session 18): read_notifications self-evidencing fix merged via PR #48 (squash, branch auto/jarvis-autonomy-20261011-2131 deleted). Merge commit cf3cc2634 on main. Validated in-sandbox before merge: 293 tests 0 failures."
   ],
   "in_progress": {
     "item": "",
@@ -82,12 +83,12 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path.",
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
   ],
-  "branch": "auto/jarvis-autonomy-20261011-2131",
+  "branch": "",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
   "last_run_id": "internal-20261011T2131Z",
-  "last_updated": "2026-10-11T21:40:00Z",
+  "last_updated": "2026-10-11T21:52:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,
