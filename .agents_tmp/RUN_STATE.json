@@ -48,7 +48,7 @@
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
   "branch": "auto/jarvis-autonomy-20261011-1031",
-  "open_pr": null,
+  "open_pr": "https://github.com/pritamchoudhary946-droid/phone-automation-via-localai-/pull/38",
   "risky_actions_done": [],
   "blockers": [],
   "last_run_id": "internal-20261011T1031Z",
