@@ -58,14 +58,15 @@ class CapabilityUpgradeTest {
           {"id":4,"seq":4,"desc":"Wait for it","action":"wait_for_text","params":{"targetText":"Done","timeoutMs":3000},"expect":"appears","verify":"TEXT_PRESENT"},
           {"id":5,"seq":5,"desc":"Shade","action":"open_notifications","params":{},"expect":"shade","verify":"NONE"},
           {"id":6,"seq":6,"desc":"Tiles","action":"open_quick_settings","params":{},"expect":"tiles","verify":"NONE"},
-          {"id":7,"seq":7,"desc":"Recents","action":"open_recents","params":{},"expect":"recents","verify":"NONE"}
+          {"id":7,"seq":7,"desc":"Recents","action":"open_recents","params":{},"expect":"recents","verify":"NONE"},
+          {"id":8,"seq":8,"desc":"Find row","action":"find_element","params":{"targetText":"Wi-Fi","direction":"down","maxSwipes":4},"expect":"opened","verify":"NONE"}
         ]}
         """.trimIndent()
 
         val result = parser.parse(json, "test goal")
         assertTrue("parse failed: $result", result is PlanParseResult.Success)
         val steps = (result as PlanParseResult.Success).plan.steps
-        assertEquals(7, steps.size)
+        assertEquals(8, steps.size)
         assertEquals(AgentAction.LongPress("Photo", 900L), steps[0].action)
         assertEquals(AgentAction.ScrollUntilFound("Settings", "down", 4), steps[1].action)
         assertEquals(AgentAction.ReadText, steps[2].action)
@@ -73,6 +74,7 @@ class CapabilityUpgradeTest {
         assertEquals(AgentAction.OpenNotifications, steps[4].action)
         assertEquals(AgentAction.OpenQuickSettings, steps[5].action)
         assertEquals(AgentAction.PressRecents, steps[6].action)
+        assertEquals(AgentAction.FindElement("Wi-Fi", "down", 4), steps[7].action)
     }
 
     // --- Validation rejects malformed parameters for the new tools ---
@@ -90,6 +92,12 @@ class CapabilityUpgradeTest {
         assertTrue(registry.validateAction(AgentAction.ScrollUntilFound("x", maxSwipes = 0)) is ToolValidationResult.Invalid)
         assertTrue(registry.validateAction(AgentAction.ScrollUntilFound("x", maxSwipes = 99)) is ToolValidationResult.Invalid)
         assertTrue(registry.validateAction(AgentAction.ScrollUntilFound("x", "up", 5)) is ToolValidationResult.Valid)
+
+        assertTrue(registry.validateAction(AgentAction.FindElement("")) is ToolValidationResult.Invalid)
+        assertTrue(registry.validateAction(AgentAction.FindElement("x", direction = "left")) is ToolValidationResult.Invalid)
+        assertTrue(registry.validateAction(AgentAction.FindElement("x", maxSwipes = 0)) is ToolValidationResult.Invalid)
+        assertTrue(registry.validateAction(AgentAction.FindElement("x", maxSwipes = 99)) is ToolValidationResult.Invalid)
+        assertTrue(registry.validateAction(AgentAction.FindElement("x", "up", 5)) is ToolValidationResult.Valid)
 
         assertTrue(registry.validateAction(AgentAction.WaitForText("")) is ToolValidationResult.Invalid)
         assertTrue(registry.validateAction(AgentAction.WaitForText("x", timeoutMs = 10L)) is ToolValidationResult.Invalid)
@@ -113,7 +121,8 @@ class CapabilityUpgradeTest {
             planStep(3, AgentAction.PressRecents, "open_recents"),
             planStep(4, AgentAction.ReadText, "read_text"),
             planStep(5, AgentAction.ScrollUntilFound("Wi-Fi", "down", 5), "scroll_until_found"),
-            planStep(6, AgentAction.WaitForText("Connected", 3_000L), "wait_for_text")
+            planStep(6, AgentAction.WaitForText("Connected", 3_000L), "wait_for_text"),
+            planStep(7, AgentAction.FindElement("Wi-Fi", "down", 5), "find_element")
         )
         steps.forEachIndexed { index, step ->
             val decision = executor.decide(steps, index, obs, nudgeUsed = false)
@@ -132,6 +141,7 @@ class CapabilityUpgradeTest {
         listOf(
             ToolRegistry.TOOL_LONG_PRESS,
             ToolRegistry.TOOL_SCROLL_UNTIL_FOUND,
+            ToolRegistry.TOOL_FIND_ELEMENT,
             ToolRegistry.TOOL_READ_TEXT,
             ToolRegistry.TOOL_WAIT_FOR_TEXT,
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS,
@@ -156,7 +166,7 @@ class CapabilityUpgradeTest {
                 availableActions = actions
             )
         )
-        listOf("long_press", "scroll_until_found", "read_text", "wait_for_text",
+        listOf("long_press", "scroll_until_found", "find_element", "read_text", "wait_for_text",
             "open_notifications", "open_quick_settings", "open_recents").forEach { tool ->
             assertTrue("prompt catalogue is missing $tool", prompt.contains(tool))
         }

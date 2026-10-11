@@ -54,7 +54,11 @@ digest), `WaitForText` (bounded wait), `OpenNotifications`, `OpenQuickSettings`,
 3. `TaskPlanParser` (tool name -> action mapping),
 4. `HybridStepExecutor.decide(...)` (deterministic case when no model is needed),
 5. `PlannerPromptBuilder.ACTION_CATALOG` (the schema the model sees),
-6. `AndroidDeviceAutomation.execute(...)` (+ accessibility primitive if new).
+6. `AndroidDeviceAutomation.execute(...)` (+ accessibility primitive if new),
+7. `TaskPlanSerializer` (`toParams` for every param the action carries, plus
+   `toVerificationTarget`/`toolNameFor`) — omitting `toParams` silently drops the
+   action's parameters on skill replay (e.g. a `ScrollUntilFound` direction), so a
+   learned skill would replay with the wrong defaults.
 An action the native layer cannot execute must not appear in the catalogue
 (see the `ask_confirmation` exclusion in `PlannerPromptBuilder.availableActions`).
 

@@ -230,6 +230,11 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 direction = str(params, "direction", "dir").ifBlank { "down" },
                 maxSwipes = params.optInt("maxSwipes", 6)
             )
+            ToolRegistry.TOOL_FIND_ELEMENT -> AgentAction.FindElement(
+                targetText = str(params, "targetText", "text", "element", "label"),
+                direction = str(params, "direction", "dir").ifBlank { "down" },
+                maxSwipes = params.optInt("maxSwipes", 6)
+            )
             ToolRegistry.TOOL_READ_TEXT -> AgentAction.ReadText
             ToolRegistry.TOOL_WAIT_FOR_TEXT -> AgentAction.WaitForText(
                 targetText = str(params, "targetText", "text", "element", "label"),

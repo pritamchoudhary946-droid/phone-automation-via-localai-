@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 11,
+  "sessions_done": 12,
   "session_cap": 48,
-  "current_milestone": "3.5 permission-prompt safety: a detected runtime permission dialog is no longer auto-granted (ObstacleDetector returns Kind.PERMISSION as unresolvable with no dismiss label; the orchestrator stops honestly)",
+  "current_milestone": "Capability: find_element (bounded scroll-to-find-and-tap) - the general 'reveal an off-screen item then press it' primitive, plus TaskPlanSerializer.toParams for ScrollUntilFound so a learned scroll skill replays with its real direction/budget",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -33,7 +33,12 @@
     "3.5 fix 2026-10-11: ObstacleDetector.detect returned Kind.PERMISSION with a grant-selecting dismissLabel ('while using the app'/'allow'/'ok'); isSafeDismiss accepts 'allow'/'continue', so TaskOrchestrator's 9.12 blocker handler tapped the grant control itself for any real runtime permission request (the class comment claimed the caller decides, the code did not). Now Kind.PERMISSION is returned unresolvable with dismissLabel=null, so the orchestrator's existing unresolvable branch stops the run honestly and never dispatches a tap; detection still needs the deny+grant pair so a Settings > Permissions list stays untouched. Regression tests: Phase9UpgradeTest.detectsAndSafelyDismissesCommonBlockers (updated) and OrchestratorLoopTest.permissionDialogIsNotAutoGranted (new).",
     "3.5 invariant recorded in AGENTS.md: a detected runtime permission dialog is UNRESOLVABLE and must never be auto-granted; do not restore a grant-selecting dismissLabel.",
     "validation 2026-10-11 (this run): COULD NOT RUN - sandbox has no toolchain: JAVA_HOME empty and no java/javac anywhere on the filesystem, /usr/lib/jvm absent, ANDROID_HOME empty, /opt/android-sdk absent. This contradicts the prior run's note that a toolchain sandbox was available; the environment varies per run. The change is 1 return-argument + test edits, reasoned from source. A toolchain run must execute ./gradlew :app:testDebugUnitTest --no-daemon before/after merge; risk is low but UNCONFIRMED by execution.",
-    "3.5 fix merged 2026-10-11 via PR #38 (squash, branch auto/jarvis-autonomy-20261011-1031 deleted). Milestone done. Gradle gate COULD NOT RUN in this sandbox (no JDK/SDK); unit confirmation still required on a toolchain run."
+    "3.5 fix merged 2026-10-11 via PR #38 (squash, branch auto/jarvis-autonomy-20261011-1031 deleted). Milestone done. Gradle gate COULD NOT RUN in this sandbox (no JDK/SDK); unit confirmation still required on a toolchain run.",
+    "capability 2026-10-11: new AgentAction.FindElement + tool find_element ('scroll to a label if needed, then tap it'). One bounded step replaces the Tap (misses off-screen) / ScrollUntilFound (reveals but never presses) gap for list/scroll discovery. Implemented across all action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (const, ToolDefinition, validateAction), TaskPlanParser.mapAction, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, PlanVariables.substitute, AndroidDeviceAutomation.execute -> executeFindElement, and TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor).",
+    "capability 2026-10-11: DeviceAutomation refactored the scroll loop into a shared revealByScrolling() used by both executeScrollUntilFound and executeFindElement; executeFindElement taps only after a fresh observation and verifies the tap against the screen fingerprint at tap time (a dispatched gesture that leaves the screen identical is reported as failure, not success).",
+    "fix 2026-10-11: TaskPlanSerializer.toParams had no ScrollUntilFound branch, so a learned skill's direction/maxSwipes were silently dropped on replay (a scroll-UP skill would replay scrolling DOWN with the default 6 swipes). Added the branch; regression test Phase4UpgradeTest.scrollUntilFoundSkillKeepsDirectionAndBudgetOnReplay.",
+    "AGENTS.md 2026-10-11: action-vocabulary checklist now includes step 7 TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor) - the omitted seam that caused the ScrollUntilFound replay defect.",
+    "validation 2026-10-11 (this run, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m8s, 269 tests 0 failures 0 errors 0 skipped (19 suites)."
   ],
   "in_progress": {
     "item": "",
@@ -48,10 +53,14 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path: stale-observation handling after Back/obstacle dismissal, false-success gates, remaining operator-precedence/boolean-logic defects (TargetResolver, TaskPlanParser)",
     "Continue Phase 5 (5.1+) acceptance criteria not yet evidenced"
   ],
-  "branch": null,
+  "branch": "auto/jarvis-autonomy-20261011-1244",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261011T1031Z",
-  "last_updated": "2026-10-11T10:45:00Z"
+  "last_run_id": "internal-20261011T1244Z",
+  "last_updated": "2026-10-11T12:50:00Z",
+  "carryover_milestone": null,
+  "milestone_attempts": 0,
+  "max_attempts_per_milestone": 3,
+  "blocked_items": []
 }

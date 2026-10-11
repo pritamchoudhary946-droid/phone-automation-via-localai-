@@ -64,6 +64,16 @@ object TaskPlanSerializer {
         is AgentAction.Drag -> JSONObject().apply {
             put("fromText", fromText); put("toText", toText)
         }
+        is AgentAction.ScrollUntilFound -> JSONObject().apply {
+            put("targetText", targetText)
+            put("direction", direction)
+            put("maxSwipes", maxSwipes)
+        }
+        is AgentAction.FindElement -> JSONObject().apply {
+            put("targetText", targetText)
+            put("direction", direction)
+            put("maxSwipes", maxSwipes)
+        }
         else -> null
     }
 
@@ -74,6 +84,7 @@ object TaskPlanSerializer {
         is AgentAction.PasteText -> targetText
         is AgentAction.LongPress -> targetText
         is AgentAction.ScrollUntilFound -> targetText
+        is AgentAction.FindElement -> targetText
         is AgentAction.WaitForText -> targetText
         is AgentAction.OpenItem -> targetText
         else -> null
@@ -149,6 +160,7 @@ object TaskPlanSerializer {
         is AgentAction.Scroll -> com.example.agent.ToolRegistry.TOOL_SCROLL
         is AgentAction.LongPress -> com.example.agent.ToolRegistry.TOOL_LONG_PRESS
         is AgentAction.ScrollUntilFound -> com.example.agent.ToolRegistry.TOOL_SCROLL_UNTIL_FOUND
+        is AgentAction.FindElement -> com.example.agent.ToolRegistry.TOOL_FIND_ELEMENT
         is AgentAction.ReadText -> com.example.agent.ToolRegistry.TOOL_READ_TEXT
         is AgentAction.WaitForText -> com.example.agent.ToolRegistry.TOOL_WAIT_FOR_TEXT
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS
