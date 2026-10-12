@@ -163,7 +163,12 @@ class AndroidDeviceAutomation(
     // not the accessibility tree, so it is resolved before the a11y-service gate (same
     // rule as ReadNotifications/AdjustVolume/PlayMedia). An unwired reader returns an
     // honest "unavailable" result rather than a fabricated status.
-    private val deviceStatusReader: DeviceStatusReader? = null
+    private val deviceStatusReader: DeviceStatusReader? = null,
+    // The clock alarm is dispatched through the platform AlarmClock intent, not an
+    // accessibility-tree control, so like the audio/ringer primitives it is resolved
+    // before the a11y-service gate. An unwired controller gets an honest "unavailable"
+    // result, never a silent no-op.
+    private val alarmController: AlarmController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -286,6 +291,18 @@ class AndroidDeviceAutomation(
             val result = reader.read()
             val digest = result.message.take(ActionResult.MAX_CAPTURED_CHARS).ifBlank { null }
             return@withContext ActionResult(result.success, result.method, result.message, digest)
+        }
+        // The clock alarm is likewise service-free: it is dispatched through the platform
+        // AlarmClock intent, so it is resolved before the a11y-service gate. This is the
+        // "wake me at 7am" primitive the planner advertises.
+        if (action is AgentAction.SetAlarm) {
+            if (action.hour !in 0..23 || action.minute !in 0..59) {
+                return@withContext ActionResult(false, "INVALID_ALARM_TIME", "Invalid alarm time ${action.hour}:${action.minute}")
+            }
+            val controller = alarmController
+                ?: return@withContext ActionResult(false, "ALARM_UNAVAILABLE", "Alarm scheduling is not available")
+            val result = controller.setAlarm(action.hour, action.minute, action.label, action.days)
+            return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()
             ?: return@withContext ActionResult(false, "NO_SERVICE", "Accessibility Service unavailable")

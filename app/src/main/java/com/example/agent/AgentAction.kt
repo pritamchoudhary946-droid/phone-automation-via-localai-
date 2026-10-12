@@ -134,6 +134,20 @@ sealed class AgentAction {
      * separately by the PLAYBACK postcondition.
      */
     data class PlayMedia(val transport: String = "toggle") : AgentAction()
+    /**
+     * Schedules a clock alarm at [hour]:[minute] (24-hour clock), the "wake me at 7am"
+     * primitive. No accessibility-tree read or UI tap can set an alarm reliably on an
+     * arbitrary screen, so like [SetRingerMode] this is dispatched through a system
+     * service (the platform [AlarmClock] intent) and resolved before the
+     * accessibility-service gate. [label] is an optional alarm name and [days] an
+     * optional list of `Calendar` weekday constants for a repeating alarm.
+     */
+    data class SetAlarm(
+        val hour: Int = 7,
+        val minute: Int = 0,
+        val label: String? = null,
+        val days: List<Int> = emptyList()
+    ) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -189,6 +203,8 @@ sealed class AgentAction {
             }
             is SetRingerMode -> "Set ringer mode to $mode"
             is PlayMedia -> "Media ${transport}: control playback"
+            is SetAlarm -> "Set alarm for %02d:%02d".format(hour, minute) +
+                (label?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "")
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

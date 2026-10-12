@@ -265,6 +265,12 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_SET_RINGER_MODE -> AgentAction.SetRingerMode(
                 mode = str(params, "mode", "state", "ringer").ifBlank { "silent" }
             )
+            ToolRegistry.TOOL_SET_ALARM -> AgentAction.SetAlarm(
+                hour = params.optInt("hour", 7),
+                minute = params.optInt("minute", 0),
+                label = str(params, "label", "message", "name").ifBlank { null },
+                days = parseAlarmDays(params.optJSONArray("days"))
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
@@ -351,6 +357,20 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
     /** True for the approved actions that can return a bounded text digest ([ActionResult.readText]). */
     private fun producesReadableText(action: AgentAction): Boolean =
         action is AgentAction.ReadText || action is AgentAction.ReadPageContent
+
+    /**
+     * Weekday constants for a repeating alarm, bounded to the 1..7 `Calendar` range and
+     * de-duplicated so a malformed model output cannot request an out-of-range day.
+     */
+    private fun parseAlarmDays(array: JSONArray?): List<Int> {
+        if (array == null) return emptyList()
+        val days = LinkedHashSet<Int>()
+        for (i in 0 until array.length()) {
+            val day = array.optInt(i, -1)
+            if (day in 1..7) days.add(day)
+        }
+        return days.toList()
+    }
 
     companion object {
         const val MAX_STEPS = 12

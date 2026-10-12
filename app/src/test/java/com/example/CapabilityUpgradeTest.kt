@@ -3,6 +3,8 @@ package com.example
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.agent.ActionResult
+import com.example.agent.AlarmController
+import com.example.agent.AlarmResult
 import com.example.agent.AgentAction
 import com.example.agent.AndroidDeviceAutomation
 import com.example.agent.AndroidDeviceStatusReader
@@ -535,6 +537,185 @@ class CapabilityUpgradeTest {
 
         val terminal = awaitTerminal(orchestrator)
         assertTrue("a refused ringer change must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
+    // --- set_alarm: the "wake me at 7am" primitive must execute ---
+
+    @Test
+    fun setAlarmExecutesWithoutAnAccessibilityService() {
+        // The alarm is dispatched through the platform AlarmClock intent, so like the
+        // audio/ringer primitives it is service-free and must resolve before the a11y gate.
+        val recorder = RecordingAlarmController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            alarmController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetAlarm(hour = 7, minute = 30, label = "Wake up"))
+        }
+
+        assertTrue("alarm must be settable without a bound a11y service: $result", result.success)
+        assertEquals("ALARM_DISPATCHED", result.method)
+        assertEquals(listOf(RecordingAlarmController.Call(7, 30, "Wake up", emptyList())), recorder.calls)
+    }
+
+    @Test
+    fun setAlarmRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            alarmController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetAlarm(hour = 6, minute = 0))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("ALARM_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setAlarmRejectsAnInvalidTime() {
+        val recorder = RecordingAlarmController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            alarmController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetAlarm(hour = 25, minute = 0))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_ALARM_TIME", result.method)
+        assertTrue("an invalid time must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun setAlarmParserCarriesTimeLabelAndDays() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Wake me at 7","action":"set_alarm","params":{"hour":7,"minute":15,"label":"Gym","days":[2,4]},"expect":"alarm set","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "set an alarm for 7:15")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val action = (result as PlanParseResult.Success).plan.steps[0].action
+        assertEquals(AgentAction.SetAlarm(hour = 7, minute = 15, label = "Gym", days = listOf(2, 4)), action)
+    }
+
+    @Test
+    fun validationAcceptsSetAlarmAndRejectsAnInvalidTime() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetAlarm(hour = 7, minute = 0)) is ToolValidationResult.Valid)
+        assertTrue(
+            "an out-of-range hour must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.SetAlarm(hour = 24, minute = 0)) !is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "an out-of-range minute must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.SetAlarm(hour = 7, minute = 60)) !is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "an out-of-range weekday must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.SetAlarm(hour = 7, minute = 0, days = listOf(9))) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun setAlarmSkillKeepsItsTimeLabelAndDaysOnReplay() {
+        // A learned alarm skill must not replay at the default 07:00 with no label/days.
+        val plan = com.example.planning.TaskPlan(
+            goal = "set an alarm for 6:30 on weekdays",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "set the alarm",
+                    action = AgentAction.SetAlarm(hour = 6, minute = 30, label = "Work", days = listOf(2, 3, 4, 5, 6)),
+                    rawActionName = "set_alarm", expectedPostcondition = "alarm set",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved alarm skill must be replayable", restored != null)
+        assertEquals(
+            AgentAction.SetAlarm(hour = 6, minute = 30, label = "Work", days = listOf(2, 3, 4, 5, 6)),
+            restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun promptAdvertisesSetAlarm() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_SET_ALARM}",
+            actions.contains(ToolRegistry.TOOL_SET_ALARM)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "set an alarm for 7am",
+                desiredOutcome = "alarm at 07:00",
+                foregroundPackage = "com.android.deskclock",
+                screenSummary = "Clock",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing set_alarm", prompt.contains("set_alarm"))
+    }
+
+    @Test
+    fun setAlarmStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The alarm is created by the clock app, a separate process no accessibility screen
+        // reflects, so the step's default NONE verification can never be satisfied from a
+        // fresh screen. The executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetAlarm -> ActionResult(true, "ALARM_DISPATCHED", "Alarm set for 07:00")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Set the alarm","action":"set_alarm","params":{"hour":7,"minute":0},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("set an alarm for 7am", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("set_alarm must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.SetAlarm })
+    }
+
+    @Test
+    fun setAlarmFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no clock app (ALARM_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetAlarm -> ActionResult(false, "ALARM_UNAVAILABLE", "No clock app is available to set an alarm")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Set the alarm","action":"set_alarm","params":{"hour":7,"minute":0},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("set an alarm for 7am", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed alarm dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
     // --- clear_text: the "empty the field before retyping" primitive ---
@@ -1112,6 +1293,16 @@ class CapabilityUpgradeTest {
         override fun set(mode: RingerMode): RingerModeResult {
             calls += mode
             return RingerModeResult(true, "RINGER_MODE", "Ringer mode set to ${mode.key}")
+        }
+    }
+
+    private class RecordingAlarmController : AlarmController {
+        data class Call(val hour: Int, val minute: Int, val label: String?, val days: List<Int>)
+
+        val calls = mutableListOf<Call>()
+        override fun setAlarm(hour: Int, minute: Int, label: String?, days: List<Int>): AlarmResult {
+            calls += Call(hour, minute, label, days)
+            return AlarmResult(true, "ALARM_DISPATCHED", "Alarm set for %02d:%02d".format(hour, minute))
         }
     }
 

@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 21,
+  "sessions_done": 22,
   "session_cap": 48,
-  "current_milestone": "Capability: new AgentAction.SetRingerMode (set_ringer_mode) - switch the whole device's ringer mode (silent/vibrate/normal), the 'put my phone on silent' primitive no tap or stream-volume change does reliably. Service-backed (AudioManager), self-evidencing, wired across all seven action-vocabulary seams.",
+  "current_milestone": "Capability: new AgentAction.SetAlarm + tool set_alarm - schedule a clock alarm at a 24-hour time ('wake me at 7am'). Service-free (AlarmClock.ACTION_SET_ALARM intent), self-evidencing, wired across all action-vocabulary seams. Mirrors the set_ringer_mode precedent.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -85,7 +85,13 @@
     "capability 2026-10-11 (session 21): SetRingerMode is self-evidencing. TaskOrchestrator.verifyAction accepts a successful result for a NONE-verified SetRingerMode as the step evidence, and selfEvidencingToolSatisfied counts a completed SetRingerMode as goal evidence (same rule as adjust_volume/play_media/read_notifications). Safe only because AndroidRingerModeController reads the mode back.",
     "regression tests 2026-10-11 (session 21, CapabilityUpgradeTest +9): setRingerModeExecutesWithoutAnAccessibilityService, setRingerModeRefusesHonestlyWhenUnwired, setRingerModeRejectsAnUnknownMode, setRingerModeParserCarriesTheMode, validationAcceptsSetRingerModeAndRejectsAnUnknownMode, setRingerModeSkillKeepsItsModeOnReplay, promptAdvertisesSetRingerMode, setRingerModeStepCompletesFromItsOwnHonestResult, setRingerModeFailureIsNotMaskedByTheSelfEvidencingRule.",
     "validation 2026-10-11 (session 21, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m6s, 313 tests 0 failures 0 errors 0 skipped (19 suites; 304 baseline + 9 new).",
-    "AGENTS.md 2026-10-11 (session 21): action-vocabulary notes and the service-backed self-evidencing invariant now list set_ringer_mode / RINGER_UNCHANGED / RINGER_PERMISSION."
+    "AGENTS.md 2026-10-11 (session 21): action-vocabulary notes and the service-backed self-evidencing invariant now list set_ringer_mode / RINGER_UNCHANGED / RINGER_PERMISSION.",
+    "capability 2026-10-12 (session 22): new AgentAction.SetAlarm + tool set_alarm ('hour','minute', optional 'label'/'days') - schedule a clock alarm at a 24-hour time ('wake me at 7am' / 'set an alarm for 6:30'). No accessibility-tree read or UI tap sets an alarm reliably on an arbitrary screen, so it dispatches the platform AlarmClock.ACTION_SET_ALARM intent. Implemented across all seven action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (const, ToolDefinition, validateAction), TaskPlanParser.mapAction (+ parseAlarmDays bounding/deduping Calendar 1..7), HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, PlanVariables.substitute (label), AndroidDeviceAutomation.execute (resolved before the a11y-service gate, like AdjustVolume/PlayMedia/SetRingerMode/ReadNotifications), and TaskPlanSerializer (toParams/toolNameFor).",
+    "capability 2026-10-12 (session 22): new com.example.agent.AlarmController seam + AndroidAlarmController (dispatches AlarmClock.ACTION_SET_ALARM with EXTRA_HOUR/EXTRA_MINUTES/EXTRA_SKIP_UI/EXTRA_MESSAGE/EXTRA_DAYS; catches ActivityNotFoundException -> ALARM_UNAVAILABLE, SecurityException -> ALARM_PERMISSION, else ALARM_ERROR). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication. Because the alarm is created by the clock app (a separate process) the app cannot read it back, so it reports only that the intent was delivered (ALARM_DISPATCHED with the accepted time), never a claimed alarm-list change.",
+    "capability 2026-10-12 (session 22): SetAlarm is self-evidencing. TaskOrchestrator.verifyAction accepts a successful result for a NONE-verified SetAlarm as the step evidence, and selfEvidencingToolSatisfied counts a completed SetAlarm as goal evidence (same rule as adjust_volume/play_media/set_ringer_mode/read_notifications).",
+    "regression tests 2026-10-12 (session 22, CapabilityUpgradeTest +9): setAlarmExecutesWithoutAnAccessibilityService, setAlarmRefusesHonestlyWhenUnwired, setAlarmRejectsAnInvalidTime, setAlarmParserCarriesTimeLabelAndDays, validationAcceptsSetAlarmAndRejectsAnInvalidTime, setAlarmSkillKeepsItsTimeLabelAndDaysOnReplay, promptAdvertisesSetAlarm, setAlarmStepCompletesFromItsOwnHonestResult, setAlarmFailureIsNotMaskedByTheSelfEvidencingRule.",
+    "validation 2026-10-12 (session 22, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m4s, 322 tests 0 failures 0 errors 0 skipped (19 suites; 313 baseline + 9 new). ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m44s, app-debug.apk produced (115 MB).",
+    "AGENTS.md 2026-10-12 (session 22): action-vocabulary notes and the service-backed self-evidencing invariant now list set_alarm / ALARM_DISPATCHED / ALARM_UNAVAILABLE."
   ],
   "in_progress": {
     "item": "",
@@ -99,14 +105,14 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path.",
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
   ],
-  "branch": "auto/jarvis-autonomy-20261011-2331",
+  "branch": "auto/jarvis-autonomy-20261012-0031",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261011T2331Z",
-  "last_updated": "2026-10-11T23:40:00Z",
+  "last_run_id": "internal-20261012T0031Z",
+  "last_updated": "2026-10-12T01:05:00Z",
   "carryover_milestone": null,
-  "milestone_attempts": 0,
+  "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": []
 }

@@ -110,7 +110,14 @@ system audio setting no tap or stream-volume change sets reliably, so it is reso
 before the a11y gate; `AndroidRingerModeController` read-backs `AudioManager.ringerMode`
 and reports `RINGER_UNCHANGED` (or `RINGER_PERMISSION` when the platform denies it for
 lack of notification-policy access) rather than a fake success. It is distinct from
-muting a stream. The prompt never advertises a capability the executor cannot run.
+muting a stream. `set_alarm` (`AgentAction.SetAlarm` + `AlarmController` ->
+`AlarmClock.ACTION_SET_ALARM`) follows the same rule: no accessibility-tree read or
+UI tap sets a clock alarm reliably on an arbitrary screen, so it is resolved before
+the a11y gate and dispatches the platform intent to the clock app. Because the alarm
+is created by a separate process the app cannot read back, `AndroidAlarmController`
+confirms only that the intent was *delivered* (and reports `ALARM_UNAVAILABLE` /
+`ALARM_PERMISSION` honestly otherwise); it never claims the alarm now exists. The
+prompt never advertises a capability the executor cannot run.
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
@@ -341,16 +348,18 @@ muting a stream. The prompt never advertises a capability the executor cannot ru
   so it never reaches a later step or the prompt. Do not regress the read's
   self-satisfaction or the secret guard.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
-  `set_ringer_mode` and `read_notifications` act on a system service
-  (`AudioManager`, the notification bus) that no accessibility screen reflects, so
-  their default NONE verification can never be satisfied from a fresh observation.
-  `verifyAction` therefore accepts a *successful* result for these as the step's
-  evidence, and `selfEvidencingToolSatisfied(...)` counts a completed one as goal
-  evidence (same rule as the reads). This is safe only because the executor reports
-  success honestly: the audio/media/ringer controllers read the stream level /
-  `isMusicActive()` / `ringerMode` back and return `AUDIO_UNCHANGED` /
-  `MEDIA_UNCHANGED` / `RINGER_UNCHANGED` when nothing moved. Never widen this to an
-  action whose success is not independently read back.
+  `set_ringer_mode`, `set_alarm` and `read_notifications` act on a system service
+  (`AudioManager`, the notification bus, the clock app via `AlarmClock`) that no
+  accessibility screen reflects, so their default NONE verification can never be
+  satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
+  result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
+  counts a completed one as goal evidence (same rule as the reads). This is safe only
+  because the executor reports success honestly: the audio/media/ringer controllers
+  read the stream level / `isMusicActive()` / `ringerMode` back and return
+  `AUDIO_UNCHANGED` / `MEDIA_UNCHANGED` / `RINGER_UNCHANGED` when nothing moved, and
+  `set_alarm` reports `ALARM_DISPATCHED` only after the intent was delivered to a clock
+  app (`ALARM_UNAVAILABLE` otherwise). Never widen this to an action whose success is
+  not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
   the device-state read primitive: battery level/charging, screen on/off, ringer
   mode and connectivity live on system services (`BatteryManager`, `PowerManager`/

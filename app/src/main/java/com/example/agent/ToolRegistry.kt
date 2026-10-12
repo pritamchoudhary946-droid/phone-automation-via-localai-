@@ -46,6 +46,7 @@ open class ToolRegistry {
         const val TOOL_ADJUST_VOLUME = "adjust_volume"
         const val TOOL_SET_RINGER_MODE = "set_ringer_mode"
         const val TOOL_PLAY_MEDIA = "play_media"
+        const val TOOL_SET_ALARM = "set_alarm"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -200,6 +201,12 @@ open class ToolRegistry {
             description = "Switches the device ringer mode between silent, vibrate and normal. Use for 'put my phone on silent', 'set it to vibrate', 'unmute my phone' - no tap or volume change does this reliably",
             requiredParameters = listOf("mode"),
             optionalParameters = emptyList()
+        ),
+        TOOL_SET_ALARM to ToolDefinition(
+            name = TOOL_SET_ALARM,
+            description = "Sets a clock alarm at a given 24-hour time. Use for 'set an alarm for 7am', 'wake me at 6:30'. No screen read or tap can set an alarm reliably",
+            requiredParameters = listOf("hour", "minute"),
+            optionalParameters = listOf("label", "days")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -416,6 +423,19 @@ open class ToolRegistry {
                 if (RingerMode.fromKey(action.mode) == null) {
                     ToolValidationResult.Invalid(
                         "set_ringer_mode mode must be one of ${RingerMode.keys()}: ${action.mode}"
+                    )
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.SetAlarm -> {
+                if (action.hour !in 0..23 || action.minute !in 0..59) {
+                    ToolValidationResult.Invalid(
+                        "set_alarm time must be a valid 24-hour time (hour 0-23, minute 0-59): ${action.hour}:${action.minute}"
+                    )
+                } else if (action.days.any { it !in 1..7 }) {
+                    ToolValidationResult.Invalid(
+                        "set_alarm days must be Calendar weekday constants (1=Sunday .. 7=Saturday): ${action.days}"
                     )
                 } else {
                     ToolValidationResult.Valid
