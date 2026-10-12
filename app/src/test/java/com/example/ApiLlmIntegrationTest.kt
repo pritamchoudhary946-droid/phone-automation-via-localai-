@@ -365,6 +365,67 @@ class ApiLlmIntegrationTest {
         assertFalse(runtime.isReady())
     }
 
+    // 14b. The reported bug: adding a key "connects", then the smoke probe flips the
+    // engine to Failed. A 2xx provider answer with no usable text is NOT a load failure.
+
+    @Test
+    fun emptyProviderAnswerIsAUsableSmokeProbeNotAFailure() = runBlocking {
+        val server = MockWebServer()
+        // 2xx, valid JSON envelope, but empty content — what a tiny one-word probe can
+        // legitimately get back from a live provider.
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"choices":[{"message":{"content":""}}]}""")
+        )
+        server.start()
+        try {
+            val runtime = runtimeFor(server, LlmProvider.OPENAI)
+            runtime.initialize()
+            assertTrue("an empty-but-2xx smoke answer must count as usable", runtime.smokeTest())
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun transientSmokeFailureThenSuccessLoadsTheEngine() = runBlocking {
+        val server = MockWebServer()
+        // First probe: provider cold-start hiccup (500). Second probe: fine.
+        server.enqueue(MockResponse().setResponseCode(500).setBody("""{"error":"cold start"}"""))
+        server.enqueue(MockResponse().setResponseCode(200)
+            .setBody("""{"choices":[{"message":{"content":"ready"}}]}"""))
+        server.start()
+        try {
+            val runtime = runtimeFor(server, LlmProvider.OPENAI)
+            runtime.initialize()
+
+            val engine = ApiInferenceEngine(runtimeFactory = { runtime })
+            assertTrue("one transient probe failure must not fail the load", engine.ensureReady())
+            assertTrue(engine.isReady())
+            assertEquals(EngineState.Ready(runtime.backendLabel()), engine.state.value)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun aRealAuthRejectionStillFailsTheLoadHonestly() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"invalid api key"}"""))
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"invalid api key"}"""))
+        server.start()
+        try {
+            val runtime = runtimeFor(server, LlmProvider.OPENAI)
+            runtime.initialize()
+
+            val engine = ApiInferenceEngine(runtimeFactory = { runtime })
+            assertFalse("a rejected key must still fail, not be masked", engine.ensureReady())
+            assertTrue(engine.state.value is EngineState.Failed)
+        } finally {
+            server.shutdown()
+        }
+    }
+
     // 15. Engine shutdown releases the runtime.
 
     @Test
