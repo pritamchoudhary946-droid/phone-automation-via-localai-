@@ -178,7 +178,13 @@ class AndroidDeviceAutomation(
     // accessibility-tree control, so like the alarm/timer primitives it is resolved
     // before the a11y-service gate. An unwired controller gets an honest "unavailable"
     // result, never a silent no-op.
-    private val calendarController: CalendarController? = null
+    private val calendarController: CalendarController? = null,
+    // Adding a contact is dispatched through the platform ContactsContract insert
+    // intent (the contacts app's own editor, pre-filled), not an accessibility-tree
+    // control, so like the calendar/alarm/timer primitives it is resolved before the
+    // a11y-service gate. An unwired controller gets an honest "unavailable" result,
+    // never a silent no-op.
+    private val contactController: ContactController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -355,6 +361,23 @@ class AndroidDeviceAutomation(
                 action.durationMinutes,
                 action.location
             )
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Adding a contact is likewise service-free: it is dispatched through the
+        // platform ContactsContract insert intent, so it is resolved before the
+        // a11y-service gate. This is the "save Priya's number 98xxxxxx" primitive.
+        // Like add_calendar_event it reports only that the intent was delivered to a
+        // contacts app (the contact is created by a separate process).
+        if (action is AgentAction.AddContact) {
+            if (action.name.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_CONTACT_NAME", "Contact name must not be blank")
+            }
+            if (action.phone.isNullOrBlank() && action.email.isNullOrBlank()) {
+                return@withContext ActionResult(false, "INVALID_CONTACT_DETAILS", "A contact needs at least a phone number or an email")
+            }
+            val controller = contactController
+                ?: return@withContext ActionResult(false, "CONTACT_UNAVAILABLE", "Contact insert is not available")
+            val result = controller.addContact(action.name, action.phone, action.email)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

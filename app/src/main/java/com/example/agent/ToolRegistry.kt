@@ -49,6 +49,7 @@ open class ToolRegistry {
         const val TOOL_SET_ALARM = "set_alarm"
         const val TOOL_SET_TIMER = "set_timer"
         const val TOOL_ADD_CALENDAR_EVENT = "add_calendar_event"
+        const val TOOL_ADD_CONTACT = "add_contact"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -230,6 +231,12 @@ open class ToolRegistry {
             description = "Adds an event to the user's calendar. Use for 'add lunch with Sam tomorrow at 1pm', 'put the standup on my calendar at 9:30'. Provide a title and the start time; dayOffset is 0 for today, 1 for tomorrow. No screen read or tap can add an event reliably",
             requiredParameters = listOf("title"),
             optionalParameters = listOf("dayOffset", "startHour", "startMinute", "durationMinutes", "location")
+        ),
+        TOOL_ADD_CONTACT to ToolDefinition(
+            name = TOOL_ADD_CONTACT,
+            description = "Adds a contact to the user's address book. Use for 'save Priya's number 9876543210', 'add an email contact for Sam at sam@example.com'. Provide a name and at least one of phone/email. No screen read or tap can add a contact reliably",
+            requiredParameters = listOf("name"),
+            optionalParameters = listOf("phone", "email")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -489,6 +496,15 @@ open class ToolRegistry {
                         ToolValidationResult.Invalid(
                             "add_calendar_event durationMinutes must be between 1 and $MAX_EVENT_DURATION_MINUTES (24 hours): ${action.durationMinutes}"
                         )
+                    else -> ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.AddContact -> {
+                when {
+                    action.name.isBlank() ->
+                        ToolValidationResult.Invalid("add_contact requires a non-blank name")
+                    action.phone.isNullOrBlank() && action.email.isNullOrBlank() ->
+                        ToolValidationResult.Invalid("add_contact requires at least one of phone or email")
                     else -> ToolValidationResult.Valid
                 }
             }

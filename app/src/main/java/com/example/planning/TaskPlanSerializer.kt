@@ -100,6 +100,11 @@ object TaskPlanSerializer {
             put("durationMinutes", durationMinutes)
             if (!location.isNullOrBlank()) put("location", location)
         }
+        is AgentAction.AddContact -> JSONObject().apply {
+            put("name", name)
+            if (!phone.isNullOrBlank()) put("phone", phone)
+            if (!email.isNullOrBlank()) put("email", email)
+        }
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
         else -> null
     }
@@ -198,6 +203,7 @@ object TaskPlanSerializer {
         is AgentAction.SetAlarm -> com.example.agent.ToolRegistry.TOOL_SET_ALARM
         is AgentAction.SetTimer -> com.example.agent.ToolRegistry.TOOL_SET_TIMER
         is AgentAction.AddCalendarEvent -> com.example.agent.ToolRegistry.TOOL_ADD_CALENDAR_EVENT
+        is AgentAction.AddContact -> com.example.agent.ToolRegistry.TOOL_ADD_CONTACT
         is AgentAction.PlayMedia -> com.example.agent.ToolRegistry.TOOL_PLAY_MEDIA
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS
         is AgentAction.ReadDeviceStatus -> com.example.agent.ToolRegistry.TOOL_READ_DEVICE_STATUS

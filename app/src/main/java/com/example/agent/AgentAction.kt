@@ -178,6 +178,20 @@ sealed class AgentAction {
         val durationMinutes: Int = 60,
         val location: String? = null
     ) : AgentAction()
+    /**
+     * Adds a contact named [name], optionally with [phone] and [email]. This is the
+     * "save Priya's number 98xxxxxx" / "add an email contact for Sam" primitive. Like
+     * [AddCalendarEvent] no accessibility-tree read or UI tap can add a contact
+     * reliably on an arbitrary screen, so it is dispatched through the platform
+     * [android.provider.ContactsContract] insert intent (the contacts app's own editor,
+     * pre-filled) and resolved before the accessibility-service gate. At least one of
+     * [phone]/[email] is required so an empty contact is never created.
+     */
+    data class AddContact(
+        val name: String,
+        val phone: String? = null,
+        val email: String? = null
+    ) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -243,6 +257,11 @@ sealed class AgentAction {
                     1 -> " tomorrow"
                     else -> " in $dayOffset days"
                 }
+            is AddContact -> buildString {
+                append("Add contact '$name'")
+                if (!phone.isNullOrBlank()) append(" tel $phone")
+                if (!email.isNullOrBlank()) append(" email $email")
+            }
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

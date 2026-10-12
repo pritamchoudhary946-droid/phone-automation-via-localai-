@@ -90,6 +90,11 @@ class PlanVariableStore {
             title = substitute(action.title),
             location = action.location?.let(::substitute)
         )
+        is AgentAction.AddContact -> action.copy(
+            name = substitute(action.name),
+            phone = action.phone?.let(::substitute),
+            email = action.email?.let(::substitute)
+        )
         is AgentAction.FinishTask -> action.copy(summary = substitute(action.summary))
         else -> action
     }

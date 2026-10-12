@@ -173,7 +173,11 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 timerController = com.example.agent.AndroidTimerController(this),
                 // Calendar-event primitive: dispatches CalendarContract ACTION_INSERT,
                 // service-free like the alarm/timer (no UI tap adds an event reliably).
-                calendarController = com.example.agent.AndroidCalendarController(this)
+                calendarController = com.example.agent.AndroidCalendarController(this),
+                // Contact primitive: dispatches the ContactsContract insert intent,
+                // service-free like the calendar/alarm/timer (no UI tap adds a contact
+                // reliably).
+                contactController = com.example.agent.AndroidContactController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
