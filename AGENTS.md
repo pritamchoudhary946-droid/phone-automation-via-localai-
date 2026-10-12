@@ -136,6 +136,15 @@ is the pure relative-day -> absolute-instant resolver. Because the event is crea
 the calendar app (a separate process) the app cannot read it back, so it reports only
 that the intent was *delivered* (`CALENDAR_DISPATCHED`) and never claims the event now
 exists (`CALENDAR_UNAVAILABLE` / `CALENDAR_PERMISSION` / `INVALID_EVENT_*` otherwise).
+`add_contact` (`AgentAction.AddContact` + `ContactController` -> the documented
+`ContactsContract.Intents.Insert.ACTION` with the NAME/PHONE/EMAIL extras) follows the
+same rule: no accessibility-tree read or UI tap adds a contact reliably on an arbitrary
+screen, so it is resolved before the a11y gate and opens the contacts app's own editor
+pre-filled. It carries `name` plus optional `phone`/`email`, and requires at least one
+of the two so an empty contact is never created. Because the contact is created by the
+contacts app (a separate process) the app cannot read it back, so it reports only that
+the intent was *delivered* (`CONTACT_DISPATCHED`) and never claims the contact now
+exists (`CONTACT_UNAVAILABLE` / `CONTACT_PERMISSION` / `INVALID_CONTACT_*` otherwise).
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
@@ -373,10 +382,10 @@ exists (`CALENDAR_UNAVAILABLE` / `CALENDAR_PERMISSION` / `INVALID_EVENT_*` other
   so it never reaches a later step or the prompt. Do not regress the read's
   self-satisfaction or the secret guard.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
-  `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event` and
+  `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
-  calendar app via `CalendarContract`) that no
+  calendar app via `CalendarContract`, the contacts app via `ContactsContract`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
@@ -386,9 +395,11 @@ exists (`CALENDAR_UNAVAILABLE` / `CALENDAR_PERMISSION` / `INVALID_EVENT_*` other
   `AUDIO_UNCHANGED` / `MEDIA_UNCHANGED` / `RINGER_UNCHANGED` when nothing moved,
   `set_alarm` reports `ALARM_DISPATCHED` only after the intent was delivered to a clock
   app (`ALARM_UNAVAILABLE` otherwise), `set_timer` reports `TIMER_DISPATCHED` on the
-  same honest delivery basis (`TIMER_UNAVAILABLE` otherwise), and `add_calendar_event`
+  same honest delivery basis (`TIMER_UNAVAILABLE` otherwise), `add_calendar_event`
   reports `CALENDAR_DISPATCHED` only after the insert intent was delivered to a calendar
-  app (`CALENDAR_UNAVAILABLE` otherwise). Never widen this to an
+  app (`CALENDAR_UNAVAILABLE` otherwise), and `add_contact` reports `CONTACT_DISPATCHED`
+  only after the insert intent was delivered to a contacts app (`CONTACT_UNAVAILABLE`
+  otherwise). Never widen this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
   the device-state read primitive: battery level/charging, screen on/off, ringer
