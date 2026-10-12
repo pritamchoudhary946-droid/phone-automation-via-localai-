@@ -74,6 +74,7 @@ object PlannerPromptBuilder {
         """- add_calendar_event: {"title":"<text>","dayOffset":<0=today,1=tomorrow,..>,"startHour":<0-23>,"startMinute":<0-59>,"durationMinutes":<int>,"location":"<optional>"}   (adds a calendar event; use for "add lunch with Sam tomorrow at 1pm" / "put the standup on my calendar at 9:30" - use 24-hour time and resolve "tomorrow" to dayOffset=1 from the current date)""",
         """- add_contact: {"name":"<text>","phone":"<optional>","email":"<optional>"}   (adds a contact to the address book; use for "save Priya's number 9876543210" / "add an email contact for Sam at sam@example.com" - provide a name and at least one of phone/email)""",
         """- dial_number: {"number":"<digits, optional + * # , ;>"}   (opens the phone dialer pre-filled with a number for the user to confirm; use for "dial 9876543210" / "call Priya's number" - it never places the call itself, so never claim a call was made)""",
+        """- send_sms: {"number":"<digits, optional + * # , ;>","message":"<text>"}   (opens the messaging app pre-filled with a number and message for the user to review and press send; use for "text Priya 9876543210 that I'll be late" - it never sends the message itself, so never claim it was sent)""",
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",

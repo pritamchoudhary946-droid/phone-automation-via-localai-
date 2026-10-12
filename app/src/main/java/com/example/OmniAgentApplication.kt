@@ -182,7 +182,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // tel: URI, service-free like the contact/calendar/alarm primitives (no
                 // UI tap opens a dialer reliably). It opens the dialer for the user to
                 // confirm; it never places the call itself.
-                dialerController = com.example.agent.AndroidDialerController(this)
+                dialerController = com.example.agent.AndroidDialerController(this),
+                // SMS primitive: dispatches the platform ACTION_SENDTO intent with an
+                // smsto: URI + sms_body extra, service-free like the dialer/contact
+                // primitives (no UI tap opens a compose screen reliably). It opens the
+                // messaging app pre-filled for the user to press send; it never sends
+                // the message itself.
+                smsController = com.example.agent.AndroidSmsController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

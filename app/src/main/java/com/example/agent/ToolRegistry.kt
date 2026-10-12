@@ -51,6 +51,7 @@ open class ToolRegistry {
         const val TOOL_ADD_CALENDAR_EVENT = "add_calendar_event"
         const val TOOL_ADD_CONTACT = "add_contact"
         const val TOOL_DIAL_NUMBER = "dial_number"
+        const val TOOL_SEND_SMS = "send_sms"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -243,6 +244,11 @@ open class ToolRegistry {
             name = TOOL_DIAL_NUMBER,
             description = "Opens the system dialer pre-filled with a phone number; the user presses call to place it. Use for 'dial 9876543210', 'call Priya's number'. It never places the call itself",
             requiredParameters = listOf("number")
+        ),
+        TOOL_SEND_SMS to ToolDefinition(
+            name = TOOL_SEND_SMS,
+            description = "Opens the messaging app pre-filled with a number and message text; the user presses send to deliver it. Use for 'text Priya 9876543210 that I'll be late'. It never sends the message itself",
+            requiredParameters = listOf("number", "message")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -519,6 +525,15 @@ open class ToolRegistry {
                     ToolValidationResult.Invalid("dial_number requires a non-blank number")
                 } else {
                     ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.SendSms -> {
+                when {
+                    action.number.isBlank() ->
+                        ToolValidationResult.Invalid("send_sms requires a non-blank number")
+                    action.message.isBlank() ->
+                        ToolValidationResult.Invalid("send_sms requires a non-blank message")
+                    else -> ToolValidationResult.Valid
                 }
             }
             is AgentAction.Wait -> {

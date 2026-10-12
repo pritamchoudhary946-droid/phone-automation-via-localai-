@@ -20,8 +20,11 @@ import com.example.agent.CalendarResult
 import com.example.agent.ContactController
 import com.example.agent.ContactResult
 import com.example.agent.AndroidDialerController
+import com.example.agent.AndroidSmsController
 import com.example.agent.DialResult
 import com.example.agent.DialerController
+import com.example.agent.SmsController
+import com.example.agent.SmsResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -1524,6 +1527,201 @@ class CapabilityUpgradeTest {
         assertTrue("a failed dialer dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- send_sms: the "text Priya that I'll be late" primitive ---
+
+    @Test
+    fun sendSmsExecutesWithoutAnAccessibilityService() {
+        // Opening the messaging compose screen is dispatched through the platform
+        // ACTION_SENDTO intent, so like the dialer/contact/calendar primitives it is
+        // service-free and must resolve before the a11y gate.
+        val recorder = RecordingSmsController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            smsController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SendSms("9876543210", "I'll be late"))
+        }
+
+        assertTrue("the compose screen must open without a bound a11y service: $result", result.success)
+        assertEquals("SMS_DISPATCHED", result.method)
+        assertEquals(listOf(RecordingSmsController.Call("9876543210", "I'll be late")), recorder.calls)
+    }
+
+    @Test
+    fun sendSmsRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            smsController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SendSms("9876543210", "I'll be late"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("SMS_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun sendSmsRejectsBlankNumberOrMessage() {
+        val recorder = RecordingSmsController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            smsController = recorder
+        )
+        val blankNumber = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SendSms("   ", "I'll be late"))
+        }
+        assertFalse(blankNumber.success)
+        assertEquals("INVALID_SMS_NUMBER", blankNumber.method)
+        val blankMessage = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SendSms("9876543210", "  "))
+        }
+        assertFalse(blankMessage.success)
+        assertEquals("INVALID_SMS_MESSAGE", blankMessage.method)
+        assertTrue("an invalid SMS must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun sendSmsNormalizesAndRejectsUnsafeCharacters() {
+        // The pure normalizer keeps a bad plan value from opening a nonsense smsto: URI:
+        // it accepts digits plus + * # , ; and rejects everything else.
+        assertEquals("+919876543210", AndroidSmsController.normalizeSmsNumber(" +919876543210 "))
+        assertEquals("*123#", AndroidSmsController.normalizeSmsNumber("*123#"))
+        assertNull(AndroidSmsController.normalizeSmsNumber(""))
+        assertNull(AndroidSmsController.normalizeSmsNumber("   "))
+        assertNull(AndroidSmsController.normalizeSmsNumber("Priya"))
+        assertNull(AndroidSmsController.normalizeSmsNumber("smsto:98765"))
+        assertNull(AndroidSmsController.normalizeSmsNumber("+"))
+    }
+
+    @Test
+    fun sendSmsParserCarriesNumberAndMessage() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Text Priya","action":"send_sms","params":{"number":"9876543210","message":"I'll be late"},"expect":"compose open","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Text support","action":"send_sms","params":{"to":"+18005551234","body":"help"},"expect":"compose open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "text Priya")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.SendSms("9876543210", "I'll be late"), steps[0].action)
+        assertEquals(AgentAction.SendSms("+18005551234", "help"), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsSendSmsAndRejectsBlanks() {
+        val registry = ToolRegistry()
+        assertTrue(
+            registry.validateAction(AgentAction.SendSms("9876543210", "hi")) is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "a blank number must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.SendSms("  ", "hi")) !is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "a blank message must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.SendSms("9876543210", "  ")) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun sendSmsSkillKeepsItsNumberAndMessageOnReplay() {
+        // A learned "text this number" skill must not replay with a dropped body.
+        val plan = com.example.planning.TaskPlan(
+            goal = "text Priya",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "open messages",
+                    action = AgentAction.SendSms("9876543210", "I'll be late"),
+                    rawActionName = "send_sms", expectedPostcondition = "compose open",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved SMS skill must be replayable", restored != null)
+        assertEquals(AgentAction.SendSms("9876543210", "I'll be late"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesSendSms() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_SEND_SMS}",
+            actions.contains(ToolRegistry.TOOL_SEND_SMS)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "text Priya 9876543210 that I'll be late",
+                desiredOutcome = "compose open",
+                foregroundPackage = "com.android.messaging",
+                screenSummary = "Messages",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing send_sms", prompt.contains("send_sms"))
+    }
+
+    @Test
+    fun sendSmsStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The messaging app is a separate process no accessibility screen reflects, so
+        // the step's default NONE verification can never be satisfied from a fresh
+        // screen. The executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SendSms -> ActionResult(true, "SMS_DISPATCHED", "Opening messages to text ${action.number}")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open messages","action":"send_sms","params":{"number":"9876543210","message":"I'll be late"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("text Priya that I'll be late", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("send_sms must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.SendSms })
+    }
+
+    @Test
+    fun sendSmsFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no messaging app (SMS_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SendSms -> ActionResult(false, "SMS_UNAVAILABLE", "No messaging app is available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open messages","action":"send_sms","params":{"number":"9876543210","message":"I'll be late"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("text Priya that I'll be late", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed SMS dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- clear_text: the "empty the field before retyping" primitive ---
 
     @Test
@@ -2222,6 +2420,16 @@ class CapabilityUpgradeTest {
         override fun dial(number: String): DialResult {
             calls += number
             return DialResult(true, "DIAL_DISPATCHED", "Opening the dialer with $number")
+        }
+    }
+
+    private class RecordingSmsController : SmsController {
+        data class Call(val number: String, val message: String)
+
+        val calls = mutableListOf<Call>()
+        override fun compose(number: String, message: String): SmsResult {
+            calls += Call(number, message)
+            return SmsResult(true, "SMS_DISPATCHED", "Opening messages to text $number")
         }
     }
 

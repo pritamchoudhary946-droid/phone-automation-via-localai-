@@ -189,7 +189,14 @@ class AndroidDeviceAutomation(
     // `tel:` URI), not an accessibility-tree control, so like the contact/calendar
     // primitives it is resolved before the a11y-service gate. An unwired controller
     // gets an honest "unavailable" result, never a silent no-op.
-    private val dialerController: DialerController? = null
+    private val dialerController: DialerController? = null,
+    // Opening the messaging compose screen is dispatched through the platform
+    // ACTION_SENDTO intent (`smsto:` URI + `"sms_body"`), not an accessibility-tree
+    // control, so like the dialer/contact/calendar primitives it is resolved before
+    // the a11y-service gate. An unwired controller gets an honest "unavailable"
+    // result, never a silent no-op. It opens the compose screen pre-filled for the
+    // user to press send; it never sends the message itself.
+    private val smsController: SmsController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -397,6 +404,24 @@ class AndroidDeviceAutomation(
             val controller = dialerController
                 ?: return@withContext ActionResult(false, "DIAL_UNAVAILABLE", "Dialer dispatch is not available")
             val result = controller.dial(action.number)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Opening the messaging compose screen is likewise service-free: it is
+        // dispatched through the platform ACTION_SENDTO intent (`smsto:` URI +
+        // `"sms_body"`), so it is resolved before the a11y-service gate. This is the
+        // "text Priya that I'll be late" primitive. It opens the compose screen
+        // pre-filled for the user to press send and never sends the message, so it
+        // reports only that the intent was delivered to a messaging app.
+        if (action is AgentAction.SendSms) {
+            if (action.number.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_SMS_NUMBER", "SMS number must not be blank")
+            }
+            if (action.message.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_SMS_MESSAGE", "SMS message must not be blank")
+            }
+            val controller = smsController
+                ?: return@withContext ActionResult(false, "SMS_UNAVAILABLE", "SMS compose dispatch is not available")
+            val result = controller.compose(action.number, action.message)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()
