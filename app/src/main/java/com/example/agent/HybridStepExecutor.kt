@@ -218,6 +218,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic calendar-event insert"
             )
 
+            is AgentAction.AddContact -> FastPathDecision.Execute(
+                action,
+                "deterministic contact insert"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"

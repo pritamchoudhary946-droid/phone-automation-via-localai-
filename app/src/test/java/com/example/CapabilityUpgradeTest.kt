@@ -17,6 +17,8 @@ import com.example.agent.AudioController
 import com.example.agent.AudioStream
 import com.example.agent.CalendarController
 import com.example.agent.CalendarResult
+import com.example.agent.ContactController
+import com.example.agent.ContactResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -1146,6 +1148,195 @@ class CapabilityUpgradeTest {
         assertTrue("a failed calendar dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- add_contact: the "save Priya's number 98xxxxxx" primitive ---
+
+    @Test
+    fun addContactExecutesWithoutAnAccessibilityService() {
+        // The contact insert is dispatched through the platform ContactsContract insert
+        // intent, so like the calendar/alarm/timer primitives it is service-free and must
+        // resolve before the a11y gate.
+        val recorder = RecordingContactController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            contactController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(
+                AgentAction.AddContact(name = "Priya", phone = "9876543210")
+            )
+        }
+
+        assertTrue("a contact must be addable without a bound a11y service: $result", result.success)
+        assertEquals("CONTACT_DISPATCHED", result.method)
+        assertEquals(
+            listOf(RecordingContactController.Call("Priya", "9876543210", null)),
+            recorder.calls
+        )
+    }
+
+    @Test
+    fun addContactRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            contactController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AddContact(name = "Priya", phone = "9876543210"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("CONTACT_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun addContactRejectsInvalidFields() {
+        val recorder = RecordingContactController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            contactController = recorder
+        )
+        val blank = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AddContact(name = "  ", phone = "9876543210"))
+        }
+        assertFalse(blank.success)
+        assertEquals("INVALID_CONTACT_NAME", blank.method)
+        val noDetails = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AddContact(name = "Priya"))
+        }
+        assertFalse(noDetails.success)
+        assertEquals("INVALID_CONTACT_DETAILS", noDetails.method)
+        assertTrue("an invalid contact must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun addContactParserCarriesNamePhoneAndEmail() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Save Priya","action":"add_contact","params":{"name":"Priya","phone":"9876543210"},"expect":"contact saved","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Save Sam email","action":"add_contact","params":{"name":"Sam","email":"sam@example.com"},"expect":"contact saved","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "save Priya's number")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.AddContact("Priya", "9876543210", null), steps[0].action)
+        assertEquals(AgentAction.AddContact("Sam", null, "sam@example.com"), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsAddContactAndRejectsInvalidFields() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.AddContact(name = "Priya", phone = "123")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.AddContact(name = "Sam", email = "s@e.com")) is ToolValidationResult.Valid)
+        assertTrue(
+            "a blank name must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.AddContact(name = "")) !is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "a contact with neither phone nor email must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.AddContact(name = "Priya")) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun addContactSkillKeepsItsFieldsOnReplay() {
+        // A learned contact skill must not replay with a dropped phone/email.
+        val plan = com.example.planning.TaskPlan(
+            goal = "save Priya's number",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "add the contact",
+                    action = AgentAction.AddContact(name = "Priya", phone = "9876543210", email = "priya@example.com"),
+                    rawActionName = "add_contact", expectedPostcondition = "contact saved",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved contact skill must be replayable", restored != null)
+        assertEquals(
+            AgentAction.AddContact(name = "Priya", phone = "9876543210", email = "priya@example.com"),
+            restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun promptAdvertisesAddContact() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_ADD_CONTACT}",
+            actions.contains(ToolRegistry.TOOL_ADD_CONTACT)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "save Priya's number 9876543210",
+                desiredOutcome = "contact saved",
+                foregroundPackage = "com.android.contacts",
+                screenSummary = "Contacts",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing add_contact", prompt.contains("add_contact"))
+    }
+
+    @Test
+    fun addContactStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The contact is created by the contacts app, a separate process no accessibility
+        // screen reflects, so the step's default NONE verification can never be satisfied
+        // from a fresh screen. The executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.AddContact -> ActionResult(true, "CONTACT_DISPATCHED", "Opening contacts to add 'Priya' (9876543210)")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Add the contact","action":"add_contact","params":{"name":"Priya","phone":"9876543210"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("save Priya's number 9876543210", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("add_contact must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.AddContact })
+    }
+
+    @Test
+    fun addContactFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no contacts app (CONTACT_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.AddContact -> ActionResult(false, "CONTACT_UNAVAILABLE", "No contacts app is available to add a contact")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Add the contact","action":"add_contact","params":{"name":"Priya","phone":"123"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("save Priya's number", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed contact dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- clear_text: the "empty the field before retyping" primitive ---
 
     @Test
@@ -1822,6 +2013,20 @@ class CapabilityUpgradeTest {
         ): CalendarResult {
             calls += Call(title, dayOffset, startHour, startMinute, durationMinutes, location)
             return CalendarResult(true, "CALENDAR_DISPATCHED", "Opening calendar to add '$title'")
+        }
+    }
+
+    private class RecordingContactController : ContactController {
+        data class Call(
+            val name: String,
+            val phone: String?,
+            val email: String?
+        )
+
+        val calls = mutableListOf<Call>()
+        override fun addContact(name: String, phone: String?, email: String?): ContactResult {
+            calls += Call(name, phone, email)
+            return ContactResult(true, "CONTACT_DISPATCHED", "Opening contacts to add '$name'")
         }
     }
 

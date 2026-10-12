@@ -72,6 +72,7 @@ object PlannerPromptBuilder {
         """- set_alarm: {"hour":<0-23>,"minute":<0-59>,"label":"<optional>","days":[<optional Calendar 1=Sun..7=Sat>]}   (sets a clock alarm; use for "set an alarm for 7am" / "wake me at 6:30" - use 24-hour time)""",
         """- set_timer: {"seconds":<1-86400>,"label":"<optional>"}   (starts a countdown timer; use for "set a timer for 10 minutes" / "start a 25-minute timer" - convert the duration to seconds)""",
         """- add_calendar_event: {"title":"<text>","dayOffset":<0=today,1=tomorrow,..>,"startHour":<0-23>,"startMinute":<0-59>,"durationMinutes":<int>,"location":"<optional>"}   (adds a calendar event; use for "add lunch with Sam tomorrow at 1pm" / "put the standup on my calendar at 9:30" - use 24-hour time and resolve "tomorrow" to dayOffset=1 from the current date)""",
+        """- add_contact: {"name":"<text>","phone":"<optional>","email":"<optional>"}   (adds a contact to the address book; use for "save Priya's number 9876543210" / "add an email contact for Sam at sam@example.com" - provide a name and at least one of phone/email)""",
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",
