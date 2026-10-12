@@ -237,6 +237,17 @@ sealed class AgentAction {
         val subject: String? = null,
         val body: String? = null
     ) : AgentAction()
+    /**
+     * Opens the maps app showing [target] - a place name or street address - the
+     * "navigate to a place" / "take me to <address>" primitive. Like [SendEmail] no
+     * accessibility-tree read or UI tap can open a map at a chosen place reliably on an
+     * arbitrary screen, so it is dispatched through the platform
+     * [android.content.Intent.ACTION_VIEW] intent with a `geo:0,0?q=` URI and resolved
+     * before the accessibility-service gate. The map opens showing the place and the
+     * user starts turn-by-turn directions from there; it never begins navigating by
+     * itself, so the consequential route stays under the user's control.
+     */
+    data class NavigateTo(val target: String) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -311,6 +322,7 @@ sealed class AgentAction {
             is SendSms -> "Open messages to text $number"
             is ShareText -> targetPackage?.takeIf { it.isNotBlank() }?.let { "Share text with $it" } ?: "Share text"
             is SendEmail -> "Open mail to email $to"
+            is NavigateTo -> "Open the map at '$target'"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

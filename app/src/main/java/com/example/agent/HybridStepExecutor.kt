@@ -243,6 +243,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic email-compose dispatch"
             )
 
+            is AgentAction.NavigateTo -> FastPathDecision.Execute(
+                action,
+                "deterministic maps navigation dispatch"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"

@@ -109,6 +109,7 @@ class PlanVariableStore {
             subject = action.subject?.let(::substitute),
             body = action.body?.let(::substitute)
         )
+        is AgentAction.NavigateTo -> action.copy(target = substitute(action.target))
         is AgentAction.FinishTask -> action.copy(summary = substitute(action.summary))
         else -> action
     }

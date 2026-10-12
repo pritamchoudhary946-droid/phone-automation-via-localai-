@@ -172,7 +172,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // SMS/dialer/share primitives (no UI tap opens a compose screen reliably).
                 // It opens the mail app pre-filled for the user to press send; it never
                 // sends the message itself.
-                emailController = com.example.agent.AndroidEmailController(this)
+                emailController = com.example.agent.AndroidEmailController(this),
+                // Navigation primitive: dispatches the platform ACTION_VIEW intent with a
+                // geo:0,0?q= URI, service-free like the SMS/dialer/share/email primitives
+                // (no UI tap opens a map at a chosen place reliably). It opens the map at
+                // the place for the user to start directions; it never navigates by itself.
+                navigationController = com.example.agent.AndroidNavigationController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

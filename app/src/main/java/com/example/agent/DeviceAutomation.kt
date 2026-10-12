@@ -210,7 +210,14 @@ class AndroidDeviceAutomation(
     // controller gets an honest "unavailable" result, never a silent no-op. It opens
     // the mail compose screen pre-filled for the user to press send; it never sends
     // the message itself.
-    private val emailController: EmailController? = null
+    private val emailController: EmailController? = null,
+    // Opening the map is dispatched through the platform ACTION_VIEW intent (a
+    // `geo:0,0?q=` URI), not an accessibility-tree control, so like the SMS/dialer/
+    // share/email primitives it is resolved before the a11y-service gate. An unwired
+    // controller gets an honest "unavailable" result, never a silent no-op. It opens
+    // the map at the place for the user to start directions; it never begins
+    // navigating by itself.
+    private val navigationController: NavigationController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -465,6 +472,20 @@ class AndroidDeviceAutomation(
             val controller = emailController
                 ?: return@withContext ActionResult(false, "EMAIL_UNAVAILABLE", "Email compose dispatch is not available")
             val result = controller.compose(action.to, action.subject, action.body)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Opening the map is likewise service-free: it is dispatched through the
+        // platform ACTION_VIEW intent with a `geo:0,0?q=` URI, so it is resolved before
+        // the a11y-service gate. This is the "navigate to a place" primitive. It opens
+        // the map showing the place for the user to start directions and never begins
+        // navigating by itself, so it reports only that the intent was delivered.
+        if (action is AgentAction.NavigateTo) {
+            if (action.target.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_NAV_TARGET", "Navigation target must not be blank")
+            }
+            val controller = navigationController
+                ?: return@withContext ActionResult(false, "NAV_UNAVAILABLE", "Navigation dispatch is not available")
+            val result = controller.navigate(action.target)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

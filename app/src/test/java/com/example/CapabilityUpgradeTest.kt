@@ -31,6 +31,9 @@ import com.example.agent.ShareResult
 import com.example.agent.AndroidEmailController
 import com.example.agent.EmailController
 import com.example.agent.EmailResult
+import com.example.agent.AndroidNavigationController
+import com.example.agent.NavigationController
+import com.example.agent.NavigationResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -1533,8 +1536,201 @@ class CapabilityUpgradeTest {
         assertTrue("a failed dialer dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
-    // --- send_sms: the "text Priya that I'll be late" primitive ---
+    // --- navigate_to: the "navigate to a place" / "take me to <address>" primitive ---
 
+    @Test
+    fun navigateToExecutesWithoutAnAccessibilityService() {
+        // Opening the map is dispatched through the platform ACTION_VIEW intent, so like
+        // the dialer/sms/email primitives it is service-free and must resolve before the
+        // a11y gate.
+        val recorder = RecordingNavigationController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            navigationController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.NavigateTo("Connaught Place"))
+        }
+
+        assertTrue("the map must open without a bound a11y service: $result", result.success)
+        assertEquals("NAV_DISPATCHED", result.method)
+        assertEquals(listOf("Connaught Place"), recorder.calls)
+    }
+
+    @Test
+    fun navigateToRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            navigationController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.NavigateTo("Connaught Place"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("NAV_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun navigateToRejectsABlankTarget() {
+        val recorder = RecordingNavigationController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            navigationController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.NavigateTo("   "))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_NAV_TARGET", result.method)
+        assertTrue("a blank target must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun navigateToNormalizesAndRejectsUnsafeTargets() {
+        // The pure normalizer keeps a bad plan value from building a nonsense geo: URI:
+        // it trims a usable place, and rejects blank, control characters and an
+        // over-long value.
+        assertEquals("Connaught Place", AndroidNavigationController.normalizeNavigationTarget("  Connaught Place  "))
+        assertEquals("221B Baker Street", AndroidNavigationController.normalizeNavigationTarget("221B Baker Street"))
+        assertNull(AndroidNavigationController.normalizeNavigationTarget(""))
+        assertNull(AndroidNavigationController.normalizeNavigationTarget("   "))
+        assertNull(AndroidNavigationController.normalizeNavigationTarget("New\nDelhi"))
+        assertNull(
+            AndroidNavigationController.normalizeNavigationTarget(
+                "x".repeat(AndroidNavigationController.MAX_NAV_TARGET_CHARS + 1)
+            )
+        )
+    }
+
+    @Test
+    fun navigateToParserCarriesThePlace() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Navigate to the office","action":"navigate_to","params":{"target":"Connaught Place"},"expect":"map open","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Show a route","action":"navigate_to","params":{"destination":"India Gate"},"expect":"map open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "navigate to the office")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.NavigateTo("Connaught Place"), steps[0].action)
+        assertEquals(AgentAction.NavigateTo("India Gate"), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsNavigateToAndRejectsABlankTarget() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.NavigateTo("Connaught Place")) is ToolValidationResult.Valid)
+        assertTrue(
+            "a blank place must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.NavigateTo("  ")) !is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "an over-long place must be rejected at the tool boundary",
+            registry.validateAction(
+                AgentAction.NavigateTo("x".repeat(AndroidNavigationController.MAX_NAV_TARGET_CHARS + 1))
+            ) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun navigateToSkillKeepsItsPlaceOnReplay() {
+        // A learned "navigate to a place" skill must not replay with a dropped target.
+        val plan = com.example.planning.TaskPlan(
+            goal = "navigate to the office",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "open the map",
+                    action = AgentAction.NavigateTo("Connaught Place"),
+                    rawActionName = "navigate_to", expectedPostcondition = "map open",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved navigation skill must be replayable", restored != null)
+        assertEquals(AgentAction.NavigateTo("Connaught Place"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesNavigateTo() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_NAVIGATE_TO}",
+            actions.contains(ToolRegistry.TOOL_NAVIGATE_TO)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "navigate to Connaught Place",
+                desiredOutcome = "map open",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing navigate_to", prompt.contains("navigate_to"))
+    }
+
+    @Test
+    fun navigateToStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The map is a separate process no accessibility screen reflects, so the step's
+        // default NONE verification can never be satisfied from a fresh screen. The
+        // executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.NavigateTo -> ActionResult(true, "NAV_DISPATCHED", "Opening the map at ${action.target}")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the map","action":"navigate_to","params":{"target":"Connaught Place"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("navigate to Connaught Place", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("navigate_to must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.NavigateTo })
+    }
+
+    @Test
+    fun navigateToFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no maps app (NAV_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.NavigateTo -> ActionResult(false, "NAV_UNAVAILABLE", "No maps app is available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the map","action":"navigate_to","params":{"target":"Connaught Place"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("navigate to Connaught Place", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed navigation dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
+    // --- send_sms: the "text Priya that I'll be late" primitive ---
     @Test
     fun sendSmsExecutesWithoutAnAccessibilityService() {
         // Opening the messaging compose screen is dispatched through the platform
@@ -2826,6 +3022,14 @@ class CapabilityUpgradeTest {
         override fun compose(to: String, subject: String?, body: String?): EmailResult {
             calls += Call(to, subject, body)
             return EmailResult(true, "EMAIL_DISPATCHED", "Opening mail to email $to")
+        }
+    }
+
+    private class RecordingNavigationController : NavigationController {
+        val calls = mutableListOf<String>()
+        override fun navigate(target: String): NavigationResult {
+            calls += target
+            return NavigationResult(true, "NAV_DISPATCHED", "Opening the map at $target")
         }
     }
 
