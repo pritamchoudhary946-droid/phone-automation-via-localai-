@@ -176,6 +176,22 @@ the app cannot read back that the message was sent, so it reports only that the 
 (`SMS_UNAVAILABLE` / `SMS_PERMISSION` / `INVALID_SMS_NUMBER` / `INVALID_SMS_MESSAGE`
 otherwise). The prompt must never let the model claim a message was sent.
 
+`share_text` (`AgentAction.ShareText` + `ShareController` -> the documented
+`Intent.ACTION_SEND` with a `text/plain` payload) follows the same rule: no
+accessibility-tree read or UI tap hands a piece of text to an arbitrary target app
+reliably on an arbitrary screen (and driving a specific app's UI would be app-specific),
+so it is resolved before the a11y gate and dispatches the platform share sheet. It
+carries `text` plus an optional `targetPackage` ("share this with WhatsApp"); when a
+package is named the intent is addressed to it and the platform chooser is kept as a
+fallback (via `EXTRA_INITIAL_INTENTS`), so a missing/renamed package degrades to "let the
+user choose" rather than failing the whole share. It never posts anywhere by itself: the
+user picks the final destination and confirms, so a consequential share stays under the
+user's control (section 3.5). Because the receiving app is a separate process the app
+cannot read back that the text was posted, so it reports only that the intent was
+*delivered* (`SHARE_DISPATCHED`) and never claims the text was shared
+(`SHARE_UNAVAILABLE` / `SHARE_PERMISSION` / `SHARE_ERROR` / `INVALID_SHARE_TEXT`
+otherwise). The prompt must never let the model claim the text was shared.
+
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
   `NONE` verification never proves completion; every terminal goal needs concrete evidence.
@@ -413,11 +429,12 @@ otherwise). The prompt must never let the model claim a message was sent.
   self-satisfaction or the secret guard.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
-  `dial_number`, `send_sms` and
+  `dial_number`, `send_sms`, `share_text` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
-  dialer via `Intent.ACTION_DIAL`, the messaging app via `Intent.ACTION_SENDTO`) that no
+  dialer via `Intent.ACTION_DIAL`, the messaging app via `Intent.ACTION_SENDTO`, the
+  platform share sheet via `Intent.ACTION_SEND`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
@@ -434,7 +451,9 @@ otherwise). The prompt must never let the model claim a message was sent.
   otherwise), and `dial_number` reports `DIAL_DISPATCHED` only after the `ACTION_DIAL`
   intent was delivered to a dialer (`DIAL_UNAVAILABLE` otherwise), and `send_sms` reports
   `SMS_DISPATCHED` only after the `ACTION_SENDTO` intent was delivered to a messaging app
-  (`SMS_UNAVAILABLE` otherwise). Never widen this to an
+  (`SMS_UNAVAILABLE` otherwise), and `share_text` reports `SHARE_DISPATCHED` only after
+  the `ACTION_SEND` intent was delivered to the share sheet (`SHARE_UNAVAILABLE`
+  otherwise). Never widen this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
   the device-state read primitive: battery level/charging, screen on/off, ringer

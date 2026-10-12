@@ -16,8 +16,8 @@ data class ShareResult(
  * <app>" primitive: no accessibility-tree read or UI tap can hand a piece of text to an
  * arbitrary target app reliably on an arbitrary screen, and driving a specific app's UI
  * would be app-specific. Instead this dispatches the platform's documented
- * [android.content.Intent.ACTION_SEND] intent with a `text/plain` payload and an
- * optional `EXTRA_TITLE`.
+ * [android.content.Intent.ACTION_SEND] intent with a `text/plain` payload and the
+ * text in `EXTRA_TEXT`.
  *
  * If a specific target app is named, the intent is addressed to it (with
  * [Intent.EXTRA_INITIAL_INTENTS] left for the platform chooser as a fallback); otherwise
@@ -54,23 +54,31 @@ class AndroidShareController(context: Context) : ShareController {
         if (text.isBlank()) {
             return ShareResult(false, "INVALID_SHARE_TEXT", "Share text must not be blank")
         }
-        val base = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, text)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
         val pkg = targetPackage?.trim()?.takeIf { it.isNotBlank() }
-        val intent = if (pkg != null) base.setPackage(pkg) else base
         val chooser = if (pkg != null) {
             // Address the named app but keep the platform chooser as a fallback so a
             // missing/renamed package degrades to "let the user choose" rather than
-            // failing the whole share.
-            Intent.createChooser(base.removePackage(), "Share via").apply {
-                putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(intent))
+            // failing the whole share. The generic intent is the chooser's primary
+            // target; the targeted intent rides along as an initial intent.
+            val targeted = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+                setPackage(pkg)
+            }
+            val generic = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            Intent.createChooser(generic, "Share via").apply {
+                putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(targeted))
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         } else {
-            Intent.createChooser(base, "Share via").apply {
+            val generic = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            Intent.createChooser(generic, "Share via").apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         }
