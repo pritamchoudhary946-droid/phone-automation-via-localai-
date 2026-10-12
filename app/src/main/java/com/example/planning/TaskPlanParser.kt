@@ -300,6 +300,11 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 targetPackage = str(params, "targetPackage", "package", "app", "to", "target")
                     .ifBlank { null }
             )
+            ToolRegistry.TOOL_SEND_EMAIL -> AgentAction.SendEmail(
+                to = str(params, "to", "email", "address", "recipient", "mail"),
+                subject = str(params, "subject", "title").ifBlank { null },
+                body = str(params, "body", "message", "text", "content").ifBlank { null }
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications

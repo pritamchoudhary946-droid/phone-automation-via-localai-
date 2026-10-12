@@ -53,6 +53,7 @@ open class ToolRegistry {
         const val TOOL_DIAL_NUMBER = "dial_number"
         const val TOOL_SEND_SMS = "send_sms"
         const val TOOL_SHARE_TEXT = "share_text"
+        const val TOOL_SEND_EMAIL = "send_email"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -256,6 +257,12 @@ open class ToolRegistry {
             description = "Shares a piece of text through the platform share sheet, optionally addressed to a named app. Use for 'share this with WhatsApp', 'send this link to Instagram'. The user picks the destination and confirms; it never posts anywhere by itself",
             requiredParameters = listOf("text"),
             optionalParameters = listOf("targetPackage", "package")
+        ),
+        TOOL_SEND_EMAIL to ToolDefinition(
+            name = TOOL_SEND_EMAIL,
+            description = "Opens the mail app pre-filled with a recipient, and optionally a subject and body; the user presses send to deliver it. Use for 'email Sam at sam@example.com that the report is ready'. It never sends the message itself",
+            requiredParameters = listOf("to"),
+            optionalParameters = listOf("subject", "body")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -546,6 +553,13 @@ open class ToolRegistry {
             is AgentAction.ShareText -> {
                 if (action.text.isBlank()) {
                     ToolValidationResult.Invalid("share_text requires non-blank text")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.SendEmail -> {
+                if (action.to.isBlank()) {
+                    ToolValidationResult.Invalid("send_email requires a non-blank recipient")
                 } else {
                     ToolValidationResult.Valid
                 }

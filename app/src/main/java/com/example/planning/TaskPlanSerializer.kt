@@ -114,6 +114,11 @@ object TaskPlanSerializer {
             put("text", text)
             if (!targetPackage.isNullOrBlank()) put("targetPackage", targetPackage)
         }
+        is AgentAction.SendEmail -> JSONObject().apply {
+            put("to", to)
+            if (!subject.isNullOrBlank()) put("subject", subject)
+            if (!body.isNullOrBlank()) put("body", body)
+        }
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
         else -> null
     }
@@ -216,6 +221,7 @@ object TaskPlanSerializer {
         is AgentAction.DialNumber -> com.example.agent.ToolRegistry.TOOL_DIAL_NUMBER
         is AgentAction.SendSms -> com.example.agent.ToolRegistry.TOOL_SEND_SMS
         is AgentAction.ShareText -> com.example.agent.ToolRegistry.TOOL_SHARE_TEXT
+        is AgentAction.SendEmail -> com.example.agent.ToolRegistry.TOOL_SEND_EMAIL
         is AgentAction.PlayMedia -> com.example.agent.ToolRegistry.TOOL_PLAY_MEDIA
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS
         is AgentAction.ReadDeviceStatus -> com.example.agent.ToolRegistry.TOOL_READ_DEVICE_STATUS

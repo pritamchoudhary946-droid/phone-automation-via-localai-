@@ -192,6 +192,24 @@ cannot read back that the text was posted, so it reports only that the intent wa
 (`SHARE_UNAVAILABLE` / `SHARE_PERMISSION` / `SHARE_ERROR` / `INVALID_SHARE_TEXT`
 otherwise). The prompt must never let the model claim the text was shared.
 
+`send_email` (`AgentAction.SendEmail` + `EmailController` -> the documented
+`Intent.ACTION_SENDTO` with a `mailto:` URI and the `EXTRA_EMAIL`/`EXTRA_SUBJECT`/
+`EXTRA_TEXT` extras) follows the same rule: no accessibility-tree read or UI tap opens a
+mail compose screen pre-filled with a recipient and body reliably on an arbitrary screen
+(and driving a specific mail app's UI would be app-specific), so it is resolved before
+the a11y gate and opens the mail app for the user to review and press send. It carries a
+`to` plus optional `subject`/`body`; `AndroidEmailController.normalizeEmailAddress(...)`
+is a pure, unit-tested gate that accepts only a plausible single address (a non-empty
+local part, exactly one `@`, and a dotted domain with no empty labels) and rejects a
+blank or garbage target before any intent is built. It deliberately opens the compose
+screen and never sends the message: sending is a consequential, hard-to-undo action that
+must stay under the user's explicit control, so the primitive does not request any send
+permission. Because the mail app is a separate process the app cannot read back that the
+message was sent, so it reports only that the intent was *delivered* (`EMAIL_DISPATCHED`)
+and never claims the message was sent (`EMAIL_UNAVAILABLE` / `EMAIL_PERMISSION` /
+`EMAIL_ERROR` / `INVALID_EMAIL_ADDRESS` otherwise). The prompt must never let the model
+claim an email was sent.
+
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
   `NONE` verification never proves completion; every terminal goal needs concrete evidence.
@@ -429,12 +447,13 @@ otherwise). The prompt must never let the model claim the text was shared.
   self-satisfaction or the secret guard.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
-  `dial_number`, `send_sms`, `share_text` and
+  `dial_number`, `send_sms`, `share_text`, `send_email` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
   dialer via `Intent.ACTION_DIAL`, the messaging app via `Intent.ACTION_SENDTO`, the
-  platform share sheet via `Intent.ACTION_SEND`) that no
+  platform share sheet via `Intent.ACTION_SEND`, the mail app via `Intent.ACTION_SENDTO`
+  `mailto:`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
@@ -453,7 +472,9 @@ otherwise). The prompt must never let the model claim the text was shared.
   `SMS_DISPATCHED` only after the `ACTION_SENDTO` intent was delivered to a messaging app
   (`SMS_UNAVAILABLE` otherwise), and `share_text` reports `SHARE_DISPATCHED` only after
   the `ACTION_SEND` intent was delivered to the share sheet (`SHARE_UNAVAILABLE`
-  otherwise). Never widen this to an
+  otherwise), and `send_email` reports `EMAIL_DISPATCHED` only after the `ACTION_SENDTO`
+  `mailto:` intent was delivered to a mail app (`EMAIL_UNAVAILABLE` otherwise). Never widen
+  this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
   the device-state read primitive: battery level/charging, screen on/off, ringer

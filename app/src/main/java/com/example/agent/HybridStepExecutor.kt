@@ -238,6 +238,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic share-sheet dispatch"
             )
 
+            is AgentAction.SendEmail -> FastPathDecision.Execute(
+                action,
+                "deterministic email-compose dispatch"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"

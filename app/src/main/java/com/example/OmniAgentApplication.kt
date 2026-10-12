@@ -194,7 +194,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // (no UI tap hands text to an arbitrary target app reliably). It opens the
                 // share sheet (optionally addressed to a named app) for the user to choose
                 // a destination and confirm; it never posts anywhere by itself.
-                shareController = com.example.agent.AndroidShareController(this)
+                shareController = com.example.agent.AndroidShareController(this),
+                // Email primitive: dispatches the platform ACTION_SENDTO intent with a
+                // mailto: URI (+ EXTRA_SUBJECT/EXTRA_TEXT), service-free like the
+                // SMS/dialer/share primitives (no UI tap opens a compose screen reliably).
+                // It opens the mail app pre-filled for the user to press send; it never
+                // sends the message itself.
+                emailController = com.example.agent.AndroidEmailController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
