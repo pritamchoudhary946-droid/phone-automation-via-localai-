@@ -1258,6 +1258,63 @@ class CapabilityUpgradeTest {
         )
     }
 
+    // --- Current date/time (relative-time resolution for set_alarm) ---
+
+    @Test
+    fun formatDateTimeRendersTheLocalClockForThePrompt() {
+        val utc = java.util.TimeZone.getTimeZone("UTC")
+        val text = PlannerPromptBuilder.formatDateTime(0L, utc)
+        assertTrue("expected yyyy-MM-dd HH:mm + weekday, got '$text'", text.startsWith("1970-01-01 00:00"))
+        assertTrue("expected a weekday name in '$text'", text.contains("Thursday"))
+    }
+
+    @Test
+    fun planningPromptCarriesTheCurrentDateTimeForRelativeTimeResolution() {
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "set an alarm for 7am",
+                desiredOutcome = "alarm at 07:00",
+                foregroundPackage = "com.android.deskclock",
+                screenSummary = "Clock",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = PlannerPromptBuilder.availableActions(ToolRegistry()),
+                currentDateTime = "2026-10-12 01:31 Sunday"
+            )
+        )
+        assertTrue(
+            "the planner must see the current date/time to resolve 'in 20 minutes'",
+            prompt.contains("2026-10-12 01:31 Sunday")
+        )
+    }
+
+    @Test
+    fun planTaskInjectsTheCurrentDateTimeWhenTheCallerOmitsIt() {
+        val runtime = FakeLlmRuntime(output = """{"steps":[{"id":1,"action":"read_device_status"}]}""")
+        val engine = buildTestEngine(context, runtimeFactory = { _, _ -> runtime })
+        kotlinx.coroutines.runBlocking { engine.initialize() }
+
+        kotlinx.coroutines.runBlocking {
+            engine.planTask(
+                goal = "what time is it",
+                screenSummary = "Home",
+                foregroundPackage = "com.example.home",
+                historySummary = "",
+                lastActionVerification = null,
+                remainingStepBudget = 10
+            )
+        }
+
+        val sentPrompt = runtime.prompts.lastOrNull()
+        assertTrue("planner prompt was not generated", sentPrompt != null)
+        assertTrue(
+            "AgentPlanner must fill the current date/time so a relative time can be resolved",
+            sentPrompt!!.contains("Current date/time: ") &&
+                !sentPrompt.contains("Current date/time: \n")
+        )
+    }
+
     // --- Helpers ---
 
     private class RecordingDeviceStatusReader : DeviceStatusReader {

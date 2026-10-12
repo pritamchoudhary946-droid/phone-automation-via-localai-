@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 22,
+  "sessions_done": 23,
   "session_cap": 48,
-  "current_milestone": "Capability: new AgentAction.SetAlarm + tool set_alarm - schedule a clock alarm at a 24-hour time ('wake me at 7am'). Service-free (AlarmClock.ACTION_SET_ALARM intent), self-evidencing, wired across all action-vocabulary seams. Mirrors the set_ringer_mode precedent.",
+  "current_milestone": "Capability/flexibility: planner now receives the device's CURRENT LOCAL DATE/TIME (PlannerPromptBuilder.formatDateTime, pure + unit-tested). Without it the model cannot resolve a relative time ('in 20 minutes', 'tomorrow at 7am') into the absolute hour/minute that set_alarm requires, so time-relative instructions were unplannable. Wired at both live call sites (AgentPlanner.plan with a withCurrentDateTime() default, TaskOrchestrator cloud prompt); deterministic in tests because a caller-supplied value wins.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -91,7 +91,11 @@
     "capability 2026-10-12 (session 22): SetAlarm is self-evidencing. TaskOrchestrator.verifyAction accepts a successful result for a NONE-verified SetAlarm as the step evidence, and selfEvidencingToolSatisfied counts a completed SetAlarm as goal evidence (same rule as adjust_volume/play_media/set_ringer_mode/read_notifications).",
     "regression tests 2026-10-12 (session 22, CapabilityUpgradeTest +9): setAlarmExecutesWithoutAnAccessibilityService, setAlarmRefusesHonestlyWhenUnwired, setAlarmRejectsAnInvalidTime, setAlarmParserCarriesTimeLabelAndDays, validationAcceptsSetAlarmAndRejectsAnInvalidTime, setAlarmSkillKeepsItsTimeLabelAndDaysOnReplay, promptAdvertisesSetAlarm, setAlarmStepCompletesFromItsOwnHonestResult, setAlarmFailureIsNotMaskedByTheSelfEvidencingRule.",
     "validation 2026-10-12 (session 22, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m4s, 322 tests 0 failures 0 errors 0 skipped (19 suites; 313 baseline + 9 new). ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m44s, app-debug.apk produced (115 MB).",
-    "AGENTS.md 2026-10-12 (session 22): action-vocabulary notes and the service-backed self-evidencing invariant now list set_alarm / ALARM_DISPATCHED / ALARM_UNAVAILABLE."
+    "AGENTS.md 2026-10-12 (session 22): action-vocabulary notes and the service-backed self-evidencing invariant now list set_alarm / ALARM_DISPATCHED / ALARM_UNAVAILABLE.",
+    "capability/flexibility 2026-10-12 (session 23): the planner now receives the device's CURRENT LOCAL DATE/TIME. New pure PlannerPromptBuilder.formatDateTime(epochMillis, zone) renders 'yyyy-MM-dd HH:mm EEEE' in the device timezone; PlanningRequest gains currentDateTime (default \"\"); the planning prompt emits 'Current date/time: <value>'. AgentPlanner.plan fills it via PlanningRequest.withCurrentDateTime() when the caller left it blank (a caller-supplied value wins, so tests stay deterministic), and TaskOrchestrator's cloud planning prompt passes formatDateTime(System.currentTimeMillis()). Without a clock the model cannot resolve a relative time ('in 20 minutes', 'tomorrow at 7am') into the absolute hour/minute that set_alarm needs - so time-relative instructions were unplannable. Blank degrades to the previous prompt (no crash, no fabrication).",
+    "regression tests 2026-10-12 (session 23, CapabilityUpgradeTest +3): formatDateTimeRendersTheLocalClockForThePrompt (pure formatter, fixed epoch+UTC -> '1970-01-01 00:00 Thursday'), planningPromptCarriesTheCurrentDateTimeForRelativeTimeResolution (supplied value reaches the prompt), planTaskInjectsTheCurrentDateTimeWhenTheCallerOmitsIt (AgentPlanner default fills a non-blank 'Current date/time: ' line through the live planTask path).",
+    "validation 2026-10-12 (session 23, toolchain present): baseline before change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 322 tests 0 failures 0 errors. After change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m11s, 325 tests 0 failures 0 errors 0 skipped (19 suites; 322 baseline + 3 new).",
+    "validation 2026-10-12 (session 23): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m41s, app-debug.apk produced."
   ],
   "in_progress": {
     "item": "",
@@ -105,12 +109,12 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path.",
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
   ],
-  "branch": "auto/jarvis-autonomy-20261012-0031",
+  "branch": "auto/jarvis-autonomy-20261012-0131",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261012T0031Z",
-  "last_updated": "2026-10-12T01:05:00Z",
+  "last_run_id": "internal-20261012T0131Z",
+  "last_updated": "2026-10-12T01:53:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
