@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 31,
+  "sessions_done": 32,
   "session_cap": 48,
-  "current_milestone": "Capability: send_email email-compose primitive (AgentAction.SendEmail + EmailController -> Intent.ACTION_SENDTO with a mailto: URI), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed intents. Opens the mail app pre-filled (recipient + optional subject/body) for the user to review and press send; never sends the message itself (section 3.5).",
+  "current_milestone": "Capability: navigate_to maps-navigation primitive (AgentAction.NavigateTo + NavigationController -> Intent.ACTION_VIEW with a geo:0,0?q=<place> URI), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed intents. Opens the map showing a place name or street address so the user can start directions; never begins navigating itself (section 3.5).",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -140,7 +140,12 @@
     "capability 2026-10-12 (session 31): SendEmail is self-evidencing (TaskOrchestrator.verifyAction accepts a successful NONE-verified SendEmail result; selfEvidencingToolSatisfied counts a completed one as goal evidence), same honest-delivery rule as send_sms/dial_number/share_text. It is compose-only by design (opens the mail app pre-filled for the user to review and press send; never sends; no send permission). AndroidManifest <queries> adds ACTION_SENDTO mailto visibility.",
     "regression tests 2026-10-12 (session 31, CapabilityUpgradeTest +10): sendEmailExecutesWithoutAnAccessibilityService, sendEmailRefusesHonestlyWhenUnwired, sendEmailRejectsBlankRecipient, sendEmailParserCarriesRecipientSubjectAndBody, validationAcceptsSendEmailAndRejectsBlanks, sendEmailSkillKeepsRecipientSubjectAndBodyOnReplay, promptAdvertisesSendEmail, sendEmailStepCompletesFromItsOwnHonestResult, sendEmailFailureIsNotMaskedByTheSelfEvidencingRule, + AndroidEmailController.normalizeEmailAddress unit case.",
     "AGENTS.md 2026-10-12 (session 31): action-vocabulary notes and the service-backed self-evidencing invariant now list send_email / EmailController / EMAIL_DISPATCHED / EMAIL_UNAVAILABLE / ACTION_SENDTO mailto:.",
-    "validation 2026-10-12 (session 31, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 4m46s; 392 tests 0 failures 0 errors 0 skipped (19 suites; 382 baseline + 10 new send_email tests)."
+    "validation 2026-10-12 (session 31, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 4m46s; 392 tests 0 failures 0 errors 0 skipped (19 suites; 382 baseline + 10 new send_email tests).",
+    "capability 2026-10-12 (session 32): new AgentAction.NavigateTo + tool navigate_to ('navigate to a place' / 'take me to <address>'). Closes the section 2.1 maps/navigation gap - a launch_app of 'maps' cannot express a destination. Implemented across all action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (const, ToolDefinition, validateAction), TaskPlanParser.mapAction, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, PlanVariables.substitute, AndroidDeviceAutomation.execute (service-free, before the a11y gate), and TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor).",
+    "capability 2026-10-12 (session 32): new com.example.agent.NavigationController interface + AndroidNavigationController (Intent.ACTION_VIEW with a geo:0,0?q= URI; normalizeNavigationTarget() is a pure, unit-tested gate that trims a usable place and rejects blank / over-MAX_NAV_TARGET_CHARS / control-character values). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication; a <queries> geo: VIEW entry added to AndroidManifest so the map app is visible on API 30+.",
+    "regression tests 2026-10-12 (session 32, CapabilityUpgradeTest): navigateToExecutesWithoutAnAccessibilityService, navigateToRefusesHonestlyWhenUnwired, navigateToRejectsABlankTarget, navigateToNormalizesAndRejectsUnsafeTargets, navigateToParserCarriesThePlace, validationAcceptsNavigateToAndRejectsABlankTarget, navigateToSkillKeepsItsPlaceOnReplay, promptAdvertisesNavigateTo, navigateToStepCompletesFromItsOwnHonestResult, navigateToFailureIsNotMaskedByTheSelfEvidencingRule.",
+    "validation 2026-10-12 (session 32, toolchain present): installed JDK21 (openjdk-21-jdk-headless) + Android SDK platform 36.1 / build-tools 36.1.0 into /opt/android-sdk; SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 2m5s, 392 tests 0 failures 0 errors 0 skipped (382 baseline + 10 new navigate_to tests).",
+    "AGENTS.md 2026-10-12 (session 32): documented the navigate_to service-backed primitive and added it to the self-evidencing service-backed list (maps app via Intent.ACTION_VIEW geo:)."
   ],
   "in_progress": {
     "item": "",
@@ -148,29 +153,29 @@
     "note": ""
   },
   "next_items": [
-    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Candidate: share-sheet/chooser handling, file/media picking, or multi-window (section 2.1).",
+    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Candidate: file/media picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT), or multi-window (section 2.1).",
     "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - TaskOrchestrator consumes budget.onExplore() and then escalates again to RecoveryStrategy.ASK_USER_HELP on identicalActionStreak>=4. Reconcile the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2).",
     "5.2 (low-risk): FailureClassifier.burnedByWrongPackage is only set when a WRONG_PACKAGE failure precedes TARGET_NOT_FOUND. No change made.",
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session.",
     "send_sms is compose-only by design; if a future milestone wants true send, it must add SEND_SMS, an explicit confirmation step, and honest read-back - do not silently widen the primitive."
   ],
-  "branch": "auto/jarvis-autonomy-20261012-0931",
+  "branch": "auto/jarvis-autonomy-20261012-1600",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261012T0931Z",
-  "last_updated": "2026-10-12T09:35:00Z",
+  "last_run_id": "internal-20261012T1600Z",
+  "last_updated": "2026-10-12T16:15:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": {
-    "summary": "Added a send_email email-compose capability (open the mail app pre-filled with a recipient and optional subject/body for the user to review and press send; never sends by itself), wired through all seven action-vocabulary seams, self-evidencing, and validated by 10 new unit tests and the unit-test gate.",
-    "evidence_reviewed": "main @615fd4d (session 30 share_text merged via PR #63); RUN_STATE.json (session 30 done, milestone_status done, carryover null); AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the send_sms/dial_number/share_text reference implementations (SmsController/AndroidSmsController, ShareController/AndroidShareController, ToolRegistry, TaskPlanParser, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, TaskPlanSerializer, TaskOrchestrator self-evidencing, OmniAgentApplication wiring, AndroidManifest queries); CapabilityUpgradeTest; RiskEvaluator.",
-    "findings": "The app could dial, text and share but had no email-compose primitive ('email Sam that the report is ready' was unplannable - confirmed gap). Email must be its own tool: it carries a recipient plus optional subject/body and maps to the documented ACTION_SENDTO mailto: intent; driving a specific mail app's UI would be app-specific. A pure normalizeEmailAddress gate is required so a blank/garbage target never builds an intent. Same honest-delivery and self-evidencing rules as the other service-backed intents apply.",
-    "milestone_implemented": "AgentAction.SendEmail(to, subject?, body?) + ToolRegistry (TOOL_SEND_EMAIL/ToolDefinition/validateAction) + TaskPlanParser.mapAction + HybridStepExecutor fast path + PlannerPromptBuilder catalogue + PlanVariables.substitute + AndroidDeviceAutomation.execute (pre-a11y-gate) + new EmailController/AndroidEmailController seam wired in OmniAgentApplication + TaskPlanSerializer toParams/toolNameFor + TaskOrchestrator self-evidencing + AndroidManifest ACTION_SENDTO mailto query.",
-    "validation": "PASSED. ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 4m46s, 392 tests 0 failures 0 errors 0 skipped (19 suites; 382 baseline + 10 new). Device: NOT verified (no device in sandbox).",
-    "remaining_work": "see next_items (file/media picking; multi-window; StuckLoopDetector budget reconciliation; FailureClassifier.burnedByWrongPackage; optional lint gate). send_email is compose-only by design; true send would need SEND permission, an explicit confirmation step and honest read-back.",
-    "honesty": "Confirmed by unit tests: send_email executes without a bound a11y service, refuses honestly when unwired, rejects a blank recipient, parses to/subject/body, validates, round-trips through the serializer (skill replay), is advertised in the prompt, self-evidences a completed step, and a failed dispatch is not masked. Confirmed by compilation: the controller builds and the unit-test source compiles. Inferred: on a real device the mail compose screen opens pre-filled (not device-tested). Blocked: none."
+    "summary": "Added a navigate_to maps-navigation capability (open the map at a place name or address so the user can start directions; never begins navigating by itself), wired through all seven action-vocabulary seams, self-evidencing like the other service-backed intents, and validated by 10 new unit tests and the unit-test gate.",
+    "evidence_reviewed": "main @0bc6a29; RUN_STATE.json (session 31 send_email done); AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the dial_number/send_sms/send_email reference implementations (DialerController/AndroidDialerController, EmailController/AndroidEmailController, ToolRegistry, TaskPlanParser, TaskPlanSerializer, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, AndroidDeviceAutomation, OmniAgentApplication, AndroidManifest.xml).",
+    "findings": "The section 2.1 gap 'navigate to a place' had no vocabulary - maps was only a launchable app (AppDirectory 'maps' -> com.google.android.apps.maps), so 'take me to <address>' had no primitive. The dialer/sms/email service-free intent pattern is the exact template for a geo: ACTION_VIEW dispatch.",
+    "milestone_implemented": "navigate_to (AgentAction.NavigateTo + NavigationController/AndroidNavigationController).",
+    "validation": "toolchain installed (JDK21 + Android SDK 36.1/36.0.0); SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 2m5s, 392 tests 0 failures 0 errors 0 skipped.",
+    "remaining_work": "Open PR (do not self-merge); let the Verify (unit tests + APK) check go green; continue capability backlog.",
+    "honesty": "A maps app is a separate process the app cannot read back, so the primitive reports only that the geo: intent was delivered (NAV_DISPATCHED) and never claims navigation began; the model prompt is told the same. Real-device validation not performed in this sandbox (unit gate only)."
   }
 }

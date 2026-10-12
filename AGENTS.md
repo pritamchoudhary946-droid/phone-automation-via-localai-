@@ -217,6 +217,23 @@ and never claims the message was sent (`EMAIL_UNAVAILABLE` / `EMAIL_PERMISSION` 
 `EMAIL_ERROR` / `INVALID_EMAIL_ADDRESS` otherwise). The prompt must never let the model
 claim an email was sent.
 
+`navigate_to` (`AgentAction.NavigateTo` + `NavigationController` -> the documented
+`Intent.ACTION_VIEW` with a `geo:0,0?q=<place>` URI) follows the same rule: no
+accessibility-tree read or UI tap opens a maps app at a chosen place/address reliably on
+an arbitrary screen (and driving a specific maps app's UI would be app-specific), so it
+is resolved before the a11y gate and opens the map showing the place. It carries a
+single `target` (a place name or street address);
+`AndroidNavigationController.normalizeNavigationTarget(...)` is a pure, unit-tested gate
+that trims a usable place and rejects a blank, over-`MAX_NAV_TARGET_CHARS`-long, or
+control-character-bearing value before any URI is built. The `geo:0,0?q=` form shows the
+place on the map and the user starts turn-by-turn directions from there; it never begins
+navigating by itself, so the consequential route stays under the user's control (section
+3.5). Because the maps app is a separate process the app cannot read back that the place
+was shown, so it reports only that the intent was *delivered* (`NAV_DISPATCHED`) and
+never claims a route was started (`NAV_UNAVAILABLE` / `NAV_PERMISSION` / `NAV_ERROR` /
+`INVALID_NAV_TARGET` otherwise). The prompt must never let the model claim navigation
+began.
+
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
   `NONE` verification never proves completion; every terminal goal needs concrete evidence.
@@ -454,13 +471,13 @@ claim an email was sent.
   self-satisfaction or the secret guard.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
-  `dial_number`, `send_sms`, `share_text`, `send_email` and
+  `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
   dialer via `Intent.ACTION_DIAL`, the messaging app via `Intent.ACTION_SENDTO`, the
   platform share sheet via `Intent.ACTION_SEND`, the mail app via `Intent.ACTION_SENDTO`
-  `mailto:`) that no
+  `mailto:`, the maps app via `Intent.ACTION_VIEW` `geo:`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
@@ -480,7 +497,9 @@ claim an email was sent.
   (`SMS_UNAVAILABLE` otherwise), and `share_text` reports `SHARE_DISPATCHED` only after
   the `ACTION_SEND` intent was delivered to the share sheet (`SHARE_UNAVAILABLE`
   otherwise), and `send_email` reports `EMAIL_DISPATCHED` only after the `ACTION_SENDTO`
-  `mailto:` intent was delivered to a mail app (`EMAIL_UNAVAILABLE` otherwise). Never widen
+  `mailto:` intent was delivered to a mail app (`EMAIL_UNAVAILABLE` otherwise), and
+  `navigate_to` reports `NAV_DISPATCHED` only after the `ACTION_VIEW` `geo:` intent was
+  delivered to a maps app (`NAV_UNAVAILABLE` otherwise). Never widen
   this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is

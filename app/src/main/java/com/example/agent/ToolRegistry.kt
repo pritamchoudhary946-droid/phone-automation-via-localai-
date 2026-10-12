@@ -54,6 +54,7 @@ open class ToolRegistry {
         const val TOOL_SEND_SMS = "send_sms"
         const val TOOL_SHARE_TEXT = "share_text"
         const val TOOL_SEND_EMAIL = "send_email"
+        const val TOOL_NAVIGATE_TO = "navigate_to"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -263,6 +264,12 @@ open class ToolRegistry {
             description = "Opens the mail app pre-filled with a recipient, and optionally a subject and body; the user presses send to deliver it. Use for 'email Sam at sam@example.com that the report is ready'. It never sends the message itself",
             requiredParameters = listOf("to"),
             optionalParameters = listOf("subject", "body")
+        ),
+        TOOL_NAVIGATE_TO to ToolDefinition(
+            name = TOOL_NAVIGATE_TO,
+            description = "Opens the maps app showing a place name or street address; the user starts directions from there. Use for 'navigate to Connaught Place', 'take me to the nearest petrol pump', 'show me the way to <address>'. It never begins navigating by itself",
+            requiredParameters = listOf("target"),
+            optionalParameters = listOf("place", "destination", "address", "query")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -560,6 +567,17 @@ open class ToolRegistry {
             is AgentAction.SendEmail -> {
                 if (action.to.isBlank()) {
                     ToolValidationResult.Invalid("send_email requires a non-blank recipient")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.NavigateTo -> {
+                if (action.target.isBlank()) {
+                    ToolValidationResult.Invalid("navigate_to requires a non-blank place or address")
+                } else if (action.target.length > AndroidNavigationController.MAX_NAV_TARGET_CHARS) {
+                    ToolValidationResult.Invalid(
+                        "navigate_to target must be at most ${AndroidNavigationController.MAX_NAV_TARGET_CHARS} characters"
+                    )
                 } else {
                     ToolValidationResult.Valid
                 }
