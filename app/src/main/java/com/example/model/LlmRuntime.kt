@@ -39,29 +39,12 @@ interface LlmRuntime : AutoCloseable {
     ): String = generate(prompt, systemInstruction, maxOutputTokens)
 
     /**
-     * Performs a tiny real generation to prove the engine can serve requests end to end.
-     *
-     * Returns false ONLY for a real failure (the runtime is not ready or generation
-     * threw). A blank result from a small probe is NOT a failure: a healthy model can
-     * legitimately answer a tiny prompt with an empty string (e.g. thinking-token-only
-     * output), so an empty-but-no-exception probe counts as usable. Implementations do
-     * their own bounded retry before giving up (plan 8.1).
+     * Human-readable backend label, e.g. "CPU" or "GPU".
      */
-    suspend fun smokeTest(): Boolean
-
-    /** Human-readable backend label, e.g. "CPU" or "GPU". */
     fun backendLabel(): String
 
     override fun close()
 }
 
 /** Raised for any genuine inference failure so callers can degrade honestly. */
-open class LlmInferenceException(message: String, cause: Throwable? = null) : Exception(message, cause)
-
-/**
- * A request the provider accepted (HTTP 2xx) but with no usable text in [generate]'s
- * bounded extraction. It is still an [LlmInferenceException] so planning degrades
- * honestly, but it is distinguishable so the smoke probe can treat an empty answer as
- * USABLE (see [LlmRuntime.smokeTest]) even though a live step treats it as no output.
- */
-class EmptyModelResponseException(message: String) : LlmInferenceException(message)
+class LlmInferenceException(message: String, cause: Throwable? = null) : Exception(message, cause)

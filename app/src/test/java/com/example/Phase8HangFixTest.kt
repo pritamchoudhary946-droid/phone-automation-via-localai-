@@ -92,30 +92,33 @@ class Phase8HangFixTest {
     }
 
     @Test
-    fun ensureReadyRunsTheSmokeProbeOnlyOnce() = runBlocking {
-        val fake = FakeLlmRuntime()
+    fun ensureReadyLoadsOnceAndRepeatedCallsAreNoOps() = runBlocking {
         var factoryCalls = 0
-        val engine = ApiInferenceEngine(runtimeFactory = { factoryCalls++; fake })
+        val engine = ApiInferenceEngine(runtimeFactory = { factoryCalls++; FakeLlmRuntime() })
 
         assertTrue(engine.ensureReady())
         assertTrue(engine.ensureReady())
         assertTrue(engine.ensureReady())
 
-        assertEquals("the smoke probe must run once, not on every re-open", 1, fake.smokeTestCount)
-        assertEquals("and the engine must load once", 1, factoryCalls)
+        assertEquals("ensureReady must load once, not on every re-open", 1, factoryCalls)
+        assertTrue(engine.isReady())
     }
 
     @Test
-    fun ensureReadyProbesAgainAfterAShutdownDropsTheEngine() = runBlocking {
+    fun ensureReadyReloadsAfterAShutdownDropsTheEngine() = runBlocking {
+        var factoryCalls = 0
         val fakes = mutableListOf<FakeLlmRuntime>()
-        val engine = ApiInferenceEngine(runtimeFactory = { FakeLlmRuntime().also { fakes.add(it) } })
+        val engine = ApiInferenceEngine(
+            runtimeFactory = { factoryCalls++; FakeLlmRuntime().also { fakes.add(it) } }
+        )
 
         assertTrue(engine.ensureReady())
-        assertEquals(1, fakes.sumOf { it.smokeTestCount })
+        assertEquals(1, factoryCalls)
 
-        // A shutdown releases the engine and re-arms the probe.
+        // A shutdown releases the engine so the next prepare loads a fresh one.
         engine.shutdown()
         assertTrue(engine.ensureReady())
-        assertEquals("a fresh load is re-verified", 2, fakes.sumOf { it.smokeTestCount })
+        assertEquals("a fresh load is built after a shutdown", 2, factoryCalls)
+        assertTrue("the old runtime was closed", fakes.first().closed)
     }
 }

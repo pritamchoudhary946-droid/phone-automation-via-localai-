@@ -40,8 +40,8 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 val isConfigured = app.llmProviderConfig.isConfigured()
 
-                // Initialize (and smoke-test) the engine once an LLM API is configured,
-                // and whenever the app starts with a saved configuration.
+                // Initialize the engine once an LLM API is configured, and whenever the
+                // app starts with a saved configuration.
                 LaunchedEffect(isConfigured) {
                     if (isConfigured) app.initializeEngineIfConfigured()
                 }

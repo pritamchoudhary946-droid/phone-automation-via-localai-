@@ -232,12 +232,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
     }
 
     /**
-     * Loads and smoke-tests the engine off the UI thread once an LLM API is configured.
-     * Returns immediately; observe [ApiInferenceEngine.state] for the real outcome.
+     * Loads the engine off the UI thread once an LLM API is configured. Returns
+     * immediately; observe [ApiInferenceEngine.state] for the real outcome.
      *
      * 8.9: single-flight. Concurrent callers (the MainActivity LaunchedEffect, the
      * Setup/dashboard Retry buttons, or a config-change re-transition) collapse onto one
-     * load, and the smoke probe runs only on the first successful load.
+     * load. There is no load-time test prompt: readiness is configuration, and a real
+     * provider defect surfaces on the first actual generation.
      */
     fun initializeEngineIfConfigured() {
         if (!llmProviderConfig.isConfigured()) {
@@ -248,7 +249,7 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         appScope.launch {
             try {
                 if (inferenceEngine.ensureReady()) {
-                    Log.i(TAG, "Engine initialized and smoke test passed successfully")
+                    Log.i(TAG, "Engine initialized and ready")
                 } else {
                     Log.w(TAG, "Engine unavailable: see EngineState for the reason")
                 }
