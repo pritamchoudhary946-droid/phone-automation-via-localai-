@@ -164,7 +164,10 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 ringerModeController = com.example.agent.AndroidRingerModeController(this),
                 // Device-status read primitive: battery/screen/ringer/connectivity,
                 // read fresh from system services on each call.
-                deviceStatusReader = com.example.agent.AndroidDeviceStatusReader(this)
+                deviceStatusReader = com.example.agent.AndroidDeviceStatusReader(this),
+                // Alarm primitive: dispatches the platform AlarmClock intent, service-free
+                // like the audio/media/ringer controllers (no UI tap sets an alarm reliably).
+                alarmController = com.example.agent.AndroidAlarmController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

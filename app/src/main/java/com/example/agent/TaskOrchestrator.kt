@@ -963,7 +963,7 @@ class TaskOrchestrator(
             // completed, honestly-read-back volume/media/ringer command is its own
             // evidence, exactly like the read actions above.
             is AgentAction.AdjustVolume, is AgentAction.PlayMedia,
-            is AgentAction.SetRingerMode -> true
+            is AgentAction.SetRingerMode, is AgentAction.SetAlarm -> true
             else -> false
         }
     }
@@ -1146,6 +1146,7 @@ class TaskOrchestrator(
             (action is AgentAction.AdjustVolume ||
                 action is AgentAction.PlayMedia ||
                 action is AgentAction.SetRingerMode ||
+                action is AgentAction.SetAlarm ||
                 action is AgentAction.ReadNotifications)
         ) {
             val detail = if (action is AgentAction.ReadNotifications) {

@@ -203,6 +203,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic device ringer-mode switch"
             )
 
+            is AgentAction.SetAlarm -> FastPathDecision.Execute(
+                action,
+                "deterministic alarm scheduling"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"
