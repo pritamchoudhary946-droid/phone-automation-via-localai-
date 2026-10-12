@@ -94,7 +94,8 @@
     "AGENTS.md 2026-10-12 (session 22): action-vocabulary notes and the service-backed self-evidencing invariant now list set_alarm / ALARM_DISPATCHED / ALARM_UNAVAILABLE.",
     "capability/flexibility 2026-10-12 (session 23): the planner now receives the device's CURRENT LOCAL DATE/TIME. New pure PlannerPromptBuilder.formatDateTime(epochMillis, zone) renders 'yyyy-MM-dd HH:mm EEEE' in the device timezone; PlanningRequest gains currentDateTime (default \"\"); the planning prompt emits 'Current date/time: <value>'. AgentPlanner.plan fills it via PlanningRequest.withCurrentDateTime() when the caller left it blank (a caller-supplied value wins, so tests stay deterministic), and TaskOrchestrator's cloud planning prompt passes formatDateTime(System.currentTimeMillis()). Without a clock the model cannot resolve a relative time ('in 20 minutes', 'tomorrow at 7am') into the absolute hour/minute that set_alarm needs - so time-relative instructions were unplannable. Blank degrades to the previous prompt (no crash, no fabrication).",
     "regression tests 2026-10-12 (session 23, CapabilityUpgradeTest +3): formatDateTimeRendersTheLocalClockForThePrompt (pure formatter, fixed epoch+UTC -> '1970-01-01 00:00 Thursday'), planningPromptCarriesTheCurrentDateTimeForRelativeTimeResolution (supplied value reaches the prompt), planTaskInjectsTheCurrentDateTimeWhenTheCallerOmitsIt (AgentPlanner default fills a non-blank 'Current date/time: ' line through the live planTask path).",
-    "validation 2026-10-12 (session 23, toolchain present): baseline before change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 322 tests 0 failures 0 errors. After change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m11s, 325 tests 0 failures 0 errors 0 skipped (19 suites; 322 baseline + 3 new)."
+    "validation 2026-10-12 (session 23, toolchain present): baseline before change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 322 tests 0 failures 0 errors. After change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m11s, 325 tests 0 failures 0 errors 0 skipped (19 suites; 322 baseline + 3 new).",
+    "validation 2026-10-12 (session 23): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m41s, app-debug.apk produced."
   ],
   "in_progress": {
     "item": "",
@@ -113,7 +114,7 @@
   "risky_actions_done": [],
   "blockers": [],
   "last_run_id": "internal-20261012T0131Z",
-  "last_updated": "2026-10-12T01:50:00Z",
+  "last_updated": "2026-10-12T01:53:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
