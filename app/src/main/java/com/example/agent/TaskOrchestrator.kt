@@ -966,7 +966,8 @@ class TaskOrchestrator(
             is AgentAction.SetRingerMode, is AgentAction.SetAlarm,
             is AgentAction.SetTimer, is AgentAction.AddCalendarEvent,
             is AgentAction.AddContact, is AgentAction.DialNumber,
-            is AgentAction.SendSms, is AgentAction.ShareText -> true
+            is AgentAction.SendSms, is AgentAction.ShareText,
+            is AgentAction.SendEmail -> true
             else -> false
         }
     }
@@ -1156,6 +1157,7 @@ class TaskOrchestrator(
                 action is AgentAction.DialNumber ||
                 action is AgentAction.SendSms ||
                 action is AgentAction.ShareText ||
+                action is AgentAction.SendEmail ||
                 action is AgentAction.ReadNotifications)
         ) {
             val detail = if (action is AgentAction.ReadNotifications) {

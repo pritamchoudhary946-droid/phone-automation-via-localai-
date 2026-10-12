@@ -28,6 +28,9 @@ import com.example.agent.SmsResult
 import com.example.agent.AndroidShareController
 import com.example.agent.ShareController
 import com.example.agent.ShareResult
+import com.example.agent.AndroidEmailController
+import com.example.agent.EmailController
+import com.example.agent.EmailResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -1899,6 +1902,202 @@ class CapabilityUpgradeTest {
         assertTrue("a failed share dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- send_email: the "email <address> that <body>" primitive ---
+
+    @Test
+    fun sendEmailExecutesWithoutAnAccessibilityService() {
+        // Composing mail is dispatched through the platform ACTION_SENDTO intent, so like
+        // the SMS/dialer/share primitives it is service-free and must resolve before the
+        // a11y gate.
+        val recorder = RecordingEmailController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            emailController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SendEmail("sam@example.com", "Report", "The report is ready"))
+        }
+
+        assertTrue("the mail compose screen must open without a bound a11y service: $result", result.success)
+        assertEquals("EMAIL_DISPATCHED", result.method)
+        assertEquals(
+            listOf(RecordingEmailController.Call("sam@example.com", "Report", "The report is ready")),
+            recorder.calls
+        )
+    }
+
+    @Test
+    fun sendEmailRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            emailController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SendEmail("sam@example.com"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("EMAIL_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun sendEmailRejectsBlankRecipient() {
+        val recorder = RecordingEmailController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            emailController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SendEmail("   "))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_EMAIL_ADDRESS", result.method)
+        assertTrue("a blank recipient must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun emailAddressNormalizerAcceptsRealAddressesAndRejectsGarbage() {
+        // The pure gate that keeps a bad plan value from opening a nonsense mailto: screen.
+        assertEquals("sam@example.com", AndroidEmailController.normalizeEmailAddress(" sam@example.com "))
+        assertEquals("a.b@c.co", AndroidEmailController.normalizeEmailAddress("a.b@c.co"))
+        assertNull(AndroidEmailController.normalizeEmailAddress(""))
+        assertNull(AndroidEmailController.normalizeEmailAddress("   "))
+        assertNull(AndroidEmailController.normalizeEmailAddress("no-at-sign"))
+        assertNull(AndroidEmailController.normalizeEmailAddress("@example.com"))
+        assertNull(AndroidEmailController.normalizeEmailAddress("sam@"))
+        assertNull(AndroidEmailController.normalizeEmailAddress("sam@@example.com"))
+        assertNull(AndroidEmailController.normalizeEmailAddress("sam@example"))
+        assertNull(AndroidEmailController.normalizeEmailAddress("sam@.com"))
+        assertNull(AndroidEmailController.normalizeEmailAddress("sam@example..com"))
+        assertNull("a spaced value is not a single address", AndroidEmailController.normalizeEmailAddress("a b@example.com"))
+    }
+
+    @Test
+    fun sendEmailParserCarriesRecipientSubjectAndBody() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Email Sam","action":"send_email","params":{"to":"sam@example.com","subject":"Report","body":"The report is ready"},"expect":"mail open","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Email with an alias key","action":"send_email","params":{"email":"sam@example.com"},"expect":"mail open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "email sam")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.SendEmail("sam@example.com", "Report", "The report is ready"), steps[0].action)
+        assertEquals(AgentAction.SendEmail("sam@example.com", null, null), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsSendEmailAndRejectsBlankRecipient() {
+        val registry = ToolRegistry()
+        assertTrue(
+            registry.validateAction(AgentAction.SendEmail("sam@example.com", "Hi", "Body")) is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "a blank recipient must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.SendEmail("   ")) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun sendEmailSkillKeepsRecipientSubjectAndBodyOnReplay() {
+        // A learned "email Sam" skill must not replay with a dropped subject/body.
+        val plan = com.example.planning.TaskPlan(
+            goal = "email sam that the report is ready",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "email Sam",
+                    action = AgentAction.SendEmail("sam@example.com", "Report", "The report is ready"),
+                    rawActionName = "send_email", expectedPostcondition = "mail open",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved email skill must be replayable", restored != null)
+        assertEquals(
+            AgentAction.SendEmail("sam@example.com", "Report", "The report is ready"),
+            restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun promptAdvertisesSendEmail() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_SEND_EMAIL}",
+            actions.contains(ToolRegistry.TOOL_SEND_EMAIL)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "email Sam that the report is ready",
+                desiredOutcome = "mail compose open",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing send_email", prompt.contains("send_email"))
+    }
+
+    @Test
+    fun sendEmailStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The mail app is a separate process no accessibility screen reflects, so the
+        // step's default NONE verification can never be satisfied from a fresh screen.
+        // The executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SendEmail -> ActionResult(true, "EMAIL_DISPATCHED", "Opening mail to email sam@example.com")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Email Sam","action":"send_email","params":{"to":"sam@example.com"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("email sam", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("send_email must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.SendEmail })
+    }
+
+    @Test
+    fun sendEmailFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no mail app (EMAIL_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SendEmail -> ActionResult(false, "EMAIL_UNAVAILABLE", "No mail app is available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Email Sam","action":"send_email","params":{"to":"sam@example.com"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("email sam", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed email dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- clear_text: the "empty the field before retyping" primitive ---
 
     @Test
@@ -2617,6 +2816,16 @@ class CapabilityUpgradeTest {
         override fun share(text: String, targetPackage: String?): ShareResult {
             calls += Call(text, targetPackage)
             return ShareResult(true, "SHARE_DISPATCHED", "Opening the share sheet")
+        }
+    }
+
+    private class RecordingEmailController : EmailController {
+        data class Call(val to: String, val subject: String?, val body: String?)
+
+        val calls = mutableListOf<Call>()
+        override fun compose(to: String, subject: String?, body: String?): EmailResult {
+            calls += Call(to, subject, body)
+            return EmailResult(true, "EMAIL_DISPATCHED", "Opening mail to email $to")
         }
     }
 

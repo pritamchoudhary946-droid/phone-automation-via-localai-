@@ -203,7 +203,14 @@ class AndroidDeviceAutomation(
     // gate. An unwired controller gets an honest "unavailable" result, never a silent
     // no-op. It opens the share sheet for the user to choose a destination and confirm;
     // it never posts anywhere by itself.
-    private val shareController: ShareController? = null
+    private val shareController: ShareController? = null,
+    // Composing an email is dispatched through the platform ACTION_SENDTO intent
+    // (`mailto:` URI), not an accessibility-tree control, so like the SMS/dialer/
+    // share primitives it is resolved before the a11y-service gate. An unwired
+    // controller gets an honest "unavailable" result, never a silent no-op. It opens
+    // the mail compose screen pre-filled for the user to press send; it never sends
+    // the message itself.
+    private val emailController: EmailController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -444,6 +451,20 @@ class AndroidDeviceAutomation(
             val controller = shareController
                 ?: return@withContext ActionResult(false, "SHARE_UNAVAILABLE", "Share dispatch is not available")
             val result = controller.share(action.text, action.targetPackage)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Composing an email is likewise service-free: it is dispatched through the
+        // platform ACTION_SENDTO intent (`mailto:` URI), so it is resolved before the
+        // a11y-service gate. This is the "email Sam that the report is ready" primitive.
+        // It opens the mail compose screen pre-filled for the user to press send and
+        // never sends the message, so it reports only that the intent was delivered.
+        if (action is AgentAction.SendEmail) {
+            if (action.to.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_EMAIL_ADDRESS", "Email recipient must not be blank")
+            }
+            val controller = emailController
+                ?: return@withContext ActionResult(false, "EMAIL_UNAVAILABLE", "Email compose dispatch is not available")
+            val result = controller.compose(action.to, action.subject, action.body)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

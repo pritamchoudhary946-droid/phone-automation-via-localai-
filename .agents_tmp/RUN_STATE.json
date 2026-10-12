@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 30,
+  "sessions_done": 31,
   "session_cap": 48,
-  "current_milestone": "Capability: share_text sharing primitive (AgentAction.ShareText + ShareController -> Intent.ACTION_SEND with a text/plain payload), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed intents. Opens the platform share sheet (optionally addressed to a named package, chooser kept as fallback) for the user to choose a destination and confirm; never posts anywhere by itself (section 3.5).",
+  "current_milestone": "Capability: send_email email-compose primitive (AgentAction.SendEmail + EmailController -> Intent.ACTION_SENDTO with a mailto: URI), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed intents. Opens the mail app pre-filled (recipient + optional subject/body) for the user to review and press send; never sends the message itself (section 3.5).",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -135,7 +135,12 @@
     "AGENTS.md 2026-10-12 (session 30): action-vocabulary notes and the service-backed self-evidencing invariant now list share_text / ShareController / SHARE_DISPATCHED / SHARE_UNAVAILABLE / ACTION_SEND.",
     "fix 2026-10-12 (session 30): AndroidShareController used Intent.removePackage(), which does not exist in the Android SDK - a compile error in the named-package branch. Rewrote the branch to build a generic ACTION_SEND intent as the chooser's primary target and the package-addressed intent as an EXTRA_INITIAL_INTENTS fallback (no removePackage). Also corrected the KDoc, which claimed an EXTRA_TITLE that is not set.",
     "validation 2026-10-12 (session 30, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon --rerun-tasks -> BUILD SUCCESSFUL in 2m33s; 382 tests 0 failures 0 errors 0 skipped (19 suites; 373 baseline + 9 new share_text tests).",
-    "merge 2026-10-12 (session 30): share_text milestone merged to main via PR (squash, branch deleted)."
+    "merge 2026-10-12 (session 30): share_text milestone merged to main via PR (squash, branch deleted).",
+    "capability 2026-10-12 (session 31): new AgentAction.SendEmail(to, subject?, body?) + tool send_email ('email Sam at sam@example.com that the report is ready'). No accessibility read/tap opens a mail compose screen pre-filled reliably, so it dispatches the documented Intent.ACTION_SENDTO with a mailto: URI (+ EXTRA_EMAIL/EXTRA_SUBJECT/EXTRA_TEXT) via a new com.example.agent.EmailController seam + AndroidEmailController (ActivityNotFoundException -> EMAIL_UNAVAILABLE, SecurityException -> EMAIL_PERMISSION, other -> EMAIL_ERROR; blank/garbage -> INVALID_EMAIL_ADDRESS via the pure normalizeEmailAddress gate). Implemented across all seven seams: AgentAction (+getDisplayName), ToolRegistry (TOOL_SEND_EMAIL, ToolDefinition, validateAction), TaskPlanParser.mapAction, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, PlanVariables.substitute, AndroidDeviceAutomation.execute (resolved before the a11y gate), TaskPlanSerializer (toParams/toolNameFor).",
+    "capability 2026-10-12 (session 31): SendEmail is self-evidencing (TaskOrchestrator.verifyAction accepts a successful NONE-verified SendEmail result; selfEvidencingToolSatisfied counts a completed one as goal evidence), same honest-delivery rule as send_sms/dial_number/share_text. It is compose-only by design (opens the mail app pre-filled for the user to review and press send; never sends; no send permission). AndroidManifest <queries> adds ACTION_SENDTO mailto visibility.",
+    "regression tests 2026-10-12 (session 31, CapabilityUpgradeTest +10): sendEmailExecutesWithoutAnAccessibilityService, sendEmailRefusesHonestlyWhenUnwired, sendEmailRejectsBlankRecipient, sendEmailParserCarriesRecipientSubjectAndBody, validationAcceptsSendEmailAndRejectsBlanks, sendEmailSkillKeepsRecipientSubjectAndBodyOnReplay, promptAdvertisesSendEmail, sendEmailStepCompletesFromItsOwnHonestResult, sendEmailFailureIsNotMaskedByTheSelfEvidencingRule, + AndroidEmailController.normalizeEmailAddress unit case.",
+    "AGENTS.md 2026-10-12 (session 31): action-vocabulary notes and the service-backed self-evidencing invariant now list send_email / EmailController / EMAIL_DISPATCHED / EMAIL_UNAVAILABLE / ACTION_SENDTO mailto:.",
+    "validation 2026-10-12 (session 31, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 4m46s; 392 tests 0 failures 0 errors 0 skipped (19 suites; 382 baseline + 10 new send_email tests)."
   ],
   "in_progress": {
     "item": "",
@@ -149,23 +154,23 @@
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session.",
     "send_sms is compose-only by design; if a future milestone wants true send, it must add SEND_SMS, an explicit confirmation step, and honest read-back - do not silently widen the primitive."
   ],
-  "branch": "auto/jarvis-autonomy-20261012-0831",
+  "branch": "auto/jarvis-autonomy-20261012-0931",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261012T0831Z",
-  "last_updated": "2026-10-12T09:05:00Z",
+  "last_run_id": "internal-20261012T0931Z",
+  "last_updated": "2026-10-12T09:35:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": {
-    "summary": "Added a share_text capability (hand a piece of text to the platform share sheet, optionally addressed to a named app, for the user to pick a destination and confirm; never posts by itself), wired through all seven action-vocabulary seams, self-evidencing, and validated by 9 new unit tests and the unit-test gate. Fixed a compile error (Intent.removePackage) in the controller that would have broken the build.",
-    "evidence_reviewed": "main @c60de41 (session 29 send_sms merged via PR #62); RUN_STATE.json (session 29 done, milestone_status done, carryover null); AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the send_sms/dial_number reference implementations (SmsController/AndroidSmsController, ToolRegistry, TaskPlanParser, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, TaskPlanSerializer, TaskOrchestrator self-evidencing, OmniAgentApplication wiring, AndroidManifest queries); CapabilityUpgradeTest share tests; RiskEvaluator.",
-    "findings": "The app could dial and text but had no general sharing primitive ('share this link with WhatsApp' was unplannable - confirmed gap). Sharing must be its own tool: it carries arbitrary text plus an optional target app and maps to the platform ACTION_SEND intent; driving a specific app's UI would be app-specific. A compile error (Intent.removePackage) in the named-package branch was found and fixed before merge. The RiskEvaluator already treats a share-flavoured FinishTask summary as risky ('External Communication'), so a share claim still needs confirmation - verified, no change needed.",
-    "milestone_implemented": "AgentAction.ShareText(text, targetPackage?) + ToolRegistry (TOOL_SHARE_TEXT/ToolDefinition/validateAction) + TaskPlanParser.mapAction + HybridStepExecutor fast path + PlannerPromptBuilder catalogue + PlanVariables.substitute + AndroidDeviceAutomation.execute (pre-a11y-gate) + new ShareController/AndroidShareController seam wired in OmniAgentApplication + TaskPlanSerializer toParams/toolNameFor + TaskOrchestrator self-evidencing + AndroidManifest ACTION_SEND text/plain query.",
-    "validation": "PASSED. ./gradlew :app:testDebugUnitTest --no-daemon --rerun-tasks -> BUILD SUCCESSFUL in 2m33s, 382 tests 0 failures 0 errors 0 skipped (19 suites; 373 baseline + 9 new). Device: NOT verified (no device in sandbox).",
-    "remaining_work": "see next_items (share-sheet/chooser handling refinement; file/media picking; multi-window; StuckLoopDetector budget reconciliation; FailureClassifier.burnedByWrongPackage; optional lint gate).",
-    "honesty": "Confirmed by unit tests: share_text executes without a bound a11y service, refuses honestly when unwired, rejects blank text, parses text+targetPackage, validates, round-trips through the serializer (skill replay), is advertised in the prompt, self-evidences a completed step, and a failed dispatch is not masked. Confirmed by compilation: the controller builds (the removePackage error is fixed). Inferred: on a real device the share sheet opens pre-filled (not device-tested). Blocked: none."
+    "summary": "Added a send_email email-compose capability (open the mail app pre-filled with a recipient and optional subject/body for the user to review and press send; never sends by itself), wired through all seven action-vocabulary seams, self-evidencing, and validated by 10 new unit tests and the unit-test gate.",
+    "evidence_reviewed": "main @615fd4d (session 30 share_text merged via PR #63); RUN_STATE.json (session 30 done, milestone_status done, carryover null); AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the send_sms/dial_number/share_text reference implementations (SmsController/AndroidSmsController, ShareController/AndroidShareController, ToolRegistry, TaskPlanParser, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, TaskPlanSerializer, TaskOrchestrator self-evidencing, OmniAgentApplication wiring, AndroidManifest queries); CapabilityUpgradeTest; RiskEvaluator.",
+    "findings": "The app could dial, text and share but had no email-compose primitive ('email Sam that the report is ready' was unplannable - confirmed gap). Email must be its own tool: it carries a recipient plus optional subject/body and maps to the documented ACTION_SENDTO mailto: intent; driving a specific mail app's UI would be app-specific. A pure normalizeEmailAddress gate is required so a blank/garbage target never builds an intent. Same honest-delivery and self-evidencing rules as the other service-backed intents apply.",
+    "milestone_implemented": "AgentAction.SendEmail(to, subject?, body?) + ToolRegistry (TOOL_SEND_EMAIL/ToolDefinition/validateAction) + TaskPlanParser.mapAction + HybridStepExecutor fast path + PlannerPromptBuilder catalogue + PlanVariables.substitute + AndroidDeviceAutomation.execute (pre-a11y-gate) + new EmailController/AndroidEmailController seam wired in OmniAgentApplication + TaskPlanSerializer toParams/toolNameFor + TaskOrchestrator self-evidencing + AndroidManifest ACTION_SENDTO mailto query.",
+    "validation": "PASSED. ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 4m46s, 392 tests 0 failures 0 errors 0 skipped (19 suites; 382 baseline + 10 new). Device: NOT verified (no device in sandbox).",
+    "remaining_work": "see next_items (file/media picking; multi-window; StuckLoopDetector budget reconciliation; FailureClassifier.burnedByWrongPackage; optional lint gate). send_email is compose-only by design; true send would need SEND permission, an explicit confirmation step and honest read-back.",
+    "honesty": "Confirmed by unit tests: send_email executes without a bound a11y service, refuses honestly when unwired, rejects a blank recipient, parses to/subject/body, validates, round-trips through the serializer (skill replay), is advertised in the prompt, self-evidences a completed step, and a failed dispatch is not masked. Confirmed by compilation: the controller builds and the unit-test source compiles. Inferred: on a real device the mail compose screen opens pre-filled (not device-tested). Blocked: none."
   }
 }

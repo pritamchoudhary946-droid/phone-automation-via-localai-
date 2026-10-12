@@ -222,6 +222,21 @@ sealed class AgentAction {
      * user's control.
      */
     data class ShareText(val text: String, val targetPackage: String? = null) : AgentAction()
+    /**
+     * Opens the mail compose screen pre-filled with [to], and optionally [subject] and
+     * [body] ("email Sam at sam@example.com that the report is ready"). Like [SendSms]
+     * no accessibility-tree read or UI tap opens a compose screen with a recipient and
+     * body reliably on an arbitrary screen, so it is dispatched through the platform
+     * [android.content.Intent.ACTION_SENDTO] intent (`mailto:` URI) and resolved before
+     * the accessibility-service gate. It opens the compose screen for the user to review
+     * and press send; it never sends the message, so a consequential send stays under
+     * the user's control.
+     */
+    data class SendEmail(
+        val to: String,
+        val subject: String? = null,
+        val body: String? = null
+    ) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -295,6 +310,7 @@ sealed class AgentAction {
             is DialNumber -> "Open the dialer with $number"
             is SendSms -> "Open messages to text $number"
             is ShareText -> targetPackage?.takeIf { it.isNotBlank() }?.let { "Share text with $it" } ?: "Share text"
+            is SendEmail -> "Open mail to email $to"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

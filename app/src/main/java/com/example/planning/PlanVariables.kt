@@ -104,6 +104,11 @@ class PlanVariableStore {
             text = substitute(action.text),
             targetPackage = action.targetPackage?.let(::substitute)
         )
+        is AgentAction.SendEmail -> action.copy(
+            to = substitute(action.to),
+            subject = action.subject?.let(::substitute),
+            body = action.body?.let(::substitute)
+        )
         is AgentAction.FinishTask -> action.copy(summary = substitute(action.summary))
         else -> action
     }
