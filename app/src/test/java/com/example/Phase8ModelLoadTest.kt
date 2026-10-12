@@ -3,7 +3,6 @@ package com.example
 import com.example.model.ApiInferenceEngine
 import com.example.model.EngineState
 import com.example.model.LlmInferenceException
-import com.example.model.runTolerantSmokeProbe
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -56,7 +55,6 @@ class Phase8ModelLoadTest {
             override suspend fun initialize() = Unit
             override fun isReady(): Boolean = false
             override suspend fun generate(prompt: String, systemInstruction: String?, maxOutputTokens: Int): String = ""
-            override suspend fun smokeTest(): Boolean = false
             override fun backendLabel(): String = "CPU"
             override fun close() = Unit
         }
@@ -92,44 +90,21 @@ class Phase8ModelLoadTest {
         assertTrue(fake.closed)
     }
 
-    // --- 8.1 (verified cause): the SMOKE PROBE must tolerate an empty answer -----
+    // --- 8.1: loading must NOT gate readiness on a test prompt ---------------------
 
     @Test
-    fun emptySmokeAnswerIsTreatedAsUsableNotFailure() = runBlocking {
-        // The exact reported bug: the model loads, the tiny probe answers with an
-        // empty string, and the old code flipped the engine to Failed and closed a
-        // perfectly good runtime. An empty-but-no-exception answer is SUCCESS.
-        var calls = 0
-        val ok = runTolerantSmokeProbe(probe = { calls++; "" })
-        assertTrue("empty answer must count as usable", ok)
-        assertEquals("empty answer should not trigger a retry", 1, calls)
-    }
+    fun loadingDoesNotConsumeATestPrompt() = runBlocking {
+        // The reported bug: a load-time probe answered with nothing (or timed out on a
+        // cold start) and the engine was reported unavailable right after a valid key was
+        // added. Readiness is configuration, so a load must issue no generation at all.
+        val fake = FakeLlmRuntime(backend = "CPU")
+        val engine = ApiInferenceEngine(runtimeFactory = { fake })
 
-    @Test
-    fun nonBlankSmokeAnswerSucceedsOnFirstAttempt() = runBlocking {
-        var calls = 0
-        val ok = runTolerantSmokeProbe(probe = { calls++; "ready" })
-        assertTrue(ok)
-        assertEquals(1, calls)
-    }
-
-    @Test
-    fun probeThatThrowsOnEveryAttemptIsTheOnlyRealFailure() = runBlocking {
-        var calls = 0
-        val ok = runTolerantSmokeProbe(attempts = 2) { calls++; throw LlmInferenceException("boom") }
-        assertFalse("repeated exception is a real failure", ok)
-        assertEquals(2, calls)
-    }
-
-    @Test
-    fun transientThrowThenEmptyAnswerEventuallySucceeds() = runBlocking {
-        var calls = 0
-        val ok = runTolerantSmokeProbe(attempts = 3) {
-            calls++
-            if (calls == 1) throw LlmInferenceException("cold start hiccup")
-            ""
-        }
-        assertTrue("a transient throw followed by an empty answer is usable", ok)
-        assertEquals(2, calls)
+        assertTrue(engine.ensureReady())
+        assertTrue(engine.isReady())
+        assertTrue(
+            "loading must not run a test prompt",
+            fake.prompts.isEmpty()
+        )
     }
 }

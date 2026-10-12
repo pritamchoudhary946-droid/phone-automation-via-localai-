@@ -55,14 +55,12 @@ class FakeLlmRuntime(
     var readyAfterInitialize: Boolean = true,
     var output: String = "",
     var throwOnGenerate: Boolean = false,
-    var smokeOk: Boolean = true,
     var backend: String = "CPU"
 ) : LlmRuntime {
 
     val prompts = mutableListOf<String>()
     val requestedMaxOutputTokens = mutableListOf<Int>()
     var initializeCount = 0
-    var smokeTestCount = 0
     var closed = false
 
     override suspend fun initialize() {
@@ -78,8 +76,6 @@ class FakeLlmRuntime(
         if (throwOnGenerate) throw LlmInferenceException("fake generation failure")
         return output
     }
-
-    override suspend fun smokeTest(): Boolean = smokeOk.also { smokeTestCount++ }
 
     override fun backendLabel(): String = backend
 

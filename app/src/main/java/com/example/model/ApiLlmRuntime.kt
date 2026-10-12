@@ -43,7 +43,8 @@ class ApiLlmRuntime(
             throw LlmInferenceException("No LLM API configured: set a provider and API key in Setup")
         }
         // No network call here: configuration presence is the readiness signal. A real
-        // call is made by smokeTest() so a bad key surfaces as an honest failure.
+        // defect (bad key, unreachable endpoint) surfaces on the first actual generation
+        // and is degraded honestly there — there is no load-time test prompt.
         ready.set(true)
         Log.i(TAG, "API LLM runtime ready (provider=${config.provider.displayName}, model=${config.effectiveModel()})")
     }
@@ -87,25 +88,6 @@ class ApiLlmRuntime(
         } catch (e: LlmInferenceException) {
             Log.w(TAG, "Vision request failed (${e.message}); retrying text-only")
             generate(prompt, systemInstruction, maxOutputTokens)
-        }
-    }
-
-    override suspend fun smokeTest(): Boolean = withContext(Dispatchers.IO) {
-        if (!isReady()) {
-            Log.w(TAG, "Smoke test failed: not configured")
-            return@withContext false
-        }
-        try {
-            val reply = generate(
-                prompt = "Reply with the single word: ready",
-                systemInstruction = "You are a minimal health check.",
-                maxOutputTokens = 8
-            )
-            Log.i(TAG, "Smoke probe returned '${reply.take(32)}' (blank=${reply.isBlank()})")
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "Smoke probe failed: ${e.message}")
-            false
         }
     }
 

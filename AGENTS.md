@@ -420,13 +420,14 @@ claim an email was sent.
     live loop; its fixed budget/foreground are documented as such.
   * BS10 no reachable `Unavailable*` default: the app wires real OCR/vision/
     summarizer; the stubs are inert constructor defaults for tests only.
-- Smoke probe (8.8): a blank smoke answer is NOT a load failure. A provider can
-  return an empty string for a tiny probe. `ApiLlmRuntime.smokeTest` routes through
-  the shared, unit-tested `runTolerantSmokeProbe(...)` — up to 2 bounded attempts
-  with a growing token budget; non-blank OR empty-without-exception succeeds; only
-  a THROWN generation on every attempt fails. Never close a working runtime on an
-  inconclusive probe. Keep the `LlmRuntime.smokeTest` contract ("empty is usable")
-  in step with any new runtime.
+- No load-time test prompt (8.8): the engine is declared ready once a provider + key
+  are configured — readiness is configuration, NOT a live probe. There is deliberately
+  no smoke-test generation at load. Gating readiness on a tiny probe is what produced
+  false "engine not available" failures right after a valid key was added (a live
+  provider is slow on its first call and may answer a one-word prompt with an empty
+  string). A real defect (bad key, unreachable endpoint) surfaces on the first actual
+  `generate`, which degrades honestly via `EngineState.Failed`; do not reintroduce a
+  load-time probe gate in `ensureReady`/`initialize`.
 - Learn-from-demonstration (4.17): the dashboard's "Watch me / Save skill" card is
   the entry point. `TaskOrchestrator.startWatching()` records each executed step;
   `saveWatchedSkill(name, goal)` persists it via `skillDao`. Do not remove the UI
@@ -533,9 +534,10 @@ claim an email was sent.
 - `initialize()` is single-flight: the Ready check is repeated INSIDE
   `mutex.withLock`, and any previous runtime is closed before it is replaced. Two
   concurrent initializers must never leave two runtimes alive.
-- Smoke probe runs once: call `ensureReady()` (load + one probe + remember), not
-  `initialize()` + a manual probe on every re-open. `reportUnavailable()`/`shutdown()`
-  clear the probe flag so a genuine reload re-verifies.
+- No probe, no flag: `ensureReady()` is just `initialize()`. There is NO load-time
+  smoke probe and no "probe ran" flag. Readiness is configuration; a bad key or
+  unreachable endpoint surfaces on the first real `generate()`. Do not reintroduce a
+  probe gate here — it is the source of the false "engine not available" bug.
 - There is no on-device runtime to release on memory pressure, so
   `OmniAgentApplication` no longer tears the engine down on a trim. Keep it that way;
   the API client holds no multi-GB state.
