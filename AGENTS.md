@@ -424,9 +424,13 @@ claim an email was sent.
   return an empty string for a tiny probe. `ApiLlmRuntime.smokeTest` routes through
   the shared, unit-tested `runTolerantSmokeProbe(...)` — up to 2 bounded attempts
   with a growing token budget; non-blank OR empty-without-exception succeeds; only
-  a THROWN generation on every attempt fails. Never close a working runtime on an
-  inconclusive probe. Keep the `LlmRuntime.smokeTest` contract ("empty is usable")
-  in step with any new runtime.
+  a THROWN generation on every attempt fails. A 2xx-but-unusable provider body is
+  raised as `EmptyModelResponseException` (an `LlmInferenceException` subclass) so
+  `generate` still degrades honestly while the probe converts it back to "usable".
+  Never close a working runtime on an inconclusive probe. Keep the
+  `LlmRuntime.smokeTest` contract ("empty is usable") in step with any new runtime.
+  Bug history: the pre-fix `smokeTest` bypassed the tolerant probe, so a cold-start
+  hiccup or empty answer flipped the engine to `Failed` right after a key was added.
 - Learn-from-demonstration (4.17): the dashboard's "Watch me / Save skill" card is
   the entry point. `TaskOrchestrator.startWatching()` records each executed step;
   `saveWatchedSkill(name, goal)` persists it via `skillDao`. Do not remove the UI
