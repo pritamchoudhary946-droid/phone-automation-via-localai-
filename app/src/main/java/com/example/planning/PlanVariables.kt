@@ -111,6 +111,7 @@ class PlanVariableStore {
         )
         is AgentAction.NavigateTo -> action.copy(target = substitute(action.target))
         is AgentAction.OpenAppInfo -> action.copy(packageName = substitute(action.packageName))
+        is AgentAction.OpenSettings -> action.copy(panel = substitute(action.panel))
         is AgentAction.Speak -> action.copy(text = substitute(action.text))
         is AgentAction.FinishTask -> action.copy(summary = substitute(action.summary))
         else -> action

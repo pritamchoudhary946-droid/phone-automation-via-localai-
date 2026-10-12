@@ -234,7 +234,13 @@ class AndroidDeviceAutomation(
     // control, so it is resolved before the a11y-service gate. It is opt-in: the
     // controller refuses honestly when speech output is off, and an unwired controller
     // gets an honest "unavailable" result rather than a silent no-op.
-    private val speakController: SpeakController? = null
+    private val speakController: SpeakController? = null,
+    // Opening a named system Settings panel is dispatched through the platform's
+    // documented Settings.ACTION_* intent, not an accessibility-tree control, so like the
+    // app-info/audio primitives it is resolved before the a11y-service gate. An unwired
+    // controller gets an honest "unavailable" result, never a silent no-op. It only opens
+    // the panel; it never changes anything there.
+    private val settingsController: SettingsController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -549,6 +555,24 @@ class AndroidDeviceAutomation(
             val controller = speakController
                 ?: return@withContext ActionResult(false, "SPEAK_UNAVAILABLE", "Speech output is not available")
             val result = controller.speak(action.text)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Opening a named system Settings panel is likewise service-free: it is dispatched
+        // through the platform's documented Settings.ACTION_* intent, so it is resolved
+        // before the a11y-service gate. This is the "open wifi settings" / "show bluetooth
+        // settings" / "open display settings" primitive. The panel is a closed set
+        // (SettingsPanel); an unknown panel is refused honestly and no intent is built.
+        // It only opens the panel for the user to act on and changes nothing itself, so it
+        // reports only that the intent was delivered.
+        if (action is AgentAction.OpenSettings) {
+            val panel = SettingsPanel.fromKey(action.panel)
+                ?: return@withContext ActionResult(
+                    false, "INVALID_SETTINGS_PANEL",
+                    "Unknown settings panel '${action.panel}'; expected one of: ${SettingsPanel.keys().joinToString(", ")}"
+                )
+            val controller = settingsController
+                ?: return@withContext ActionResult(false, "SETTINGS_UNAVAILABLE", "Settings dispatch is not available")
+            val result = controller.openPanel(panel)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

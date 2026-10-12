@@ -41,6 +41,9 @@ import com.example.agent.TorchController
 import com.example.agent.TorchResult
 import com.example.agent.SpeakController
 import com.example.agent.SpeakResult
+import com.example.agent.SettingsController
+import com.example.agent.SettingsPanel
+import com.example.agent.SettingsResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -1925,6 +1928,181 @@ class CapabilityUpgradeTest {
         assertTrue("a failed app-info dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- open_settings: the "open wifi / bluetooth / display settings" primitive ---
+
+    @Test
+    fun openSettingsExecutesWithoutAnAccessibilityService() {
+        val recorder = RecordingSettingsController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            settingsController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenSettings("wifi"))
+        }
+        assertTrue("settings must open without a bound a11y service: $result", result.success)
+        assertEquals("SETTINGS_OPENED", result.method)
+        assertEquals(listOf(SettingsPanel.WIFI), recorder.calls)
+    }
+
+    @Test
+    fun openSettingsRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            settingsController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenSettings("wifi"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("SETTINGS_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun openSettingsRejectsAnUnknownPanelBeforeDispatch() {
+        val recorder = RecordingSettingsController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            settingsController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenSettings("definitely_not_a_panel"))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_SETTINGS_PANEL", result.method)
+        assertTrue("an unknown panel must never touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun settingsPanelResolvesKeysAndAliases() {
+        // The closed enum resolver accepts canonical keys and natural aliases alike.
+        assertEquals(SettingsPanel.WIFI, SettingsPanel.fromKey("wifi"))
+        assertEquals(SettingsPanel.WIFI, SettingsPanel.fromKey("  Wi-Fi  "))
+        assertEquals(SettingsPanel.BLUETOOTH, SettingsPanel.fromKey("bluetooth"))
+        assertEquals(SettingsPanel.DISPLAY, SettingsPanel.fromKey("screen"))
+        assertEquals(SettingsPanel.DATE, SettingsPanel.fromKey("date_time"))
+        assertEquals(SettingsPanel.DND, SettingsPanel.fromKey("do-not-disturb"))
+        assertNull(SettingsPanel.fromKey(""))
+        assertNull(SettingsPanel.fromKey("nonsense"))
+    }
+
+    @Test
+    fun openSettingsParserCarriesThePanel() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Open wifi settings","action":"open_settings","params":{"panel":"wifi"},"expect":"wireless settings open","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Open bluetooth settings","action":"open_settings","params":{"section":"Bluetooth"},"expect":"bluetooth settings open","verify":"NONE"},
+          {"id":3,"seq":3,"desc":"Open display settings","action":"open_settings","params":{"name":"display"},"expect":"display settings open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "open wifi settings")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.OpenSettings("wifi"), steps[0].action)
+        assertEquals(AgentAction.OpenSettings("bluetooth"), steps[1].action)
+        assertEquals(AgentAction.OpenSettings("display"), steps[2].action)
+    }
+
+    @Test
+    fun validationAcceptsOpenSettingsAndRejectsAnUnknownPanel() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.OpenSettings("wifi")) is ToolValidationResult.Valid)
+        assertTrue(
+            "an unknown panel must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.OpenSettings("nonsense")) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun openSettingsSkillKeepsItsPanelOnReplay() {
+        val plan = com.example.planning.TaskPlan(
+            goal = "open bluetooth settings",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "open settings",
+                    action = AgentAction.OpenSettings("bluetooth"),
+                    rawActionName = "open_settings", expectedPostcondition = "settings open",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved settings skill must be replayable", restored != null)
+        assertEquals(AgentAction.OpenSettings("bluetooth"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesOpenSettings() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_OPEN_SETTINGS}",
+            actions.contains(ToolRegistry.TOOL_OPEN_SETTINGS)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "open wifi settings",
+                desiredOutcome = "wireless settings open",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing open_settings", prompt.contains("open_settings"))
+    }
+
+    @Test
+    fun openSettingsStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenSettings -> ActionResult(true, "SETTINGS_OPENED", "Opening ${action.panel} settings")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open wifi settings","action":"open_settings","params":{"panel":"wifi"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open wifi settings", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("open_settings must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.OpenSettings })
+    }
+
+    @Test
+    fun openSettingsFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenSettings -> ActionResult(false, "SETTINGS_UNAVAILABLE", "No settings app is available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open wifi settings","action":"open_settings","params":{"panel":"wifi"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open wifi settings", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed settings dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- set_torch: the "turn on the flashlight" primitive ---
 
     @Test
@@ -3604,6 +3782,16 @@ class CapabilityUpgradeTest {
         override fun openAppInfo(packageName: String): AppInfoResult {
             calls += packageName
             return AppInfoResult(true, "APP_INFO_OPENED", "Opening settings for $packageName")
+        }
+    }
+
+    private class RecordingSettingsController(
+        private val result: SettingsResult? = null
+    ) : SettingsController {
+        val calls = mutableListOf<SettingsPanel>()
+        override fun openPanel(panel: SettingsPanel): SettingsResult {
+            calls += panel
+            return result ?: SettingsResult(true, "SETTINGS_OPENED", "Opening ${panel.key} settings")
         }
     }
 

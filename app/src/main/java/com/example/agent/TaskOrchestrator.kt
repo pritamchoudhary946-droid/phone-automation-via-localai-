@@ -967,7 +967,7 @@ class TaskOrchestrator(
             is AgentAction.AddContact, is AgentAction.DialNumber,
             is AgentAction.SendSms, is AgentAction.ShareText,
             is AgentAction.SendEmail, is AgentAction.NavigateTo,
-            is AgentAction.OpenAppInfo, is AgentAction.SetTorch,
+            is AgentAction.OpenAppInfo, is AgentAction.OpenSettings, is AgentAction.SetTorch,
             // Speech output acts on the platform TTS engine (no screen reflects it), and
             // the executor reports SPOKEN only once the engine accepted the utterance.
             is AgentAction.Speak -> true
@@ -1159,6 +1159,7 @@ class TaskOrchestrator(
                 action is AgentAction.SendEmail ||
                 action is AgentAction.NavigateTo ||
                 action is AgentAction.OpenAppInfo ||
+                action is AgentAction.OpenSettings ||
                 action is AgentAction.SetTorch ||
                 action is AgentAction.Speak ||
                 action is AgentAction.ReadNotifications)

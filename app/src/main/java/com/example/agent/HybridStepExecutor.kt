@@ -263,6 +263,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic on-device speech output"
             )
 
+            is AgentAction.OpenSettings -> FastPathDecision.Execute(
+                action,
+                "deterministic system-settings dispatch"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"

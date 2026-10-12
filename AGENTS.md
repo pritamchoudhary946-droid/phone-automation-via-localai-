@@ -252,6 +252,24 @@ that the page was shown, so it reports only that the intent was *delivered*
 `APP_INFO_PERMISSION` / `APP_INFO_ERROR` / `INVALID_APP_INFO_PACKAGE` otherwise). The
 prompt must never let the model claim a setting was changed.
 
+`open_settings` (`AgentAction.OpenSettings` + `SettingsController` -> the documented
+`Settings.ACTION_*` panel intents) follows the same rule: no accessibility-tree read or
+UI tap opens a named system Settings panel (wifi/bluetooth/display/...) reliably on an
+arbitrary screen, so it is resolved before the a11y gate and lets the system Settings app
+show the panel. It carries a single `panel`; `SettingsPanel` is a *closed* enum mapping
+each named panel to its real `Settings.ACTION_*` constant, and
+`SettingsPanel.fromKey(...)` is a pure, unit-tested resolver that accepts canonical keys
+and natural aliases ("wi-fi", "screen" -> display) and returns null for an unknown value,
+so the executor refuses an unrecognised panel with `INVALID_SETTINGS_PANEL` before any
+intent is built (the tool boundary rejects it too). It is distinct from `open_app_info`
+(one app's page) and from `open_quick_settings` (the shade). It only *opens* the panel;
+the user decides what to change there, so a consequential change stays under the user's
+control (section 3.5). Because the Settings app is a separate process the app cannot read
+back that the panel was shown, so it reports only that the intent was *delivered*
+(`SETTINGS_OPENED`) and never claims a setting was changed (`SETTINGS_UNAVAILABLE` /
+`SETTINGS_PERMISSION` / `INVALID_SETTINGS_PANEL` otherwise). The prompt must never let the
+model claim a setting was changed.
+
 `set_torch` (`AgentAction.SetTorch` + `TorchController` -> `CameraManager.setTorchMode`
 on the back camera with a flash unit) follows the same rule: the torch is a
 camera-hardware setting no accessibility-tree read or UI tap toggles reliably on an
@@ -523,7 +541,7 @@ output is off, read live per call by `AgentPlanner`.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
-  `open_app_info`, `set_torch`,
+  `open_app_info`, `open_settings`, `set_torch`,
   `speak` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
@@ -531,7 +549,8 @@ output is off, read live per call by `AgentPlanner`.
   dialer via `Intent.ACTION_DIAL`, the messaging app via `Intent.ACTION_SENDTO`, the
   platform share sheet via `Intent.ACTION_SEND`, the mail app via `Intent.ACTION_SENDTO`
   `mailto:`, the maps app via `Intent.ACTION_VIEW` `geo:`, the Settings app via
-  `Settings.ACTION_APPLICATION_DETAILS_SETTINGS`, the text-to-speech engine via
+  `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` (app info) or the named
+  `Settings.ACTION_*` panels (open_settings), the text-to-speech engine via
   `TextToSpeech`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
@@ -557,6 +576,8 @@ output is off, read live per call by `AgentPlanner`.
   delivered to a maps app (`NAV_UNAVAILABLE` otherwise), and `open_app_info` reports
   `APP_INFO_OPENED` only after the `ACTION_APPLICATION_DETAILS_SETTINGS` `package:`
   intent was delivered to a settings app (`APP_INFO_UNAVAILABLE` otherwise), and
+  `open_settings` reports `SETTINGS_OPENED` only after the `Settings.ACTION_*` panel
+  intent was delivered to the Settings app (`SETTINGS_UNAVAILABLE` otherwise), and
   `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
   confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the

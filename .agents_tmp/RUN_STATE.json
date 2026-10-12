@@ -1,9 +1,9 @@
 {
   "project_done": false,
-  "sessions_done": 35,
+  "sessions_done": 36,
   "session_cap": 48,
-  "current_milestone": "Capability: speak (on-device TTS) primitive (AgentAction.Speak + SpeakController/AndroidSpeakController -> platform TextToSpeech), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed primitives. Opt-in gated by the existing voiceOutputEnabled setting (live lambda), refused honestly with SPEAK_DISABLED when off, both in the executor and in the advertised prompt catalogue.",
-  "milestone_status": "done",
+  "current_milestone": "Capability: open_settings (named system Settings panel primitive; AgentAction.OpenSettings + SettingsController/AndroidSettingsController. A *closed* SettingsPanel enum maps each named panel to a documented Settings.ACTION_* constant; an unknown panel is refused honestly with INVALID_SETTINGS_PANEL before any intent is built (and at the tool boundary). Wired through all seven action-vocabulary seams and self-evidencing like the other service-free intent-dispatch primitives.)",
+  "milestone_status": "in_progress",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
     "recording: saveWatchedSkill now stores the catalog tool name (ToolRegistry.TOOL_*) instead of the Kotlin class name, so a watched skill is replayable",
@@ -164,13 +164,15 @@
     "regression tests 2026-10-12 (session 35, CapabilityUpgradeTest +9): speakExecutesWithoutAnAccessibilityService, speakRefusesHonestlyWhenUnwired, speakDisabledIsReportedAsFailure, speakParserCarriesTheText, validationAcceptsSpeakAndRejectsBlankOrOversizedText, speakSkillKeepsItsTextOnReplay, promptAdvertisesSpeakOnlyWhenVoiceOutputIsOn, speakStepCompletesFromItsOwnHonestResult, speakFailureIsNotMaskedByTheSelfEvidencingRule.",
     "validation 2026-10-12 (session 35, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m48s, 421 tests 0 failures 0 errors 0 skipped (412 baseline + 9 new speak tests).",
     "AGENTS.md 2026-10-12 (session 35): documented the speak service-backed, opt-in primitive and added it to the self-evidencing service-backed list (text-to-speech engine via TextToSpeech).",
-    "validation 2026-10-12 (session 35, final): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m41s; app-debug.apk produced. Both gates green (421 unit tests + APK)."
+    "validation 2026-10-12 (session 35, final): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m41s; app-debug.apk produced. Both gates green (421 unit tests + APK).",
+    "capability 2026-10-12 (session 36): new AgentAction.OpenSettings + tool open_settings ('open wifi/bluetooth/display/accessibility settings'). A closed SettingsPanel enum (24 panels) maps named panels to documented Settings.ACTION_* constants; SettingsPanel.fromKey resolves keys and natural aliases and returns null for an unknown value, so an unrecognised panel is INVALID_SETTINGS_PANEL. Wired through all seven seams (AgentAction, ToolRegistry const/ToolDefinition/validateAction, TaskPlanParser, HybridStepExecutor fast path, PlannerPromptBuilder.ACTION_CATALOG, AndroidDeviceAutomation.execute service-free branch before the a11y gate, TaskPlanSerializer toParams/toVerificationTarget/toolNameFor) plus PlanVariables.substitute and the TaskOrchestrator self-evidencing lists. Distinct from open_app_info (one app's page) and open_quick_settings (the shade).",
+    "validation 2026-10-12 (session 36, toolchain present: JAVA_HOME=/workspace/tools/jdk-21.0.5+11, ANDROID_HOME=/workspace/tools/android-sdk): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m10s, 431 tests 0 failures 0 errors (421 baseline + 10 new open_settings tests)."
   ],
-  "in_progress": {
-    "item": "",
-    "step": "",
-    "note": ""
-  },
+  "in_progress": [
+    "open_settings implemented across AgentAction, SettingsController.kt (SettingsPanel enum + SettingsController + AndroidSettingsController), HybridStepExecutor fast path, PlannerPromptBuilder catalogue, TaskPlanParser.mapAction, TaskPlanSerializer (toParams/toolNameFor), PlanVariables.substitute, DeviceAutomation.execute (service-free branch before the a11y gate), TaskOrchestrator self-evidencing lists, ToolRegistry (const/ToolDefinition/validateAction), OmniAgentApplication DI wiring.",
+    "10 new CapabilityUpgradeTest cases added and the full unit suite is GREEN: 431 tests, 0 failures.",
+    "Remaining this run: run assembleDebug, open PR, auto-merge per section 18, write the seven-section report."
+  ],
   "next_items": [
     "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Remaining investigated gap: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT). The on-device TTS speak gap is now closed.",
     "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - reconcile the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2).",
@@ -181,9 +183,9 @@
   "open_pr": 70,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261012T1931Z",
-  "last_updated": "2026-10-12T19:48:00Z",
-  "carryover_milestone": null,
+  "last_run_id": "auto/jarvis-autonomy-20261012-2040",
+  "last_updated": "2026-10-12T20:55:00Z",
+  "carryover_milestone": "open_settings",
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
