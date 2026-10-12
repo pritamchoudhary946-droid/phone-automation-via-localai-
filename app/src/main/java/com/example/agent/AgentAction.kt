@@ -160,6 +160,24 @@ sealed class AgentAction {
         val seconds: Int = 300,
         val label: String? = null
     ) : AgentAction()
+    /**
+     * Adds a calendar event titled [title] on [dayOffset] (0 = today, 1 = tomorrow),
+     * starting at [startHour]:[startMinute] (24-hour clock) for [durationMinutes],
+     * optionally at [location]. This is the "add lunch with Sam tomorrow at 1pm"
+     * primitive. Like [SetAlarm]/[SetTimer] no accessibility-tree read or UI tap can
+     * add an event reliably on an arbitrary screen, so it is dispatched through the
+     * platform [android.provider.CalendarContract] insert intent and resolved before
+     * the accessibility-service gate. The planner resolves a relative day ("tomorrow")
+     * from the prompt's current date into the numeric [dayOffset].
+     */
+    data class AddCalendarEvent(
+        val title: String,
+        val dayOffset: Int = 0,
+        val startHour: Int = 9,
+        val startMinute: Int = 0,
+        val durationMinutes: Int = 60,
+        val location: String? = null
+    ) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -219,6 +237,12 @@ sealed class AgentAction {
                 (label?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "")
             is SetTimer -> "Start a timer for ${formatTimerSeconds(seconds)}" +
                 (label?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "")
+            is AddCalendarEvent -> "Add calendar event '$title' at %02d:%02d".format(startHour, startMinute) +
+                when (dayOffset) {
+                    0 -> " today"
+                    1 -> " tomorrow"
+                    else -> " in $dayOffset days"
+                }
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

@@ -86,6 +86,10 @@ class PlanVariableStore {
         is AgentAction.LongPress -> action.copy(targetText = action.targetText?.let(::substitute))
         is AgentAction.SetAlarm -> action.copy(label = action.label?.let(::substitute))
         is AgentAction.SetTimer -> action.copy(label = action.label?.let(::substitute))
+        is AgentAction.AddCalendarEvent -> action.copy(
+            title = substitute(action.title),
+            location = action.location?.let(::substitute)
+        )
         is AgentAction.FinishTask -> action.copy(summary = substitute(action.summary))
         else -> action
     }

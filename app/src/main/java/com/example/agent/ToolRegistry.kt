@@ -48,6 +48,7 @@ open class ToolRegistry {
         const val TOOL_PLAY_MEDIA = "play_media"
         const val TOOL_SET_ALARM = "set_alarm"
         const val TOOL_SET_TIMER = "set_timer"
+        const val TOOL_ADD_CALENDAR_EVENT = "add_calendar_event"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -62,6 +63,12 @@ open class ToolRegistry {
 
         /** Longest countdown timer the tool accepts: 24 hours, in seconds. */
         const val MAX_TIMER_SECONDS = 24 * 60 * 60
+
+        /** Longest forward day offset a calendar event may be scheduled for. */
+        const val MAX_EVENT_DAY_OFFSET = 30
+
+        /** Longest calendar event duration the tool accepts: 24 hours, in minutes. */
+        const val MAX_EVENT_DURATION_MINUTES = 24 * 60
     }
 
     private val tools = mapOf(
@@ -217,6 +224,12 @@ open class ToolRegistry {
             description = "Starts a countdown timer for a duration in seconds. Use for 'set a timer for 10 minutes', 'start a 25-minute timer'. Distinct from an alarm (which fires at a clock time); no screen read or tap can start a timer reliably",
             requiredParameters = listOf("seconds"),
             optionalParameters = listOf("label")
+        ),
+        TOOL_ADD_CALENDAR_EVENT to ToolDefinition(
+            name = TOOL_ADD_CALENDAR_EVENT,
+            description = "Adds an event to the user's calendar. Use for 'add lunch with Sam tomorrow at 1pm', 'put the standup on my calendar at 9:30'. Provide a title and the start time; dayOffset is 0 for today, 1 for tomorrow. No screen read or tap can add an event reliably",
+            requiredParameters = listOf("title"),
+            optionalParameters = listOf("dayOffset", "startHour", "startMinute", "durationMinutes", "location")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -458,6 +471,25 @@ open class ToolRegistry {
                     )
                 } else {
                     ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.AddCalendarEvent -> {
+                when {
+                    action.title.isBlank() ->
+                        ToolValidationResult.Invalid("add_calendar_event requires a non-blank title")
+                    action.dayOffset !in 0..MAX_EVENT_DAY_OFFSET ->
+                        ToolValidationResult.Invalid(
+                            "add_calendar_event dayOffset must be between 0 and $MAX_EVENT_DAY_OFFSET: ${action.dayOffset}"
+                        )
+                    action.startHour !in 0..23 || action.startMinute !in 0..59 ->
+                        ToolValidationResult.Invalid(
+                            "add_calendar_event start time must be a valid 24-hour time (hour 0-23, minute 0-59): ${action.startHour}:${action.startMinute}"
+                        )
+                    action.durationMinutes <= 0 || action.durationMinutes > MAX_EVENT_DURATION_MINUTES ->
+                        ToolValidationResult.Invalid(
+                            "add_calendar_event durationMinutes must be between 1 and $MAX_EVENT_DURATION_MINUTES (24 hours): ${action.durationMinutes}"
+                        )
+                    else -> ToolValidationResult.Valid
                 }
             }
             is AgentAction.Wait -> {

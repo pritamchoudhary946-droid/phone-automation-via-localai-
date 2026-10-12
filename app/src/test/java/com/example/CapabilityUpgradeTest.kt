@@ -6,6 +6,7 @@ import com.example.agent.ActionResult
 import com.example.agent.AlarmController
 import com.example.agent.AlarmResult
 import com.example.agent.AgentAction
+import com.example.agent.AndroidCalendarController
 import com.example.agent.AndroidDeviceAutomation
 import com.example.agent.AndroidDeviceStatusReader
 import com.example.agent.AppDirectory
@@ -14,6 +15,8 @@ import com.example.agent.DeviceStatusResult
 import com.example.agent.AudioAdjustResult
 import com.example.agent.AudioController
 import com.example.agent.AudioStream
+import com.example.agent.CalendarController
+import com.example.agent.CalendarResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -903,6 +906,246 @@ class CapabilityUpgradeTest {
         assertTrue("a failed timer dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- add_calendar_event: the "add lunch with Sam tomorrow at 1pm" primitive ---
+
+    @Test
+    fun calendarEventBeginTimeResolvesRelativeDayAndTime() {
+        // The calendar editor receives an absolute begin time; "tomorrow at 1pm" must
+        // resolve to the next day at 13:00 in the device zone, not to today or to 01:00.
+        val zone = java.util.TimeZone.getTimeZone("UTC")
+        val now = 1768435200000L // 2026-01-15T00:00:00Z
+        assertEquals(1768467600000L, AndroidCalendarController.beginMillis(now, zone, 0, 9, 0))  // today 09:00
+        assertEquals(1768568400000L, AndroidCalendarController.beginMillis(now, zone, 1, 13, 0)) // tomorrow 13:00
+        assertEquals(1768608000000L, AndroidCalendarController.beginMillis(now, zone, 2, 0, 0))  // +2 days 00:00
+    }
+
+    @Test
+    fun addCalendarEventExecutesWithoutAnAccessibilityService() {
+        // The calendar insert is dispatched through the platform CalendarContract
+        // ACTION_INSERT intent, so like the alarm/timer/audio primitives it is
+        // service-free and must resolve before the a11y gate.
+        val recorder = RecordingCalendarController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            calendarController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(
+                AgentAction.AddCalendarEvent(
+                    title = "Lunch with Sam",
+                    dayOffset = 1,
+                    startHour = 13,
+                    startMinute = 0,
+                    durationMinutes = 60,
+                    location = "Cafe"
+                )
+            )
+        }
+
+        assertTrue("event must be addable without a bound a11y service: $result", result.success)
+        assertEquals("CALENDAR_DISPATCHED", result.method)
+        assertEquals(
+            listOf(RecordingCalendarController.Call("Lunch with Sam", 1, 13, 0, 60, "Cafe")),
+            recorder.calls
+        )
+    }
+
+    @Test
+    fun addCalendarEventRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            calendarController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AddCalendarEvent(title = "Standup"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("CALENDAR_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun addCalendarEventRejectsInvalidFields() {
+        val recorder = RecordingCalendarController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            calendarController = recorder
+        )
+        val blank = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AddCalendarEvent(title = "  "))
+        }
+        assertFalse(blank.success)
+        assertEquals("INVALID_EVENT_TITLE", blank.method)
+        val badDay = kotlinx.coroutines.runBlocking {
+            automation.execute(
+                AgentAction.AddCalendarEvent(title = "X", dayOffset = ToolRegistry.MAX_EVENT_DAY_OFFSET + 1)
+            )
+        }
+        assertFalse(badDay.success)
+        assertEquals("INVALID_EVENT_DAY", badDay.method)
+        val badTime = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AddCalendarEvent(title = "X", startHour = 24))
+        }
+        assertFalse(badTime.success)
+        assertEquals("INVALID_EVENT_TIME", badTime.method)
+        val badDuration = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.AddCalendarEvent(title = "X", durationMinutes = 0))
+        }
+        assertFalse(badDuration.success)
+        assertEquals("INVALID_EVENT_DURATION", badDuration.method)
+        assertTrue("an invalid event must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun addCalendarEventParserResolvesRelativeDayAndMeridiem() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Lunch tomorrow","action":"add_calendar_event","params":{"title":"Lunch with Sam","day":"tomorrow","startHour":1,"amPm":"pm","startMinute":0,"durationMinutes":60},"expect":"event added","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Standup today","action":"add_calendar_event","params":{"title":"Standup","startHour":9,"startMinute":30},"expect":"event added","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "add lunch with Sam tomorrow at 1pm")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(
+            AgentAction.AddCalendarEvent(title = "Lunch with Sam", dayOffset = 1, startHour = 13, startMinute = 0, durationMinutes = 60),
+            steps[0].action
+        )
+        assertEquals(
+            AgentAction.AddCalendarEvent(title = "Standup", dayOffset = 0, startHour = 9, startMinute = 30, durationMinutes = 60),
+            steps[1].action
+        )
+    }
+
+    @Test
+    fun validationAcceptsAddCalendarEventAndRejectsInvalidFields() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.AddCalendarEvent(title = "Standup")) is ToolValidationResult.Valid)
+        assertTrue(
+            "a blank title must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.AddCalendarEvent(title = "")) !is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "an out-of-range day offset must be rejected at the tool boundary",
+            registry.validateAction(
+                AgentAction.AddCalendarEvent(title = "X", dayOffset = ToolRegistry.MAX_EVENT_DAY_OFFSET + 1)
+            ) !is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "an invalid 24-hour time must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.AddCalendarEvent(title = "X", startHour = 24)) !is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "a zero duration must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.AddCalendarEvent(title = "X", durationMinutes = 0)) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun addCalendarEventSkillKeepsItsFieldsOnReplay() {
+        // A learned calendar skill must not replay at the defaults (today 09:00, 60m).
+        val plan = com.example.planning.TaskPlan(
+            goal = "add lunch with Sam tomorrow at 1pm",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "add the event",
+                    action = AgentAction.AddCalendarEvent(
+                        title = "Lunch with Sam", dayOffset = 1, startHour = 13,
+                        startMinute = 0, durationMinutes = 90, location = "Cafe"
+                    ),
+                    rawActionName = "add_calendar_event", expectedPostcondition = "event added",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved calendar skill must be replayable", restored != null)
+        assertEquals(
+            AgentAction.AddCalendarEvent(
+                title = "Lunch with Sam", dayOffset = 1, startHour = 13,
+                startMinute = 0, durationMinutes = 90, location = "Cafe"
+            ),
+            restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun promptAdvertisesAddCalendarEvent() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_ADD_CALENDAR_EVENT}",
+            actions.contains(ToolRegistry.TOOL_ADD_CALENDAR_EVENT)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "add lunch with Sam tomorrow at 1pm",
+                desiredOutcome = "event on the calendar",
+                foregroundPackage = "com.android.calendar",
+                screenSummary = "Calendar",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing add_calendar_event", prompt.contains("add_calendar_event"))
+    }
+
+    @Test
+    fun addCalendarEventStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The event is created by the calendar app, a separate process no accessibility
+        // screen reflects, so the step's default NONE verification can never be satisfied
+        // from a fresh screen. The executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.AddCalendarEvent -> ActionResult(true, "CALENDAR_DISPATCHED", "Opening calendar to add 'Lunch with Sam' at 13:00 tomorrow")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Add the event","action":"add_calendar_event","params":{"title":"Lunch with Sam","dayOffset":1,"startHour":13},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("add lunch with Sam tomorrow at 1pm", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("add_calendar_event must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.AddCalendarEvent })
+    }
+
+    @Test
+    fun addCalendarEventFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no calendar app (CALENDAR_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.AddCalendarEvent -> ActionResult(false, "CALENDAR_UNAVAILABLE", "No calendar app is available to add an event")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Add the event","action":"add_calendar_event","params":{"title":"Lunch"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("add lunch tomorrow", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed calendar dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- clear_text: the "empty the field before retyping" primitive ---
 
     @Test
@@ -1555,6 +1798,30 @@ class CapabilityUpgradeTest {
         override fun setTimer(seconds: Int, label: String?): TimerResult {
             calls += Call(seconds, label)
             return TimerResult(true, "TIMER_DISPATCHED", "Timer set for ${seconds}s")
+        }
+    }
+
+    private class RecordingCalendarController : CalendarController {
+        data class Call(
+            val title: String,
+            val dayOffset: Int,
+            val startHour: Int,
+            val startMinute: Int,
+            val durationMinutes: Int,
+            val location: String?
+        )
+
+        val calls = mutableListOf<Call>()
+        override fun addEvent(
+            title: String,
+            dayOffset: Int,
+            startHour: Int,
+            startMinute: Int,
+            durationMinutes: Int,
+            location: String?
+        ): CalendarResult {
+            calls += Call(title, dayOffset, startHour, startMinute, durationMinutes, location)
+            return CalendarResult(true, "CALENDAR_DISPATCHED", "Opening calendar to add '$title'")
         }
     }
 

@@ -172,7 +172,13 @@ class AndroidDeviceAutomation(
     // The countdown timer is likewise dispatched through the platform AlarmClock intent
     // (ACTION_SET_TIMER), service-free, so it is resolved before the a11y-service gate
     // exactly like the alarm. An unwired controller gets an honest "unavailable" result.
-    private val timerController: TimerController? = null
+    private val timerController: TimerController? = null,
+    // Adding a calendar event is dispatched through the platform CalendarContract
+    // ACTION_INSERT intent (the calendar's own editor, pre-filled), not an
+    // accessibility-tree control, so like the alarm/timer primitives it is resolved
+    // before the a11y-service gate. An unwired controller gets an honest "unavailable"
+    // result, never a silent no-op.
+    private val calendarController: CalendarController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -319,6 +325,36 @@ class AndroidDeviceAutomation(
             val controller = timerController
                 ?: return@withContext ActionResult(false, "TIMER_UNAVAILABLE", "Timer scheduling is not available")
             val result = controller.setTimer(action.seconds, action.label)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Adding a calendar event is likewise service-free: it is dispatched through the
+        // platform CalendarContract ACTION_INSERT intent, so it is resolved before the
+        // a11y-service gate. This is the "add lunch with Sam tomorrow at 1pm" primitive
+        // the planner advertises. Like set_alarm it reports only that the intent was
+        // delivered to a calendar app (the event is created by a separate process).
+        if (action is AgentAction.AddCalendarEvent) {
+            if (action.title.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_EVENT_TITLE", "Calendar event title must not be blank")
+            }
+            if (action.dayOffset !in 0..com.example.agent.ToolRegistry.MAX_EVENT_DAY_OFFSET) {
+                return@withContext ActionResult(false, "INVALID_EVENT_DAY", "Invalid event day offset ${action.dayOffset}")
+            }
+            if (action.startHour !in 0..23 || action.startMinute !in 0..59) {
+                return@withContext ActionResult(false, "INVALID_EVENT_TIME", "Invalid event start time ${action.startHour}:${action.startMinute}")
+            }
+            if (action.durationMinutes <= 0 || action.durationMinutes > com.example.agent.ToolRegistry.MAX_EVENT_DURATION_MINUTES) {
+                return@withContext ActionResult(false, "INVALID_EVENT_DURATION", "Invalid event duration ${action.durationMinutes}m")
+            }
+            val controller = calendarController
+                ?: return@withContext ActionResult(false, "CALENDAR_UNAVAILABLE", "Calendar event insert is not available")
+            val result = controller.addEvent(
+                action.title,
+                action.dayOffset,
+                action.startHour,
+                action.startMinute,
+                action.durationMinutes,
+                action.location
+            )
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

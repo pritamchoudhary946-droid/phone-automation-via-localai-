@@ -964,7 +964,7 @@ class TaskOrchestrator(
             // evidence, exactly like the read actions above.
             is AgentAction.AdjustVolume, is AgentAction.PlayMedia,
             is AgentAction.SetRingerMode, is AgentAction.SetAlarm,
-            is AgentAction.SetTimer -> true
+            is AgentAction.SetTimer, is AgentAction.AddCalendarEvent -> true
             else -> false
         }
     }
@@ -1149,6 +1149,7 @@ class TaskOrchestrator(
                 action is AgentAction.SetRingerMode ||
                 action is AgentAction.SetAlarm ||
                 action is AgentAction.SetTimer ||
+                action is AgentAction.AddCalendarEvent ||
                 action is AgentAction.ReadNotifications)
         ) {
             val detail = if (action is AgentAction.ReadNotifications) {
