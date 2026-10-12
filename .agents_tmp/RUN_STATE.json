@@ -3,7 +3,7 @@
   "sessions_done": 34,
   "session_cap": 48,
   "current_milestone": "Capability: set_torch flashlight primitive (AgentAction.SetTorch + TorchController/AndroidTorchController -> CameraManager.setTorchMode with a read-back via TorchCallback), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed primitives. Reads the state back so an ignored toggle is TORCH_UNCHANGED (failure), never a fake success.",
-  "milestone_status": "in_progress",
+  "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
     "recording: saveWatchedSkill now stores the catalog tool name (ToolRegistry.TOOL_*) instead of the Kotlin class name, so a watched skill is replayable",
@@ -156,12 +156,13 @@
     "fix 2026-10-12 (session 34): comma typo in TaskOrchestrator.selfEvidencingToolSatisfied when-list (is AgentAction.OpenAppInfo -> true, is AgentAction.SetTorch -> true) produced a Kotlin syntax error; the unit gate caught it before merge (rewritten as a single comma-joined condition list).",
     "regression tests 2026-10-12 (session 34, CapabilityUpgradeTest +10): setTorchExecutesWithoutAnAccessibilityService, setTorchOffReachesTheController, setTorchRefusesHonestlyWhenUnwired, setTorchUnchangedIsReportedAsFailure, setTorchParserCarriesTheOnValue, validationAcceptsSetTorch, setTorchSkillKeepsItsStateOnReplay, promptAdvertisesSetTorch, setTorchStepCompletesFromItsOwnHonestResult, setTorchFailureIsNotMaskedByTheSelfEvidencingRule.",
     "validation 2026-10-12 (session 34, toolchain bootstrapped): apt openjdk-21-jdk-headless + Android SDK cmdline-tools -> /opt/android-sdk platforms;android-36.1 build-tools;36.1.0; SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 3m11s, 412 tests 0 failures 0 errors 0 skipped (402 baseline + 10 new set_torch tests).",
-    "AGENTS.md 2026-10-12 (session 34): documented the set_torch service-backed primitive and added it to the self-evidencing service-backed list (torch via CameraManager.setTorchMode)."
+    "AGENTS.md 2026-10-12 (session 34): documented the set_torch service-backed primitive and added it to the self-evidencing service-backed list (torch via CameraManager.setTorchMode).",
+    "validation 2026-10-12 (session 34, final): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m40s; app-debug.apk produced (66 MB). Both gates green (unit tests + APK)."
   ],
   "in_progress": {
-    "item": "set_torch capability",
-    "step": "unit gate green (412 tests); APK build pending; PR pending",
-    "note": "Toolchain bootstrapped in-sandbox: JDK21 apt + Android SDK platform 36.1 / build-tools 36.1.0 into /opt/android-sdk."
+    "item": "",
+    "step": "",
+    "note": ""
   },
   "next_items": [
     "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Remaining investigated gaps: on-device TTS speak (TextToSpeech), file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
@@ -174,7 +175,7 @@
   "risky_actions_done": [],
   "blockers": [],
   "last_run_id": "internal-20261012T1850Z",
-  "last_updated": "2026-10-12T19:00:00Z",
+  "last_updated": "2026-10-12T19:05:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
@@ -184,8 +185,8 @@
     "evidence_reviewed": "main @8605663 (session 33 open_app_info done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the open_app_info/navigate_to reference implementations; AudioController/RingerModeController read-back pattern; ToolRegistry, TaskPlanParser, TaskPlanSerializer, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, AndroidDeviceAutomation, TaskOrchestrator, OmniAgentApplication.",
     "findings": "The section 2.1 gap 'torch/flashlight' had no vocabulary - a launch_app cannot toggle the torch, and no accessibility read/tap toggles it reliably on an arbitrary screen (it may be off-screen in quick settings). The AudioManager/RingerMode service-free + read-back pattern is the exact template.",
     "milestone_implemented": "set_torch (AgentAction.SetTorch + TorchController/AndroidTorchController via CameraManager.setTorchMode).",
-    "validation": "Toolchain bootstrapped in-sandbox (JDK21 + Android SDK platform 36.1 / build-tools 36.1.0); SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL, 412 tests 0 failures 0 errors 0 skipped.",
-    "remaining_work": "Run :app:assembleDebug; open PR and merge per section 18; continue capability backlog (TTS speak, file pick).",
+    "validation": "Toolchain bootstrapped in-sandbox (JDK21 apt + Android SDK platform 36.1 / build-tools 36.1.0); SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL, 412 tests 0 failures 0 errors 0 skipped (402 baseline + 10 new set_torch tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.",
+    "remaining_work": "Open PR and merge per section 18 (this run); continue capability backlog (on-device TTS speak, file/document picking).",
     "honesty": "The torch state is read back via CameraManager.TorchCallback, so set_torch reports TORCH_ON/TORCH_OFF only on a confirmed change and TORCH_UNCHANGED otherwise; it never claims success on a device with no flash (TORCH_UNAVAILABLE). Real-device validation not performed in this sandbox (unit gate only)."
   }
 }
