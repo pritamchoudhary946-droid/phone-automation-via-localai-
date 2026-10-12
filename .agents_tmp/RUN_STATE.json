@@ -3,7 +3,7 @@
   "sessions_done": 23,
   "session_cap": 48,
   "current_milestone": "Capability/flexibility: planner now receives the device's CURRENT LOCAL DATE/TIME (PlannerPromptBuilder.formatDateTime, pure + unit-tested). Without it the model cannot resolve a relative time ('in 20 minutes', 'tomorrow at 7am') into the absolute hour/minute that set_alarm requires, so time-relative instructions were unplannable. Wired at both live call sites (AgentPlanner.plan with a withCurrentDateTime() default, TaskOrchestrator cloud prompt); deterministic in tests because a caller-supplied value wins.",
-  "milestone_status": "in_progress",
+  "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
     "recording: saveWatchedSkill now stores the catalog tool name (ToolRegistry.TOOL_*) instead of the Kotlin class name, so a watched skill is replayable",
@@ -91,12 +91,15 @@
     "capability 2026-10-12 (session 22): SetAlarm is self-evidencing. TaskOrchestrator.verifyAction accepts a successful result for a NONE-verified SetAlarm as the step evidence, and selfEvidencingToolSatisfied counts a completed SetAlarm as goal evidence (same rule as adjust_volume/play_media/set_ringer_mode/read_notifications).",
     "regression tests 2026-10-12 (session 22, CapabilityUpgradeTest +9): setAlarmExecutesWithoutAnAccessibilityService, setAlarmRefusesHonestlyWhenUnwired, setAlarmRejectsAnInvalidTime, setAlarmParserCarriesTimeLabelAndDays, validationAcceptsSetAlarmAndRejectsAnInvalidTime, setAlarmSkillKeepsItsTimeLabelAndDaysOnReplay, promptAdvertisesSetAlarm, setAlarmStepCompletesFromItsOwnHonestResult, setAlarmFailureIsNotMaskedByTheSelfEvidencingRule.",
     "validation 2026-10-12 (session 22, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m4s, 322 tests 0 failures 0 errors 0 skipped (19 suites; 313 baseline + 9 new). ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m44s, app-debug.apk produced (115 MB).",
-    "AGENTS.md 2026-10-12 (session 22): action-vocabulary notes and the service-backed self-evidencing invariant now list set_alarm / ALARM_DISPATCHED / ALARM_UNAVAILABLE."
+    "AGENTS.md 2026-10-12 (session 22): action-vocabulary notes and the service-backed self-evidencing invariant now list set_alarm / ALARM_DISPATCHED / ALARM_UNAVAILABLE.",
+    "capability/flexibility 2026-10-12 (session 23): the planner now receives the device's CURRENT LOCAL DATE/TIME. New pure PlannerPromptBuilder.formatDateTime(epochMillis, zone) renders 'yyyy-MM-dd HH:mm EEEE' in the device timezone; PlanningRequest gains currentDateTime (default \"\"); the planning prompt emits 'Current date/time: <value>'. AgentPlanner.plan fills it via PlanningRequest.withCurrentDateTime() when the caller left it blank (a caller-supplied value wins, so tests stay deterministic), and TaskOrchestrator's cloud planning prompt passes formatDateTime(System.currentTimeMillis()). Without a clock the model cannot resolve a relative time ('in 20 minutes', 'tomorrow at 7am') into the absolute hour/minute that set_alarm needs - so time-relative instructions were unplannable. Blank degrades to the previous prompt (no crash, no fabrication).",
+    "regression tests 2026-10-12 (session 23, CapabilityUpgradeTest +3): formatDateTimeRendersTheLocalClockForThePrompt (pure formatter, fixed epoch+UTC -> '1970-01-01 00:00 Thursday'), planningPromptCarriesTheCurrentDateTimeForRelativeTimeResolution (supplied value reaches the prompt), planTaskInjectsTheCurrentDateTimeWhenTheCallerOmitsIt (AgentPlanner default fills a non-blank 'Current date/time: ' line through the live planTask path).",
+    "validation 2026-10-12 (session 23, toolchain present): baseline before change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 322 tests 0 failures 0 errors. After change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m11s, 325 tests 0 failures 0 errors 0 skipped (19 suites; 322 baseline + 3 new)."
   ],
   "in_progress": {
-    "item": "planner current-date/time",
-    "step": "implementation done; running :app:testDebugUnitTest to validate",
-    "note": "PlannerModels.kt PlanningRequest.currentDateTime, PlannerPromptBuilder.formatDateTime + prompt line, AgentPlanner.withCurrentDateTime default, TaskOrchestrator cloud prompt; 3 new CapabilityUpgradeTest cases."
+    "item": "",
+    "step": "",
+    "note": ""
   },
   "next_items": [
     "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Candidate: calendar/contacts intent actions (section 2.1) - none exist yet.",
@@ -110,8 +113,8 @@
   "risky_actions_done": [],
   "blockers": [],
   "last_run_id": "internal-20261012T0131Z",
-  "last_updated": "2026-10-12T01:40:00Z",
-  "carryover_milestone": "Capability/flexibility: planner now receives the device's CURRENT LOCAL DATE/TIME (PlannerPromptBuilder.formatDateTime, pure + unit-tested). Without it the model cannot resolve a relative time ('in 20 minutes', 'tomorrow at 7am') into the absolute hour/minute that set_alarm requires, so time-relative instructions were unplannable. Wired at both live call sites (AgentPlanner.plan with a withCurrentDateTime() default, TaskOrchestrator cloud prompt); deterministic in tests because a caller-supplied value wins.",
+  "last_updated": "2026-10-12T01:50:00Z",
+  "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": []
