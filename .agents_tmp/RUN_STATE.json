@@ -1,6 +1,6 @@
 {
   "project_done": false,
-  "sessions_done": 23,
+  "sessions_done": 24,
   "session_cap": 48,
   "current_milestone": "Capability/flexibility: planner now receives the device's CURRENT LOCAL DATE/TIME (PlannerPromptBuilder.formatDateTime, pure + unit-tested). Without it the model cannot resolve a relative time ('in 20 minutes', 'tomorrow at 7am') into the absolute hour/minute that set_alarm requires, so time-relative instructions were unplannable. Wired at both live call sites (AgentPlanner.plan with a withCurrentDateTime() default, TaskOrchestrator cloud prompt); deterministic in tests because a caller-supplied value wins.",
   "milestone_status": "done",
@@ -95,7 +95,9 @@
     "capability/flexibility 2026-10-12 (session 23): the planner now receives the device's CURRENT LOCAL DATE/TIME. New pure PlannerPromptBuilder.formatDateTime(epochMillis, zone) renders 'yyyy-MM-dd HH:mm EEEE' in the device timezone; PlanningRequest gains currentDateTime (default \"\"); the planning prompt emits 'Current date/time: <value>'. AgentPlanner.plan fills it via PlanningRequest.withCurrentDateTime() when the caller left it blank (a caller-supplied value wins, so tests stay deterministic), and TaskOrchestrator's cloud planning prompt passes formatDateTime(System.currentTimeMillis()). Without a clock the model cannot resolve a relative time ('in 20 minutes', 'tomorrow at 7am') into the absolute hour/minute that set_alarm needs - so time-relative instructions were unplannable. Blank degrades to the previous prompt (no crash, no fabrication).",
     "regression tests 2026-10-12 (session 23, CapabilityUpgradeTest +3): formatDateTimeRendersTheLocalClockForThePrompt (pure formatter, fixed epoch+UTC -> '1970-01-01 00:00 Thursday'), planningPromptCarriesTheCurrentDateTimeForRelativeTimeResolution (supplied value reaches the prompt), planTaskInjectsTheCurrentDateTimeWhenTheCallerOmitsIt (AgentPlanner default fills a non-blank 'Current date/time: ' line through the live planTask path).",
     "validation 2026-10-12 (session 23, toolchain present): baseline before change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 322 tests 0 failures 0 errors. After change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m11s, 325 tests 0 failures 0 errors 0 skipped (19 suites; 322 baseline + 3 new).",
-    "validation 2026-10-12 (session 23): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m41s, app-debug.apk produced."
+    "validation 2026-10-12 (session 23): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m41s, app-debug.apk produced.",
+    "merge 2026-10-12 (session 23): planner current-date/time capability merged via PR #55 (squash, branch auto/jarvis-autonomy-20261012-0131 deleted). Merge commit b93141d on main. Validated in-sandbox before merge: 325 tests 0 failures; APK built (115 MB).",
+    "docs 2026-10-12 (session 23): AGENTS.md records the planner current-date/time invariant (merged via PR #56, squash, branch auto/jarvis-autonomy-20261012-0155 deleted)."
   ],
   "in_progress": {
     "item": "",
@@ -109,12 +111,12 @@
     "Continue item 4A mandatory full bug sweep on the live recovery path.",
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
   ],
-  "branch": "auto/jarvis-autonomy-20261012-0131",
+  "branch": "",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
   "last_run_id": "internal-20261012T0131Z",
-  "last_updated": "2026-10-12T01:53:00Z",
+  "last_updated": "2026-10-12T01:58:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
