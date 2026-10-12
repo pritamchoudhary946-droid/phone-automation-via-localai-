@@ -56,4 +56,12 @@ interface LlmRuntime : AutoCloseable {
 }
 
 /** Raised for any genuine inference failure so callers can degrade honestly. */
-class LlmInferenceException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class LlmInferenceException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * A request the provider accepted (HTTP 2xx) but with no usable text in [generate]'s
+ * bounded extraction. It is still an [LlmInferenceException] so planning degrades
+ * honestly, but it is distinguishable so the smoke probe can treat an empty answer as
+ * USABLE (see [LlmRuntime.smokeTest]) even though a live step treats it as no output.
+ */
+class EmptyModelResponseException(message: String) : LlmInferenceException(message)
