@@ -246,7 +246,11 @@ class AndroidDeviceAutomation(
     // control, so like the app-info/settings primitives it is resolved before the
     // a11y-service gate. An unwired viewer gets an honest "unavailable" result, never a
     // silent no-op. It only opens the calendar; it never adds or changes an event.
-    private val calendarViewer: CalendarViewer? = null
+    private val calendarViewer: CalendarViewer? = null,
+    // create_note dispatches the notes app's own compose intent, not an accessibility-tree
+    // control, so like the contact/calendar inserts it is resolved before the a11y-service
+    // gate. An unwired controller gets an honest "unavailable" result, never a silent no-op.
+    private val noteController: NoteController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -590,6 +594,16 @@ class AndroidDeviceAutomation(
             val viewer = calendarViewer
                 ?: return@withContext ActionResult(false, "CALENDAR_UNAVAILABLE", "Calendar dispatch is not available")
             val result = viewer.openCalendar(System.currentTimeMillis())
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // create_note is an intent-dispatch primitive like add_contact/add_calendar_event:
+        // the notes app's own editor is a separate process, and no screen read or tap adds a
+        // note reliably on an arbitrary screen, so it is resolved before the a11y-service
+        // gate. It reports only that the compose intent was delivered.
+        if (action is AgentAction.Note) {
+            val creator = noteController
+                ?: return@withContext ActionResult(false, "NOTE_UNAVAILABLE", "Note dispatch is not available")
+            val result = creator.createNote(action.title, action.content)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()
