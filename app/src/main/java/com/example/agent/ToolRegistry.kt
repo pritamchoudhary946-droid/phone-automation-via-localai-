@@ -56,6 +56,7 @@ open class ToolRegistry {
         const val TOOL_SEND_EMAIL = "send_email"
         const val TOOL_NAVIGATE_TO = "navigate_to"
         const val TOOL_OPEN_APP_INFO = "open_app_info"
+        const val TOOL_SET_TORCH = "set_torch"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -277,6 +278,12 @@ open class ToolRegistry {
             description = "Opens the system Settings App-info page for an app. Use for 'open Chrome's settings' / 'show WhatsApp app info' / 'app settings for Instagram'. Provide an installed package name or an app alias (e.g. com.android.chrome or chrome). It only opens the page; it never changes anything there",
             requiredParameters = listOf("packageName"),
             optionalParameters = listOf("package", "app", "appQuery", "target")
+        ),
+        TOOL_SET_TORCH to ToolDefinition(
+            name = TOOL_SET_TORCH,
+            description = "Turns the device flashlight/torch on or off. Use for 'turn on the flashlight', 'switch the torch off', 'is the light on'. It reads the state back, so a toggle the hardware ignored is reported as a failure, never a fake success",
+            requiredParameters = listOf("on"),
+            optionalParameters = listOf("state", "enabled", "enable", "bool")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -596,6 +603,10 @@ open class ToolRegistry {
                     ToolValidationResult.Valid
                 }
             }
+            // set_torch carries a Boolean on/off, so there is no blank/unsafe value to
+            // reject; it is always a valid request (the executor reports honestly when no
+            // flash is available).
+            is AgentAction.SetTorch -> ToolValidationResult.Valid
             is AgentAction.Wait -> {
                 if (action.durationMs < 0 || action.durationMs > 30_000) {
                     ToolValidationResult.Invalid("Wait duration must be between 0ms and 30000ms: ${action.durationMs}")

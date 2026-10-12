@@ -252,6 +252,21 @@ that the page was shown, so it reports only that the intent was *delivered*
 `APP_INFO_PERMISSION` / `APP_INFO_ERROR` / `INVALID_APP_INFO_PACKAGE` otherwise). The
 prompt must never let the model claim a setting was changed.
 
+`set_torch` (`AgentAction.SetTorch` + `TorchController` -> `CameraManager.setTorchMode`
+on the back camera with a flash unit) follows the same rule: the torch is a
+camera-hardware setting no accessibility-tree read or UI tap toggles reliably on an
+arbitrary screen (it may live only in quick settings, off-screen), so it is resolved
+before the a11y gate. It carries a boolean `on`; `TaskPlanParser.parseTorchOn(...)`
+accepts a JSON boolean or a string alias ("on"/"off"/"enable"/"disable"/"yes"/"no"/
+"1"/"0") and defaults to ON for the common "turn on the flashlight" intent, always a
+valid request. Unlike the intent-dispatch primitives it *does* read the state back:
+`AndroidTorchController` registers a `CameraManager.TorchCallback`, waits a bounded
+`CONFIRM_BUDGET_MS` for the requested state, and reports `TORCH_ON`/`TORCH_OFF` only on
+a confirmed change, `TORCH_UNCHANGED` when the hardware ignored the request, and
+`TORCH_UNAVAILABLE` (no camera service / no flash) / `TORCH_PERMISSION` / `TORCH_ERROR`
+otherwise — never a fake success. It is injectable via the `AndroidDeviceAutomation`
+constructor and wired in `OmniAgentApplication`.
+
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
   `NONE` verification never proves completion; every terminal goal needs concrete evidence.
@@ -490,7 +505,7 @@ prompt must never let the model claim a setting was changed.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
-  `open_app_info` and
+  `open_app_info`, `set_torch` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
@@ -521,7 +536,9 @@ prompt must never let the model claim a setting was changed.
   `navigate_to` reports `NAV_DISPATCHED` only after the `ACTION_VIEW` `geo:` intent was
   delivered to a maps app (`NAV_UNAVAILABLE` otherwise), and `open_app_info` reports
   `APP_INFO_OPENED` only after the `ACTION_APPLICATION_DETAILS_SETTINGS` `package:`
-  intent was delivered to a settings app (`APP_INFO_UNAVAILABLE` otherwise). Never widen
+  intent was delivered to a settings app (`APP_INFO_UNAVAILABLE` otherwise), and
+  `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
+  confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise). Never widen
   this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is

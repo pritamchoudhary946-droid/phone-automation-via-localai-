@@ -223,7 +223,13 @@ class AndroidDeviceAutomation(
     // like the SMS/dialer/share/email/navigation primitives it is resolved before the
     // a11y-service gate. An unwired controller gets an honest "unavailable" result,
     // never a silent no-op. It only opens the page; it never changes anything there.
-    private val appInfoController: AppInfoController? = null
+    private val appInfoController: AppInfoController? = null,
+    // The torch/flashlight is a camera-hardware setting (CameraManager.setTorchMode),
+    // not an accessibility-tree control, so like the audio/ringer primitives it is
+    // resolved before the a11y-service gate. An unwired controller gets an honest
+    // "unavailable" result, never a silent no-op. The controller reads the state back,
+    // so an ignored toggle is reported as failure, not a fake success.
+    private val torchController: TorchController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -516,6 +522,17 @@ class AndroidDeviceAutomation(
                 appDirectory.resolvePackage(action.packageName) ?: action.packageName
             }
             val result = controller.openAppInfo(resolved)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // The torch/flashlight is likewise service-free: it is driven through the
+        // CameraManager, so it is resolved before the a11y-service gate. This is the
+        // "turn on the flashlight" / "switch the torch off" primitive. The controller
+        // reads the torch state back, so an ignored request surfaces as TORCH_UNCHANGED
+        // (a failure) rather than a fake success.
+        if (action is AgentAction.SetTorch) {
+            val controller = torchController
+                ?: return@withContext ActionResult(false, "TORCH_UNAVAILABLE", "Flashlight control is not available")
+            val result = controller.setTorch(action.on)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

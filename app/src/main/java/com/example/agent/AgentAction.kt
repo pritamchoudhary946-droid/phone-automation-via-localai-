@@ -258,6 +258,16 @@ sealed class AgentAction {
      * consequential action is performed by the primitive itself.
      */
     data class OpenAppInfo(val packageName: String) : AgentAction()
+    /**
+     * Turns the device torch/flashlight on or off - the "turn on the flashlight" /
+     * "switch the torch off" primitive. The torch is a camera-hardware setting, not an
+     * accessibility-tree control, so like [AdjustVolume]/[SetRingerMode] it is resolved
+     * before the accessibility-service gate and driven through
+     * [AndroidTorchController] (`CameraManager.setTorchMode`). The state is read back, so
+     * a toggle the hardware ignored is reported as an honest failure, never a fake
+     * success.
+     */
+    data class SetTorch(val on: Boolean) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -334,6 +344,7 @@ sealed class AgentAction {
             is SendEmail -> "Open mail to email $to"
             is NavigateTo -> "Open the map at '$target'"
             is OpenAppInfo -> "Open app info for '$packageName'"
+            is SetTorch -> if (on) "Turn the flashlight on" else "Turn the flashlight off"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

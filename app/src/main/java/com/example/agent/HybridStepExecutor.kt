@@ -253,6 +253,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic app-info dispatch"
             )
 
+            is AgentAction.SetTorch -> FastPathDecision.Execute(
+                action,
+                "deterministic torch control"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"
