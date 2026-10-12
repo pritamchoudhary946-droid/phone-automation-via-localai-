@@ -117,7 +117,14 @@ the a11y gate and dispatches the platform intent to the clock app. Because the a
 is created by a separate process the app cannot read back, `AndroidAlarmController`
 confirms only that the intent was *delivered* (and reports `ALARM_UNAVAILABLE` /
 `ALARM_PERMISSION` honestly otherwise); it never claims the alarm now exists. The
-prompt never advertises a capability the executor cannot run.
+prompt never advertises a capability the executor cannot run. `set_timer`
+(`AgentAction.SetTimer` + `TimerController` -> `AlarmClock.ACTION_SET_TIMER`) follows
+the same rule and is distinct from `set_alarm`: a countdown timer counts down from now
+(an alarm fires at a clock time), so it carries `seconds` (bounded by
+`ToolRegistry.MAX_TIMER_SECONDS`, 24 h) plus an optional `label`, is resolved before
+the a11y gate, and — because the clock app is a separate process — reports
+`TIMER_DISPATCHED` only after the intent was delivered (`TIMER_UNAVAILABLE` /
+`TIMER_PERMISSION` / `INVALID_TIMER_DURATION` otherwise).
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
@@ -355,18 +362,19 @@ prompt never advertises a capability the executor cannot run.
   so it never reaches a later step or the prompt. Do not regress the read's
   self-satisfaction or the secret guard.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
-  `set_ringer_mode`, `set_alarm` and `read_notifications` act on a system service
-  (`AudioManager`, the notification bus, the clock app via `AlarmClock`) that no
+  `set_ringer_mode`, `set_alarm`, `set_timer` and `read_notifications` act on a system
+  service (`AudioManager`, the notification bus, the clock app via `AlarmClock`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
   counts a completed one as goal evidence (same rule as the reads). This is safe only
   because the executor reports success honestly: the audio/media/ringer controllers
   read the stream level / `isMusicActive()` / `ringerMode` back and return
-  `AUDIO_UNCHANGED` / `MEDIA_UNCHANGED` / `RINGER_UNCHANGED` when nothing moved, and
+  `AUDIO_UNCHANGED` / `MEDIA_UNCHANGED` / `RINGER_UNCHANGED` when nothing moved,
   `set_alarm` reports `ALARM_DISPATCHED` only after the intent was delivered to a clock
-  app (`ALARM_UNAVAILABLE` otherwise). Never widen this to an action whose success is
-  not independently confirmed.
+  app (`ALARM_UNAVAILABLE` otherwise), and `set_timer` reports `TIMER_DISPATCHED` on the
+  same honest delivery basis (`TIMER_UNAVAILABLE` otherwise). Never widen this to an
+  action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
   the device-state read primitive: battery level/charging, screen on/off, ringer
   mode and connectivity live on system services (`BatteryManager`, `PowerManager`/

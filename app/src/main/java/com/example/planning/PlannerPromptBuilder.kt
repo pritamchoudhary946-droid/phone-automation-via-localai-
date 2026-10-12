@@ -70,6 +70,7 @@ object PlannerPromptBuilder {
         """- set_ringer_mode: {"mode":"silent|vibrate|normal"}   (switch the whole device's ringer mode; use for "put my phone on silent" / "set it to vibrate" / "unmute my phone" - this is not a volume change)""",
         """- play_media: {"transport":"play|pause|toggle|stop|next|previous"}   (controls the active media/song: toggle=play/pause; use for "pause the music" / "next song" / "stop playback")""",
         """- set_alarm: {"hour":<0-23>,"minute":<0-59>,"label":"<optional>","days":[<optional Calendar 1=Sun..7=Sat>]}   (sets a clock alarm; use for "set an alarm for 7am" / "wake me at 6:30" - use 24-hour time)""",
+        """- set_timer: {"seconds":<1-86400>,"label":"<optional>"}   (starts a countdown timer; use for "set a timer for 10 minutes" / "start a 25-minute timer" - convert the duration to seconds)""",
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",

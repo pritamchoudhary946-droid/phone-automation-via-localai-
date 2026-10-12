@@ -168,7 +168,11 @@ class AndroidDeviceAutomation(
     // accessibility-tree control, so like the audio/ringer primitives it is resolved
     // before the a11y-service gate. An unwired controller gets an honest "unavailable"
     // result, never a silent no-op.
-    private val alarmController: AlarmController? = null
+    private val alarmController: AlarmController? = null,
+    // The countdown timer is likewise dispatched through the platform AlarmClock intent
+    // (ACTION_SET_TIMER), service-free, so it is resolved before the a11y-service gate
+    // exactly like the alarm. An unwired controller gets an honest "unavailable" result.
+    private val timerController: TimerController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -302,6 +306,19 @@ class AndroidDeviceAutomation(
             val controller = alarmController
                 ?: return@withContext ActionResult(false, "ALARM_UNAVAILABLE", "Alarm scheduling is not available")
             val result = controller.setAlarm(action.hour, action.minute, action.label, action.days)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // The countdown timer is likewise service-free: it is dispatched through the
+        // platform AlarmClock ACTION_SET_TIMER intent, so it is resolved before the
+        // a11y-service gate. This is the "set a 10-minute timer" primitive the planner
+        // advertises, and it is distinct from an alarm (which fires at a clock time).
+        if (action is AgentAction.SetTimer) {
+            if (action.seconds <= 0 || action.seconds > com.example.agent.ToolRegistry.MAX_TIMER_SECONDS) {
+                return@withContext ActionResult(false, "INVALID_TIMER_DURATION", "Invalid timer duration ${action.seconds}s")
+            }
+            val controller = timerController
+                ?: return@withContext ActionResult(false, "TIMER_UNAVAILABLE", "Timer scheduling is not available")
+            val result = controller.setTimer(action.seconds, action.label)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

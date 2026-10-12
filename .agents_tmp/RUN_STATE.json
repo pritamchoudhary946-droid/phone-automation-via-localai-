@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 24,
+  "sessions_done": 25,
   "session_cap": 48,
-  "current_milestone": "Capability/flexibility: planner now receives the device's CURRENT LOCAL DATE/TIME (PlannerPromptBuilder.formatDateTime, pure + unit-tested). Without it the model cannot resolve a relative time ('in 20 minutes', 'tomorrow at 7am') into the absolute hour/minute that set_alarm requires, so time-relative instructions were unplannable. Wired at both live call sites (AgentPlanner.plan with a withCurrentDateTime() default, TaskOrchestrator cloud prompt); deterministic in tests because a caller-supplied value wins.",
+  "current_milestone": "Capability: set_timer countdown-timer primitive (AgentAction.SetTimer + TimerController -> AlarmClock.ACTION_SET_TIMER), distinct from set_alarm; wired through all seven action-vocabulary seams and self-evidencing like the other service-backed controls.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -97,7 +97,13 @@
     "validation 2026-10-12 (session 23, toolchain present): baseline before change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 322 tests 0 failures 0 errors. After change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m11s, 325 tests 0 failures 0 errors 0 skipped (19 suites; 322 baseline + 3 new).",
     "validation 2026-10-12 (session 23): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m41s, app-debug.apk produced.",
     "merge 2026-10-12 (session 23): planner current-date/time capability merged via PR #55 (squash, branch auto/jarvis-autonomy-20261012-0131 deleted). Merge commit b93141d on main. Validated in-sandbox before merge: 325 tests 0 failures; APK built (115 MB).",
-    "docs 2026-10-12 (session 23): AGENTS.md records the planner current-date/time invariant (merged via PR #56, squash, branch auto/jarvis-autonomy-20261012-0155 deleted)."
+    "docs 2026-10-12 (session 23): AGENTS.md records the planner current-date/time invariant (merged via PR #56, squash, branch auto/jarvis-autonomy-20261012-0155 deleted).",
+    "capability 2026-10-12 (session 24): new AgentAction.SetTimer + tool set_timer ('seconds', optional 'label') - a countdown timer ('set a 10-minute timer' / 'start a 25-minute timer'), distinct from set_alarm (a timer counts down from now, an alarm fires at a clock time). No accessibility-tree read or UI tap starts a timer reliably on an arbitrary screen, so it dispatches the platform AlarmClock.ACTION_SET_TIMER intent. Implemented across all seven action-vocabulary seams: AgentAction (+getDisplayName + formatTimerSeconds), ToolRegistry (TOOL_SET_TIMER const, MAX_TIMER_SECONDS=24h, ToolDefinition, validateAction), TaskPlanParser.mapAction (+ parseTimerSeconds: seconds/durationSeconds/duration, else minutes*60, else 300 default), HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, PlanVariables.substitute (label), AndroidDeviceAutomation.execute (resolved before the a11y-service gate, like SetAlarm/AdjustVolume/PlayMedia/SetRingerMode/ReadNotifications), and TaskPlanSerializer (toParams/toolNameFor).",
+    "capability 2026-10-12 (session 24): new com.example.agent.TimerController seam + AndroidTimerController (dispatches AlarmClock.ACTION_SET_TIMER with EXTRA_LENGTH/EXTRA_SKIP_UI/EXTRA_MESSAGE; catches ActivityNotFoundException -> TIMER_UNAVAILABLE, SecurityException -> TIMER_PERMISSION, else TIMER_ERROR; rejects a non-positive duration with INVALID_TIMER_DURATION). Injected via the AndroidDeviceAutomation constructor (timerController) and wired in OmniAgentApplication. Because the timer is created by the clock app (a separate process) the app cannot read it back, so it reports only that the intent was delivered (TIMER_DISPATCHED with the accepted duration), never a claimed running timer.",
+    "capability 2026-10-12 (session 24): SetTimer is self-evidencing. TaskOrchestrator.verifyAction accepts a successful result for a NONE-verified SetTimer as the step evidence, and selfEvidencingToolSatisfied counts a completed SetTimer as goal evidence (same rule as adjust_volume/play_media/set_ringer_mode/set_alarm/read_notifications).",
+    "regression tests 2026-10-12 (session 24, CapabilityUpgradeTest +9): setTimerExecutesWithoutAnAccessibilityService, setTimerRefusesHonestlyWhenUnwired, setTimerRejectsAnInvalidDuration, setTimerParserCarriesDurationLabelAndMinutesFallback, validationAcceptsSetTimerAndRejectsAnInvalidDuration, setTimerSkillKeepsItsDurationAndLabelOnReplay, promptAdvertisesSetTimer, setTimerStepCompletesFromItsOwnHonestResult, setTimerFailureIsNotMaskedByTheSelfEvidencingRule.",
+    "validation 2026-10-12 (session 24, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m10s, 334 tests 0 failures 0 errors 0 skipped (19 suites; 325 baseline + 9 new).",
+    "AGENTS.md 2026-10-12 (session 24): action-vocabulary notes and the service-backed self-evidencing invariant now list set_timer / TIMER_DISPATCHED / TIMER_UNAVAILABLE."
   ],
   "in_progress": {
     "item": "",
@@ -115,19 +121,19 @@
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261012T0131Z",
-  "last_updated": "2026-10-12T02:00:00Z",
+  "last_run_id": "internal-20261012T0232Z",
+  "last_updated": "2026-10-12T02:45:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": {
-    "summary": "Added a planner current-date/time capability so relative times resolve to the absolute hour/minute set_alarm needs; validated and merged.",
-    "evidence_reviewed": "main @0312943 (set_alarm PR #54); RUN_STATE.json (session 22 done); AGENTS.md action-vocabulary checklist; PlannerModels/PlannerPromptBuilder/AgentPlanner/TaskOrchestrator/LiteRtEngine callers.",
-    "findings": "set_alarm (PR #54) requires absolute hour/minute, but the planning prompt carried no clock, so 'wake me at 7am'/'in 20 minutes' had nothing to anchor to (confirmed gap).",
-    "milestone_implemented": "PlanningRequest.currentDateTime + pure PlannerPromptBuilder.formatDateTime(...) + 'Current date/time: ...' prompt line; AgentPlanner fills it when blank; TaskOrchestrator cloud prompt passes the live clock.",
-    "validation": "PASSED. Baseline 322 tests 0 failures; after change ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 325 tests 0 failures 0 errors; ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk 115 MB. Device: NOT verified (no device in sandbox).",
+    "summary": "Added a set_timer countdown-timer capability (distinct from set_alarm); wired through all action-vocabulary seams, self-evidencing, validated by 9 new unit tests and merged.",
+    "evidence_reviewed": "main @d25183e (session 23 report); RUN_STATE.json (session 23 done); AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; AgentAction/ToolRegistry/TaskPlanParser/PlanVariables/HybridStepExecutor/PlannerPromptBuilder/DeviceAutomation/TaskOrchestrator/TaskPlanSerializer callers; set_alarm (PR #54) as the reference implementation.",
+    "findings": "set_alarm schedules a clock alarm but the app had no countdown-timer primitive ('set a 10-minute timer' was unplannable - confirmed gap). set_timer is a distinct capability (counts down from now vs fires at a clock time) so it needs its own tool, not an alias of set_alarm.",
+    "milestone_implemented": "AgentAction.SetTimer(seconds, label) + ToolRegistry (TOOL_SET_TIMER/MAX_TIMER_SECONDS/ToolDefinition/validateAction) + TaskPlanParser.parseTimerSeconds + HybridStepExecutor fast path + PlannerPromptBuilder catalogue + PlanVariables.substitute + AndroidDeviceAutomation.execute (pre-a11y-gate) + new TimerController/AndroidTimerController seam wired in OmniAgentApplication + TaskPlanSerializer toParams/toolNameFor + TaskOrchestrator self-evidencing.",
+    "validation": "PASSED. ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m10s, 334 tests 0 failures 0 errors 0 skipped (19 suites; 325 baseline + 9 new). Device: NOT verified (no device in sandbox).",
     "remaining_work": "see next_items (calendar/contacts intent actions; StuckLoopDetector budget reconciliation; FailureClassifier.burnedByWrongPackage; optional lint gate).",
-    "honesty": "Confirmed by unit tests + APK build: the prompt carries a non-blank clock and the pure formatter renders a known epoch/timezone. Inferred: on-device model will use the clock to resolve relative times (not device-tested). Blocked: none. Workflow deviation: a state-record commit (ef78804) was accidentally pushed directly to main; content is the intended state, main is green, history not rewritten (no force-push)."
+    "honesty": "Confirmed by unit tests: set_timer executes without a bound a11y service, refuses honestly when unwired, rejects an invalid duration, parses seconds/minutes, validates, round-trips through the serializer (skill replay), is advertised in the prompt, and self-evidences a completed step (a failed dispatch is not masked). Inferred: on a real device the Clock app will start the countdown (not device-tested). Blocked: none."
   }
 }

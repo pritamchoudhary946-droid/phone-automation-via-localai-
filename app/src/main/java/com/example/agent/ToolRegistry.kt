@@ -47,6 +47,7 @@ open class ToolRegistry {
         const val TOOL_SET_RINGER_MODE = "set_ringer_mode"
         const val TOOL_PLAY_MEDIA = "play_media"
         const val TOOL_SET_ALARM = "set_alarm"
+        const val TOOL_SET_TIMER = "set_timer"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -58,6 +59,9 @@ open class ToolRegistry {
         const val TOOL_SCREENSHOT = "screenshot"
         const val TOOL_ASK_CONFIRMATION = "ask_confirmation"
         const val TOOL_REPORT_STATUS = "report_status"
+
+        /** Longest countdown timer the tool accepts: 24 hours, in seconds. */
+        const val MAX_TIMER_SECONDS = 24 * 60 * 60
     }
 
     private val tools = mapOf(
@@ -207,6 +211,12 @@ open class ToolRegistry {
             description = "Sets a clock alarm at a given 24-hour time. Use for 'set an alarm for 7am', 'wake me at 6:30'. No screen read or tap can set an alarm reliably",
             requiredParameters = listOf("hour", "minute"),
             optionalParameters = listOf("label", "days")
+        ),
+        TOOL_SET_TIMER to ToolDefinition(
+            name = TOOL_SET_TIMER,
+            description = "Starts a countdown timer for a duration in seconds. Use for 'set a timer for 10 minutes', 'start a 25-minute timer'. Distinct from an alarm (which fires at a clock time); no screen read or tap can start a timer reliably",
+            requiredParameters = listOf("seconds"),
+            optionalParameters = listOf("label")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -436,6 +446,15 @@ open class ToolRegistry {
                 } else if (action.days.any { it !in 1..7 }) {
                     ToolValidationResult.Invalid(
                         "set_alarm days must be Calendar weekday constants (1=Sunday .. 7=Saturday): ${action.days}"
+                    )
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.SetTimer -> {
+                if (action.seconds <= 0 || action.seconds > MAX_TIMER_SECONDS) {
+                    ToolValidationResult.Invalid(
+                        "set_timer seconds must be between 1 and $MAX_TIMER_SECONDS (24 hours): ${action.seconds}"
                     )
                 } else {
                     ToolValidationResult.Valid

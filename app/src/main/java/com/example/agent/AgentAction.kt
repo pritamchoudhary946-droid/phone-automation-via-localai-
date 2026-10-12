@@ -148,6 +148,18 @@ sealed class AgentAction {
         val label: String? = null,
         val days: List<Int> = emptyList()
     ) : AgentAction()
+    /**
+     * Starts a countdown timer for [seconds], the "set a 10-minute timer" primitive.
+     * This is distinct from [SetAlarm]: a timer counts down from now, an alarm fires at
+     * a clock time. Like [SetAlarm] no accessibility-tree read or UI tap can start one
+     * reliably on an arbitrary screen, so it is dispatched through the platform
+     * [AlarmClock] intent and resolved before the accessibility-service gate. [label] is
+     * an optional timer name.
+     */
+    data class SetTimer(
+        val seconds: Int = 300,
+        val label: String? = null
+    ) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -205,6 +217,8 @@ sealed class AgentAction {
             is PlayMedia -> "Media ${transport}: control playback"
             is SetAlarm -> "Set alarm for %02d:%02d".format(hour, minute) +
                 (label?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "")
+            is SetTimer -> "Start a timer for ${formatTimerSeconds(seconds)}" +
+                (label?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "")
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"
@@ -220,6 +234,15 @@ sealed class AgentAction {
             is FinishTask -> "Finish: $summary"
             is FailTask -> "Fail: $reason"
         }
+    }
+
+    /** Renders a countdown length as `M:SS` / `H:MM:SS` for a human-readable display name. */
+    private fun formatTimerSeconds(seconds: Int): String {
+        val safe = seconds.coerceAtLeast(0)
+        val hours = safe / 3600
+        val minutes = (safe % 3600) / 60
+        val secs = safe % 60
+        return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, secs) else "%d:%02d".format(minutes, secs)
     }
 }
 

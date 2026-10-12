@@ -167,7 +167,10 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 deviceStatusReader = com.example.agent.AndroidDeviceStatusReader(this),
                 // Alarm primitive: dispatches the platform AlarmClock intent, service-free
                 // like the audio/media/ringer controllers (no UI tap sets an alarm reliably).
-                alarmController = com.example.agent.AndroidAlarmController(this)
+                alarmController = com.example.agent.AndroidAlarmController(this),
+                // Countdown-timer primitive: dispatches AlarmClock ACTION_SET_TIMER,
+                // service-free like the alarm (distinct from it - a timer counts down).
+                timerController = com.example.agent.AndroidTimerController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
