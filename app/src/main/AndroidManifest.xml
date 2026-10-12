@@ -30,6 +30,10 @@
             <action android:name="android.intent.action.SENDTO" />
             <data android:scheme="smsto" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
     </queries>
 
     <application

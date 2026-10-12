@@ -25,6 +25,9 @@ import com.example.agent.DialResult
 import com.example.agent.DialerController
 import com.example.agent.SmsController
 import com.example.agent.SmsResult
+import com.example.agent.AndroidShareController
+import com.example.agent.ShareController
+import com.example.agent.ShareResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -1722,6 +1725,180 @@ class CapabilityUpgradeTest {
         assertTrue("a failed SMS dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- share_text: the "share this with <app>" primitive ---
+
+    @Test
+    fun shareTextExecutesWithoutAnAccessibilityService() {
+        // Handing text to the platform share sheet is dispatched through the platform
+        // ACTION_SEND intent, so like the SMS/dialer/contact/calendar primitives it is
+        // service-free and must resolve before the a11y gate.
+        val recorder = RecordingShareController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            shareController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.ShareText("Check this out", "com.whatsapp"))
+        }
+
+        assertTrue("the share sheet must open without a bound a11y service: $result", result.success)
+        assertEquals("SHARE_DISPATCHED", result.method)
+        assertEquals(listOf(RecordingShareController.Call("Check this out", "com.whatsapp")), recorder.calls)
+    }
+
+    @Test
+    fun shareTextRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            shareController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.ShareText("Check this out"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("SHARE_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun shareTextRejectsBlankText() {
+        val recorder = RecordingShareController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            shareController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.ShareText("   "))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_SHARE_TEXT", result.method)
+        assertTrue("blank text must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun shareTextParserCarriesTextAndTargetPackage() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Share with WhatsApp","action":"share_text","params":{"text":"Check this out","targetPackage":"com.whatsapp"},"expect":"share sheet open","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Share generically","action":"share_text","params":{"content":"hello"},"expect":"share sheet open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "share this")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.ShareText("Check this out", "com.whatsapp"), steps[0].action)
+        assertEquals(AgentAction.ShareText("hello", null), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsShareTextAndRejectsBlanks() {
+        val registry = ToolRegistry()
+        assertTrue(
+            registry.validateAction(AgentAction.ShareText("hi", "com.whatsapp")) is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "blank text must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.ShareText("   ")) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun shareTextSkillKeepsItsTextAndTargetOnReplay() {
+        // A learned "share this with WhatsApp" skill must not replay with a dropped
+        // target package (which would silently fall back to the generic chooser).
+        val plan = com.example.planning.TaskPlan(
+            goal = "share this with WhatsApp",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "share text",
+                    action = AgentAction.ShareText("Check this out", "com.whatsapp"),
+                    rawActionName = "share_text", expectedPostcondition = "share sheet open",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved share skill must be replayable", restored != null)
+        assertEquals(AgentAction.ShareText("Check this out", "com.whatsapp"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesShareText() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_SHARE_TEXT}",
+            actions.contains(ToolRegistry.TOOL_SHARE_TEXT)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "share this link with WhatsApp",
+                desiredOutcome = "share sheet open",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing share_text", prompt.contains("share_text"))
+    }
+
+    @Test
+    fun shareTextStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The share target is a separate process no accessibility screen reflects, so
+        // the step's default NONE verification can never be satisfied from a fresh
+        // screen. The executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.ShareText -> ActionResult(true, "SHARE_DISPATCHED", "Opening the share sheet")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Share the text","action":"share_text","params":{"text":"Check this out"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("share this text", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("share_text must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.ShareText })
+    }
+
+    @Test
+    fun shareTextFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no share target (SHARE_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.ShareText -> ActionResult(false, "SHARE_UNAVAILABLE", "No app can share text")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Share the text","action":"share_text","params":{"text":"Check this out"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("share this text", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed share dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- clear_text: the "empty the field before retyping" primitive ---
 
     @Test
@@ -2430,6 +2607,16 @@ class CapabilityUpgradeTest {
         override fun compose(number: String, message: String): SmsResult {
             calls += Call(number, message)
             return SmsResult(true, "SMS_DISPATCHED", "Opening messages to text $number")
+        }
+    }
+
+    private class RecordingShareController : ShareController {
+        data class Call(val text: String, val targetPackage: String?)
+
+        val calls = mutableListOf<Call>()
+        override fun share(text: String, targetPackage: String?): ShareResult {
+            calls += Call(text, targetPackage)
+            return ShareResult(true, "SHARE_DISPATCHED", "Opening the share sheet")
         }
     }
 

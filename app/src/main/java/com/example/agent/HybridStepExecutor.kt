@@ -233,6 +233,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic SMS compose dispatch"
             )
 
+            is AgentAction.ShareText -> FastPathDecision.Execute(
+                action,
+                "deterministic share-sheet dispatch"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"
