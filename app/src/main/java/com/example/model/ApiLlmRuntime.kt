@@ -43,7 +43,8 @@ class ApiLlmRuntime(
             throw LlmInferenceException("No LLM API configured: set a provider and API key in Setup")
         }
         // No network call here: configuration presence is the readiness signal. A real
-        // call is made by smokeTest() so a bad key surfaces as an honest failure.
+        // defect (bad key, unreachable endpoint) surfaces on the first actual generation
+        // and is degraded honestly there — there is no load-time test prompt.
         ready.set(true)
         Log.i(TAG, "API LLM runtime ready (provider=${config.provider.displayName}, model=${config.effectiveModel()})")
     }
@@ -87,37 +88,6 @@ class ApiLlmRuntime(
         } catch (e: LlmInferenceException) {
             Log.w(TAG, "Vision request failed (${e.message}); retrying text-only")
             generate(prompt, systemInstruction, maxOutputTokens)
-        }
-    }
-
-    /**
-     * The load-time smoke probe.
-     *
-     * A live provider is often slow on its first call (cold start) and may answer a
-     * one-word probe with an empty string. Treating either as a hard failure is the
-     * "engine not available right after I added my key" bug, so the probe runs through
-     * the shared, unit-tested [runTolerantSmokeProbe]: up to two bounded attempts with a
-     * growing token budget, where an empty-but-no-exception answer counts as usable and
-     * only a generation that THROWS on every attempt fails.
-     *
-     * It never re-checks [isReady] here — [ApiInferenceEngine] guards readiness before
-     * calling, and short-circuiting a live probe on the [ready] flag would defeat it.
-     */
-    override suspend fun smokeTest(): Boolean = withContext(Dispatchers.IO) {
-        runTolerantSmokeProbe { maxOutputTokens ->
-            try {
-                generate(
-                    prompt = "Reply with the single word: ready",
-                    systemInstruction = "You are a minimal health check.",
-                    maxOutputTokens = maxOutputTokens
-                )
-            } catch (e: EmptyModelResponseException) {
-                // The provider answered 2xx but gave no text for the tiny probe: the key
-                // and endpoint are demonstrably working, so report an empty-but-usable
-                // result rather than letting the exception fail the load.
-                Log.i(TAG, "Smoke probe got an empty provider answer; treating as usable")
-                ""
-            }
         }
     }
 
@@ -283,7 +253,7 @@ class ApiLlmRuntime(
                 throw LlmInferenceException("Provider returned HTTP ${resp.code}: ${text.take(200)}")
             }
             return extract(text)
-                ?: throw EmptyModelResponseException("Provider response had no usable content: ${text.take(200)}")
+                ?: throw LlmInferenceException("Provider response had no usable content: ${text.take(200)}")
         }
     }
 

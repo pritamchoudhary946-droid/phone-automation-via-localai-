@@ -546,7 +546,7 @@ private fun EngineLoadStatusCard(app: com.example.OmniAgentApplication?) {
         is com.example.model.EngineState.Ready ->
             Triple(MintSuccess, "Jarvis engine ready (${s.backend})", "Planning runs through your configured LLM API.")
         is com.example.model.EngineState.Loading ->
-            Triple(ElectricBlue, "Connecting engine…", "Verifying the API configuration and running a smoke test.")
+            Triple(ElectricBlue, "Connecting engine…", "Verifying your API configuration.")
         is com.example.model.EngineState.Failed ->
             Triple(MaterialTheme.colorScheme.error, "Engine not available", s.message)
         com.example.model.EngineState.NotInitialized ->

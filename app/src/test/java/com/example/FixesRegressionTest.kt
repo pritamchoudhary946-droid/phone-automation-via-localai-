@@ -666,7 +666,6 @@ class FixesRegressionTest {
             if (index >= outputs.size) throw LlmInferenceException("no more scripted outputs")
             return outputs[index]
         }
-        override suspend fun smokeTest(): Boolean = true
         override fun backendLabel(): String = "CPU"
         override fun close() { initialized = false }
     }

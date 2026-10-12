@@ -181,14 +181,12 @@ class ApiLlmIntegrationTest {
     }
 
     @Test
-    fun failedSmokeTestLeavesEngineUnavailable() = runBlocking {
-        val fake = FakeLlmRuntime(smokeOk = false)
+    fun configuredEngineLoadsWithoutAnyProbeGeneration() = runBlocking {
+        val fake = FakeLlmRuntime(output = "anything")
         val engine = ApiInferenceEngine(runtimeFactory = { fake })
-        // ensureReady loads once, then runs the probe; a failing probe marks the
-        // engine unavailable (and never leaves it claiming ready).
-        assertFalse(engine.ensureReady())
-        assertFalse(engine.isReady())
-        assertTrue(engine.state.value is EngineState.Failed)
+        assertTrue(engine.ensureReady())
+        assertTrue(engine.isReady())
+        assertTrue("no test prompt may run at load time", fake.prompts.isEmpty())
     }
 
     // 5. Invalid model output / unknown actions rejected; bounded repair then fallback.
@@ -365,53 +363,29 @@ class ApiLlmIntegrationTest {
         assertFalse(runtime.isReady())
     }
 
-    // 14b. The reported bug: adding a key "connects", then the smoke probe flips the
-    // engine to Failed. A 2xx provider answer with no usable text is NOT a load failure.
+    // 14b. There is no load-time test prompt: a configured engine loads ready with no
+    // generation, and a real provider defect surfaces honestly on the first real call.
 
     @Test
-    fun emptyProviderAnswerIsAUsableSmokeProbeNotAFailure() = runBlocking {
+    fun configuredEngineLoadsReadyWithoutAnyGeneration() = runBlocking {
         val server = MockWebServer()
-        // 2xx, valid JSON envelope, but empty content — what a tiny one-word probe can
-        // legitimately get back from a live provider.
-        server.enqueue(
-            MockResponse().setResponseCode(200)
-                .setBody("""{"choices":[{"message":{"content":""}}]}""")
-        )
-        server.start()
-        try {
-            val runtime = runtimeFor(server, LlmProvider.OPENAI)
-            runtime.initialize()
-            assertTrue("an empty-but-2xx smoke answer must count as usable", runtime.smokeTest())
-        } finally {
-            server.shutdown()
-        }
-    }
-
-    @Test
-    fun transientSmokeFailureThenSuccessLoadsTheEngine() = runBlocking {
-        val server = MockWebServer()
-        // First probe: provider cold-start hiccup (500). Second probe: fine.
-        server.enqueue(MockResponse().setResponseCode(500).setBody("""{"error":"cold start"}"""))
-        server.enqueue(MockResponse().setResponseCode(200)
-            .setBody("""{"choices":[{"message":{"content":"ready"}}]}"""))
         server.start()
         try {
             val runtime = runtimeFor(server, LlmProvider.OPENAI)
             runtime.initialize()
 
             val engine = ApiInferenceEngine(runtimeFactory = { runtime })
-            assertTrue("one transient probe failure must not fail the load", engine.ensureReady())
+            assertTrue("a configured key loads ready without probing", engine.ensureReady())
             assertTrue(engine.isReady())
-            assertEquals(EngineState.Ready(runtime.backendLabel()), engine.state.value)
+            assertEquals("no request may be sent at load time", 0, server.requestCount)
         } finally {
             server.shutdown()
         }
     }
 
     @Test
-    fun aRealAuthRejectionStillFailsTheLoadHonestly() = runBlocking {
+    fun aBadKeyYieldsNoOutputWithoutTearingDownTheEngine() = runBlocking {
         val server = MockWebServer()
-        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"invalid api key"}"""))
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"invalid api key"}"""))
         server.start()
         try {
@@ -419,8 +393,30 @@ class ApiLlmIntegrationTest {
             runtime.initialize()
 
             val engine = ApiInferenceEngine(runtimeFactory = { runtime })
-            assertFalse("a rejected key must still fail, not be masked", engine.ensureReady())
-            assertTrue(engine.state.value is EngineState.Failed)
+            assertTrue("load does not judge the key", engine.ensureReady())
+
+            // The rejected key shows up here as an honest no-output, never a fabricated
+            // answer and never a misleading "engine not available" — the caller (planner)
+            // degrades instead of the load being declared broken.
+            assertNull(engine.generate("hello", null, 16))
+            assertTrue("the engine is not falsely marked unavailable", engine.isReady())
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun transientProviderErrorOnFirstCallDoesNotCrashPlanning() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(500).setBody("""{"error":"cold start"}"""))
+        server.start()
+        try {
+            val runtime = runtimeFor(server, LlmProvider.OPENAI)
+            runtime.initialize()
+            val engine = ApiInferenceEngine(runtimeFactory = { runtime })
+            assertTrue(engine.ensureReady())
+
+            assertNull("a provider error yields no output, never a crash", engine.generate("hi", null, 16))
         } finally {
             server.shutdown()
         }

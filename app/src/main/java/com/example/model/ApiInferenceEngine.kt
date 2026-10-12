@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.util.concurrent.atomic.AtomicBoolean
 
 /** Honest lifecycle state for the remote reasoning engine. */
 sealed class EngineState {
@@ -20,43 +19,6 @@ sealed class EngineState {
     data class Ready(val backend: String) : EngineState()
     data class Failed(val message: String) : EngineState()
 }
-
-/**
- * Shared, testable smoke-probe policy. Runs up to [attempts] bounded generations via
- * [probe], growing the token budget by [tokenStep] each time.
- *
- * An EMPTY-but-no-exception answer counts as SUCCESS: a provider can legitimately return
- * an empty string for a tiny prompt, and that must never be reported as a failure or
- * cause a working runtime to be closed. Only generation that THROWS on every attempt is
- * a real failure.
- */
-internal suspend fun runTolerantSmokeProbe(
-    attempts: Int = 2,
-    baseTokens: Int = 8,
-    tokenStep: Int = 8,
-    probe: suspend (maxOutputTokens: Int) -> String
-): Boolean {
-    var lastError: Throwable? = null
-    for (attempt in 0 until attempts) {
-        try {
-            val result = probe(baseTokens + attempt * tokenStep)
-            Log.i(
-                TAG_SMOKE,
-                "Smoke probe attempt ${attempt + 1} returned '${result.take(32)}' (blank=${result.isBlank()}); engine usable"
-            )
-            return true
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Throwable) {
-            lastError = e
-            Log.w(TAG_SMOKE, "Smoke probe attempt ${attempt + 1} threw: ${e.message}")
-        }
-    }
-    Log.w(TAG_SMOKE, "Smoke probe failed after $attempts attempts: ${lastError?.message}")
-    return false
-}
-
-private const val TAG_SMOKE = "SmokeProbe"
 
 /**
  * Owns exactly one [LlmRuntime] instance, loads it off the UI thread, guards it against
@@ -75,8 +37,6 @@ class ApiInferenceEngine(
 
     private val mutex = Mutex()
     private var runtime: LlmRuntime? = null
-    /** True once a load+smoke cycle has completed, so the probe does not re-run. */
-    private val smokeVerified = AtomicBoolean(false)
 
     private val _state = MutableStateFlow<EngineState>(EngineState.NotInitialized)
     val state: StateFlow<EngineState> = _state.asStateFlow()
@@ -176,44 +136,27 @@ class ApiInferenceEngine(
     }
 
     /**
-     * Loads the engine once, then runs the smoke probe ONCE, cheaply, and remembers it.
-     * Subsequent calls are cheap no-ops, so re-opening the app does not re-run a real
-     * generation. Returns true only when the engine is ready and the probe passed; a
-     * failure is reported honestly via [reportUnavailable].
+     * Prepares the engine for inference: verifies a provider and key are configured and
+     * reports ready. There is deliberately NO load-time test prompt.
+     *
+     * A one-word probe is a poor readiness gate: a live provider is slow on its first
+     * call and may legitimately answer a tiny prompt with an empty string, so gating on
+     * it produced false "engine not available" failures right after a user added a valid
+     * key. A real defect (bad key, unreachable endpoint) surfaces on the first actual
+     * generation and is degraded honestly there via [generate] and [reportUnavailable].
      */
-    suspend fun ensureReady(): Boolean {
-        if (!initialize()) return false
-        if (smokeVerified.get()) return true
-        val active = runtime ?: return false
-        val passed = try {
-            active.smokeTest().also {
-                if (!it) Log.w(TAG, "Smoke test failed: underlying runtime smoke test failed")
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Throwable) {
-            Log.w(TAG, "Smoke test threw: ${e.message}")
-            false
-        }
-        if (passed) {
-            smokeVerified.set(true)
-            return true
-        }
-        reportUnavailable("The engine loaded but did not answer a test prompt (check the provider key/endpoint)")
-        return false
-    }
+    suspend fun ensureReady(): Boolean = initialize()
 
     fun isReady(): Boolean = _state.value is EngineState.Ready && runtime?.isReady() == true
 
     /**
-     * Marks the engine honestly unavailable with a real reason. Used when the engine
-     * loaded but a post-load check (e.g. the smoke test) failed, so the UI can show
-     * *why* instead of a silent "not loaded".
+     * Marks the engine honestly unavailable with a real reason (e.g. no API key is
+     * configured, or the first real generation failed), so the UI can show *why*
+     * instead of a silent "not loaded".
      */
     fun reportUnavailable(reason: String) {
         runCatching { runtime?.close() }
         runtime = null
-        smokeVerified.set(false)
         _state.value = EngineState.Failed(reason)
     }
 
@@ -225,7 +168,6 @@ class ApiInferenceEngine(
             Log.w(TAG, "Error unloading engine: ${e.message}")
         } finally {
             runtime = null
-            smokeVerified.set(false)
             _state.value = EngineState.NotInitialized
         }
     }
