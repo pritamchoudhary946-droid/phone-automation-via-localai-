@@ -271,6 +271,10 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 label = str(params, "label", "message", "name").ifBlank { null },
                 days = parseAlarmDays(params.optJSONArray("days"))
             )
+            ToolRegistry.TOOL_SET_TIMER -> AgentAction.SetTimer(
+                seconds = parseTimerSeconds(params),
+                label = str(params, "label", "message", "name").ifBlank { null }
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
@@ -370,6 +374,24 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             if (day in 1..7) days.add(day)
         }
         return days.toList()
+    }
+
+    /**
+     * Resolves a countdown length to seconds. The model may emit the duration as
+     * `seconds`, `duration`/`durationSeconds`, or as `minutes` (a natural phrasing like
+     * "set a 10-minute timer" is often expressed in minutes), so accept the first present
+     * form. A missing/blank duration falls back to the tool default (5 minutes); the tool
+     * boundary still rejects a non-positive or over-long value, so a bad value cannot
+     * reach the executor as a fake success.
+     */
+    private fun parseTimerSeconds(params: JSONObject): Int {
+        for (key in listOf("seconds", "durationSeconds", "duration")) {
+            val value = params.optInt(key, Int.MIN_VALUE)
+            if (value != Int.MIN_VALUE) return value
+        }
+        val minutes = params.optInt("minutes", Int.MIN_VALUE)
+        if (minutes != Int.MIN_VALUE) return minutes * 60
+        return 5 * 60
     }
 
     companion object {

@@ -208,6 +208,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic alarm scheduling"
             )
 
+            is AgentAction.SetTimer -> FastPathDecision.Execute(
+                action,
+                "deterministic countdown-timer scheduling"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"

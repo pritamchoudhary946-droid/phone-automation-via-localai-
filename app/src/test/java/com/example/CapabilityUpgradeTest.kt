@@ -24,6 +24,8 @@ import com.example.agent.RingerModeController
 import com.example.agent.RingerModeResult
 import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
+import com.example.agent.TimerController
+import com.example.agent.TimerResult
 import com.example.agent.ToolRegistry
 import com.example.agent.ToolValidationResult
 import com.example.model.LiteRtEngine
@@ -718,6 +720,189 @@ class CapabilityUpgradeTest {
         assertTrue("a failed alarm dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- set_timer: the "set a 10-minute timer" primitive must execute ---
+
+    @Test
+    fun setTimerExecutesWithoutAnAccessibilityService() {
+        // The countdown timer is dispatched through the platform AlarmClock ACTION_SET_TIMER
+        // intent, so like the alarm/audio/ringer primitives it is service-free and must
+        // resolve before the a11y gate.
+        val recorder = RecordingTimerController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            timerController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetTimer(seconds = 600, label = "Tea"))
+        }
+
+        assertTrue("timer must be settable without a bound a11y service: $result", result.success)
+        assertEquals("TIMER_DISPATCHED", result.method)
+        assertEquals(listOf(RecordingTimerController.Call(600, "Tea")), recorder.calls)
+    }
+
+    @Test
+    fun setTimerRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            timerController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetTimer(seconds = 300))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("TIMER_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setTimerRejectsAnInvalidDuration() {
+        val recorder = RecordingTimerController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            timerController = recorder
+        )
+        val zero = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetTimer(seconds = 0))
+        }
+        assertFalse(zero.success)
+        assertEquals("INVALID_TIMER_DURATION", zero.method)
+        val tooLong = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetTimer(seconds = ToolRegistry.MAX_TIMER_SECONDS + 1))
+        }
+        assertFalse(tooLong.success)
+        assertEquals("INVALID_TIMER_DURATION", tooLong.method)
+        assertTrue("an invalid duration must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun setTimerParserCarriesDurationLabelAndMinutesFallback() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Timer for ten minutes","action":"set_timer","params":{"seconds":600,"label":"Tea"},"expect":"timer set","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Timer via minutes","action":"set_timer","params":{"minutes":25},"expect":"timer set","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "set a timer")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.SetTimer(seconds = 600, label = "Tea"), steps[0].action)
+        assertEquals(AgentAction.SetTimer(seconds = 25 * 60, label = null), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsSetTimerAndRejectsAnInvalidDuration() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetTimer(seconds = 600)) is ToolValidationResult.Valid)
+        assertTrue(
+            "a zero duration must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.SetTimer(seconds = 0)) !is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "a duration beyond the 24-hour cap must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.SetTimer(seconds = ToolRegistry.MAX_TIMER_SECONDS + 1)) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun setTimerSkillKeepsItsDurationAndLabelOnReplay() {
+        // A learned timer skill must not replay at the default 300s with no label.
+        val plan = com.example.planning.TaskPlan(
+            goal = "set a 10-minute timer for tea",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "start the timer",
+                    action = AgentAction.SetTimer(seconds = 600, label = "Tea"),
+                    rawActionName = "set_timer", expectedPostcondition = "timer set",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved timer skill must be replayable", restored != null)
+        assertEquals(
+            AgentAction.SetTimer(seconds = 600, label = "Tea"),
+            restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun promptAdvertisesSetTimer() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_SET_TIMER}",
+            actions.contains(ToolRegistry.TOOL_SET_TIMER)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "set a timer for 10 minutes",
+                desiredOutcome = "timer counting down",
+                foregroundPackage = "com.android.deskclock",
+                screenSummary = "Clock",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing set_timer", prompt.contains("set_timer"))
+    }
+
+    @Test
+    fun setTimerStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The timer is created by the clock app, a separate process no accessibility screen
+        // reflects, so the step's default NONE verification can never be satisfied from a
+        // fresh screen. The executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetTimer -> ActionResult(true, "TIMER_DISPATCHED", "Timer set for 10:00")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Set the timer","action":"set_timer","params":{"seconds":600},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("set a timer for 10 minutes", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("set_timer must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.SetTimer })
+    }
+
+    @Test
+    fun setTimerFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no clock app (TIMER_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetTimer -> ActionResult(false, "TIMER_UNAVAILABLE", "No clock app is available to set a timer")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Set the timer","action":"set_timer","params":{"seconds":600},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("set a timer for 10 minutes", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed timer dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- clear_text: the "empty the field before retyping" primitive ---
 
     @Test
@@ -1360,6 +1545,16 @@ class CapabilityUpgradeTest {
         override fun setAlarm(hour: Int, minute: Int, label: String?, days: List<Int>): AlarmResult {
             calls += Call(hour, minute, label, days)
             return AlarmResult(true, "ALARM_DISPATCHED", "Alarm set for %02d:%02d".format(hour, minute))
+        }
+    }
+
+    private class RecordingTimerController : TimerController {
+        data class Call(val seconds: Int, val label: String?)
+
+        val calls = mutableListOf<Call>()
+        override fun setTimer(seconds: Int, label: String?): TimerResult {
+            calls += Call(seconds, label)
+            return TimerResult(true, "TIMER_DISPATCHED", "Timer set for ${seconds}s")
         }
     }
 
