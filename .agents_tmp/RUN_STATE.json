@@ -163,7 +163,8 @@
     "gate 2026-10-12 (session 35): speak is OPT-IN via the existing voiceOutputEnabled setting threaded as a live () -> Boolean (exactly like notificationTriageEnabled): AndroidDeviceAutomation refuses AgentAction.Speak with SPEAK_DISABLED when off, PlannerPromptBuilder.availableActions(..., voiceOutputEnabled) withholds the tool from the advertised list and actionCatalog(...) withholds its schema line while off, and AgentPlanner reads both live per call.",
     "regression tests 2026-10-12 (session 35, CapabilityUpgradeTest +9): speakExecutesWithoutAnAccessibilityService, speakRefusesHonestlyWhenUnwired, speakDisabledIsReportedAsFailure, speakParserCarriesTheText, validationAcceptsSpeakAndRejectsBlankOrOversizedText, speakSkillKeepsItsTextOnReplay, promptAdvertisesSpeakOnlyWhenVoiceOutputIsOn, speakStepCompletesFromItsOwnHonestResult, speakFailureIsNotMaskedByTheSelfEvidencingRule.",
     "validation 2026-10-12 (session 35, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m48s, 421 tests 0 failures 0 errors 0 skipped (412 baseline + 9 new speak tests).",
-    "AGENTS.md 2026-10-12 (session 35): documented the speak service-backed, opt-in primitive and added it to the self-evidencing service-backed list (text-to-speech engine via TextToSpeech)."
+    "AGENTS.md 2026-10-12 (session 35): documented the speak service-backed, opt-in primitive and added it to the self-evidencing service-backed list (text-to-speech engine via TextToSpeech).",
+    "validation 2026-10-12 (session 35, final): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m41s; app-debug.apk produced. Both gates green (421 unit tests + APK)."
   ],
   "in_progress": {
     "item": "",
@@ -181,7 +182,7 @@
   "risky_actions_done": [],
   "blockers": [],
   "last_run_id": "internal-20261012T1931Z",
-  "last_updated": "2026-10-12T19:42:00Z",
+  "last_updated": "2026-10-12T19:48:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
@@ -191,7 +192,7 @@
     "evidence_reviewed": "main @1fd99e8 (session 34 set_torch done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the set_torch reference implementation; AudioController/RingerModeController read-back pattern and the notificationTriageEnabled opt-in gate pattern; ToolRegistry, TaskPlanParser, TaskPlanSerializer, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, AgentPlanner, AndroidDeviceAutomation, TaskOrchestrator, OmniAgentApplication.",
     "findings": "The section 2.1 capability gap 'on-device TTS speak' had no vocabulary - a launch_app cannot make the phone talk, and no accessibility read/tap produces speech. The Torch/Audio service-free + honest-result pattern is the exact template; the notificationTriageEnabled live-lambda gate is the exact opt-in template.",
     "milestone_implemented": "speak (AgentAction.Speak(text) + SpeakController/AndroidSpeakController via the platform TextToSpeech engine), opt-in gated by voiceOutputEnabled.",
-    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 421 tests 0 failures 0 errors 0 skipped (412 baseline + 9 new speak tests). APK build attempted next.",
+    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 421 tests 0 failures 0 errors 0 skipped (412 baseline + 9 new speak tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.",
     "remaining_work": "Build the debug APK (assembleDebug); open/merge the PR per section 18 (this run); continue capability backlog (file/document picking).",
     "honesty": "Speech is reported SPOKEN only once the platform TTS engine accepted the utterance (waits briefly for UtteranceProgressListener.onDone); an engine that never became ready is TTS_UNAVAILABLE and an opt-out is SPEAK_DISABLED - never a fake success. Real-device audio validation not performed in this sandbox (unit gate only)."
   }
