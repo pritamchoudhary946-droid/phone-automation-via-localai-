@@ -196,7 +196,14 @@ class AndroidDeviceAutomation(
     // the a11y-service gate. An unwired controller gets an honest "unavailable"
     // result, never a silent no-op. It opens the compose screen pre-filled for the
     // user to press send; it never sends the message itself.
-    private val smsController: SmsController? = null
+    private val smsController: SmsController? = null,
+    // Sharing text is dispatched through the platform ACTION_SEND intent (a
+    // `text/plain` payload), not an accessibility-tree control, so like the
+    // SMS/dialer/contact/calendar primitives it is resolved before the a11y-service
+    // gate. An unwired controller gets an honest "unavailable" result, never a silent
+    // no-op. It opens the share sheet for the user to choose a destination and confirm;
+    // it never posts anywhere by itself.
+    private val shareController: ShareController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -422,6 +429,21 @@ class AndroidDeviceAutomation(
             val controller = smsController
                 ?: return@withContext ActionResult(false, "SMS_UNAVAILABLE", "SMS compose dispatch is not available")
             val result = controller.compose(action.number, action.message)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Sharing text is likewise service-free: it is dispatched through the platform
+        // ACTION_SEND intent with a `text/plain` payload, so it is resolved before the
+        // a11y-service gate. This is the "share this with WhatsApp" primitive. It opens
+        // the share sheet (optionally addressed to a named app) for the user to choose a
+        // destination and confirm and never posts anywhere by itself, so it reports only
+        // that the intent was delivered.
+        if (action is AgentAction.ShareText) {
+            if (action.text.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_SHARE_TEXT", "Share text must not be blank")
+            }
+            val controller = shareController
+                ?: return@withContext ActionResult(false, "SHARE_UNAVAILABLE", "Share dispatch is not available")
+            val result = controller.share(action.text, action.targetPackage)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

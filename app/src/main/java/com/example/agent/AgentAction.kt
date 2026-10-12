@@ -211,6 +211,17 @@ sealed class AgentAction {
      * sends the message, so a consequential send stays under the user's control.
      */
     data class SendSms(val number: String, val message: String) : AgentAction()
+    /**
+     * Shares [text] through the platform share sheet, optionally addressed to
+     * [targetPackage] ("share this with WhatsApp"). Like [SendSms] no accessibility-tree
+     * read or UI tap can hand text to an arbitrary target app reliably on an arbitrary
+     * screen, so it is dispatched through the platform
+     * [android.content.Intent.ACTION_SEND] intent (`text/plain` + an optional
+     * `EXTRA_TITLE`) and resolved before the accessibility-service gate. The user still
+     * picks the destination and confirms, so a consequential share stays under the
+     * user's control.
+     */
+    data class ShareText(val text: String, val targetPackage: String? = null) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -283,6 +294,7 @@ sealed class AgentAction {
             }
             is DialNumber -> "Open the dialer with $number"
             is SendSms -> "Open messages to text $number"
+            is ShareText -> targetPackage?.takeIf { it.isNotBlank() }?.let { "Share text with $it" } ?: "Share text"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

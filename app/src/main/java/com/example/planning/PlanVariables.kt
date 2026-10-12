@@ -100,6 +100,10 @@ class PlanVariableStore {
             number = substitute(action.number),
             message = substitute(action.message)
         )
+        is AgentAction.ShareText -> action.copy(
+            text = substitute(action.text),
+            targetPackage = action.targetPackage?.let(::substitute)
+        )
         is AgentAction.FinishTask -> action.copy(summary = substitute(action.summary))
         else -> action
     }

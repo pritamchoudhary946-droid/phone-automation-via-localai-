@@ -188,7 +188,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // primitives (no UI tap opens a compose screen reliably). It opens the
                 // messaging app pre-filled for the user to press send; it never sends
                 // the message itself.
-                smsController = com.example.agent.AndroidSmsController(this)
+                smsController = com.example.agent.AndroidSmsController(this),
+                // Share primitive: dispatches the platform ACTION_SEND intent with a
+                // text/plain payload, service-free like the SMS/dialer/contact primitives
+                // (no UI tap hands text to an arbitrary target app reliably). It opens the
+                // share sheet (optionally addressed to a named app) for the user to choose
+                // a destination and confirm; it never posts anywhere by itself.
+                shareController = com.example.agent.AndroidShareController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

@@ -52,6 +52,7 @@ open class ToolRegistry {
         const val TOOL_ADD_CONTACT = "add_contact"
         const val TOOL_DIAL_NUMBER = "dial_number"
         const val TOOL_SEND_SMS = "send_sms"
+        const val TOOL_SHARE_TEXT = "share_text"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -249,6 +250,12 @@ open class ToolRegistry {
             name = TOOL_SEND_SMS,
             description = "Opens the messaging app pre-filled with a number and message text; the user presses send to deliver it. Use for 'text Priya 9876543210 that I'll be late'. It never sends the message itself",
             requiredParameters = listOf("number", "message")
+        ),
+        TOOL_SHARE_TEXT to ToolDefinition(
+            name = TOOL_SHARE_TEXT,
+            description = "Shares a piece of text through the platform share sheet, optionally addressed to a named app. Use for 'share this with WhatsApp', 'send this link to Instagram'. The user picks the destination and confirms; it never posts anywhere by itself",
+            requiredParameters = listOf("text"),
+            optionalParameters = listOf("targetPackage", "package")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -534,6 +541,13 @@ open class ToolRegistry {
                     action.message.isBlank() ->
                         ToolValidationResult.Invalid("send_sms requires a non-blank message")
                     else -> ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.ShareText -> {
+                if (action.text.isBlank()) {
+                    ToolValidationResult.Invalid("share_text requires non-blank text")
+                } else {
+                    ToolValidationResult.Valid
                 }
             }
             is AgentAction.Wait -> {
