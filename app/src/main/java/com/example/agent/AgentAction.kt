@@ -192,6 +192,15 @@ sealed class AgentAction {
         val phone: String? = null,
         val email: String? = null
     ) : AgentAction()
+    /**
+     * Opens the system dialer pre-filled with [number] ("dial this number" / "call
+     * Priya"). Like [AddContact] no accessibility-tree read or UI tap opens a dialer
+     * with a number reliably on an arbitrary screen, so it is dispatched through the
+     * platform [android.content.Intent.ACTION_DIAL] intent and resolved before the
+     * accessibility-service gate. It opens the dialer for the user to confirm; it never
+     * places the call, so a consequential call stays under the user's control.
+     */
+    data class DialNumber(val number: String) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -262,6 +271,7 @@ sealed class AgentAction {
                 if (!phone.isNullOrBlank()) append(" tel $phone")
                 if (!email.isNullOrBlank()) append(" email $email")
             }
+            is DialNumber -> "Open the dialer with $number"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

@@ -184,7 +184,12 @@ class AndroidDeviceAutomation(
     // control, so like the calendar/alarm/timer primitives it is resolved before the
     // a11y-service gate. An unwired controller gets an honest "unavailable" result,
     // never a silent no-op.
-    private val contactController: ContactController? = null
+    private val contactController: ContactController? = null,
+    // Opening the dialer is dispatched through the platform ACTION_DIAL intent (a
+    // `tel:` URI), not an accessibility-tree control, so like the contact/calendar
+    // primitives it is resolved before the a11y-service gate. An unwired controller
+    // gets an honest "unavailable" result, never a silent no-op.
+    private val dialerController: DialerController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -378,6 +383,20 @@ class AndroidDeviceAutomation(
             val controller = contactController
                 ?: return@withContext ActionResult(false, "CONTACT_UNAVAILABLE", "Contact insert is not available")
             val result = controller.addContact(action.name, action.phone, action.email)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Opening the dialer is likewise service-free: it is dispatched through the
+        // platform ACTION_DIAL intent with a `tel:` URI, so it is resolved before the
+        // a11y-service gate. This is the "dial 9876543210" / "call Priya" primitive.
+        // It opens the dialer for the user to confirm and never places the call, so it
+        // reports only that the intent was delivered to a dialer (like add_contact).
+        if (action is AgentAction.DialNumber) {
+            if (action.number.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_DIAL_NUMBER", "Dial number must not be blank")
+            }
+            val controller = dialerController
+                ?: return@withContext ActionResult(false, "DIAL_UNAVAILABLE", "Dialer dispatch is not available")
+            val result = controller.dial(action.number)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

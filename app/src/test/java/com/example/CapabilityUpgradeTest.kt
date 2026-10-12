@@ -19,6 +19,9 @@ import com.example.agent.CalendarController
 import com.example.agent.CalendarResult
 import com.example.agent.ContactController
 import com.example.agent.ContactResult
+import com.example.agent.AndroidDialerController
+import com.example.agent.DialResult
+import com.example.agent.DialerController
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -1337,6 +1340,190 @@ class CapabilityUpgradeTest {
         assertTrue("a failed contact dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- dial_number: the "dial 9876543210" / "call Priya" primitive ---
+
+    @Test
+    fun dialNumberExecutesWithoutAnAccessibilityService() {
+        // Opening the dialer is dispatched through the platform ACTION_DIAL intent, so
+        // like the contact/calendar/alarm primitives it is service-free and must resolve
+        // before the a11y gate.
+        val recorder = RecordingDialerController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            dialerController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.DialNumber("9876543210"))
+        }
+
+        assertTrue("the dialer must open without a bound a11y service: $result", result.success)
+        assertEquals("DIAL_DISPATCHED", result.method)
+        assertEquals(listOf("9876543210"), recorder.calls)
+    }
+
+    @Test
+    fun dialNumberRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            dialerController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.DialNumber("9876543210"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("DIAL_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun dialNumberRejectsABlankNumber() {
+        val recorder = RecordingDialerController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            dialerController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.DialNumber("   "))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_DIAL_NUMBER", result.method)
+        assertTrue("a blank number must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun dialNumberNormalizesAndRejectsUnsafeCharacters() {
+        // The pure normalizer is the gate that keeps a bad plan value from opening a
+        // nonsense tel: URI: it accepts digits plus + * # , ; and rejects everything else.
+        assertEquals("+919876543210", AndroidDialerController.normalizeDialNumber(" +919876543210 "))
+        assertEquals("*123#", AndroidDialerController.normalizeDialNumber("*123#"))
+        assertNull(AndroidDialerController.normalizeDialNumber(""))
+        assertNull(AndroidDialerController.normalizeDialNumber("   "))
+        assertNull(AndroidDialerController.normalizeDialNumber("Priya"))
+        assertNull(AndroidDialerController.normalizeDialNumber("tel:98765"))
+        assertNull(AndroidDialerController.normalizeDialNumber("+"))
+    }
+
+    @Test
+    fun dialNumberParserCarriesTheNumber() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Dial Priya","action":"dial_number","params":{"number":"9876543210"},"expect":"dialer open","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Dial support","action":"dial_number","params":{"phone":"+18005551234"},"expect":"dialer open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "dial Priya")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.DialNumber("9876543210"), steps[0].action)
+        assertEquals(AgentAction.DialNumber("+18005551234"), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsDialNumberAndRejectsABlankNumber() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.DialNumber("9876543210")) is ToolValidationResult.Valid)
+        assertTrue(
+            "a blank number must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.DialNumber("  ")) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun dialNumberSkillKeepsItsNumberOnReplay() {
+        // A learned "dial this number" skill must not replay with a dropped number.
+        val plan = com.example.planning.TaskPlan(
+            goal = "dial Priya",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "open the dialer",
+                    action = AgentAction.DialNumber("9876543210"),
+                    rawActionName = "dial_number", expectedPostcondition = "dialer open",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved dialer skill must be replayable", restored != null)
+        assertEquals(AgentAction.DialNumber("9876543210"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesDialNumber() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_DIAL_NUMBER}",
+            actions.contains(ToolRegistry.TOOL_DIAL_NUMBER)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "dial 9876543210",
+                desiredOutcome = "dialer open",
+                foregroundPackage = "com.android.dialer",
+                screenSummary = "Dialer",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing dial_number", prompt.contains("dial_number"))
+    }
+
+    @Test
+    fun dialNumberStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The dialer is a separate process no accessibility screen reflects, so the
+        // step's default NONE verification can never be satisfied from a fresh screen.
+        // The executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.DialNumber -> ActionResult(true, "DIAL_DISPATCHED", "Opening the dialer with ${action.number}")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the dialer","action":"dial_number","params":{"number":"9876543210"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("dial 9876543210", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("dial_number must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.DialNumber })
+    }
+
+    @Test
+    fun dialNumberFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no dialer (DIAL_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.DialNumber -> ActionResult(false, "DIAL_UNAVAILABLE", "No dialer app is available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the dialer","action":"dial_number","params":{"number":"9876543210"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("dial 9876543210", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed dialer dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- clear_text: the "empty the field before retyping" primitive ---
 
     @Test
@@ -2027,6 +2214,14 @@ class CapabilityUpgradeTest {
         override fun addContact(name: String, phone: String?, email: String?): ContactResult {
             calls += Call(name, phone, email)
             return ContactResult(true, "CONTACT_DISPATCHED", "Opening contacts to add '$name'")
+        }
+    }
+
+    private class RecordingDialerController : DialerController {
+        val calls = mutableListOf<String>()
+        override fun dial(number: String): DialResult {
+            calls += number
+            return DialResult(true, "DIAL_DISPATCHED", "Opening the dialer with $number")
         }
     }
 

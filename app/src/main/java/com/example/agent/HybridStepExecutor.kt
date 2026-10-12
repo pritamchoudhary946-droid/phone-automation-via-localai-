@@ -223,6 +223,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic contact insert"
             )
 
+            is AgentAction.DialNumber -> FastPathDecision.Execute(
+                action,
+                "deterministic dialer dispatch"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"
