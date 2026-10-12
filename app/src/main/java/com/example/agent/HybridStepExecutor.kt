@@ -268,6 +268,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic system-settings dispatch"
             )
 
+            is AgentAction.OpenCalendar -> FastPathDecision.Execute(
+                action,
+                "deterministic calendar dispatch"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"

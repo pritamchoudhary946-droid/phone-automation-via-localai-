@@ -17,6 +17,8 @@ import com.example.agent.AudioController
 import com.example.agent.AudioStream
 import com.example.agent.CalendarController
 import com.example.agent.CalendarResult
+import com.example.agent.CalendarViewer
+import com.example.agent.CalendarViewResult
 import com.example.agent.ContactController
 import com.example.agent.ContactResult
 import com.example.agent.AndroidDialerController
@@ -2103,6 +2105,167 @@ class CapabilityUpgradeTest {
         assertTrue("a failed settings dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- open_calendar: the "open my calendar" / "show the calendar" primitive ---
+
+    @Test
+    fun openCalendarExecutesWithoutAnAccessibilityService() {
+        // The calendar view is dispatched through the platform's documented calendar time
+        // URI, so like the app-info/settings primitives it is service-free and must resolve
+        // before the a11y gate.
+        val recorder = RecordingCalendarViewer()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            calendarViewer = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenCalendar)
+        }
+        assertTrue("the calendar must open without a bound a11y service: $result", result.success)
+        assertEquals("CALENDAR_OPENED", result.method)
+        assertEquals("the viewer must be asked exactly once", 1, recorder.calls)
+    }
+
+    @Test
+    fun openCalendarRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            calendarViewer = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenCalendar)
+        }
+        assertFalse("no viewer must not be a fake success", result.success)
+        assertEquals("CALENDAR_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun openCalendarReportsFailureHonestlyWhenNoCalendarAppExists() {
+        val recorder = RecordingCalendarViewer(
+            CalendarViewResult(false, "CALENDAR_UNAVAILABLE", "No calendar app is available to open")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            calendarViewer = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenCalendar)
+        }
+        assertFalse("a missing calendar app must not be reported as success", result.success)
+        assertEquals("CALENDAR_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun openCalendarParserMapsTheToolName() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Open the calendar","action":"open_calendar","params":{},"expect":"calendar open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "open my calendar")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.OpenCalendar, steps[0].action)
+    }
+
+    @Test
+    fun validationAcceptsOpenCalendar() {
+        val registry = ToolRegistry()
+        assertTrue(
+            "open_calendar carries no parameter and is always a valid request",
+            registry.validateAction(AgentAction.OpenCalendar) is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun openCalendarSkillRoundTripsOnReplay() {
+        val plan = com.example.planning.TaskPlan(
+            goal = "open my calendar",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "open calendar",
+                    action = AgentAction.OpenCalendar,
+                    rawActionName = "open_calendar", expectedPostcondition = "calendar open",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved calendar skill must be replayable", restored != null)
+        assertEquals(AgentAction.OpenCalendar, restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesOpenCalendar() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_OPEN_CALENDAR}",
+            actions.contains(ToolRegistry.TOOL_OPEN_CALENDAR)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "open my calendar",
+                desiredOutcome = "calendar open",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing open_calendar", prompt.contains("open_calendar"))
+    }
+
+    @Test
+    fun openCalendarStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenCalendar -> ActionResult(true, "CALENDAR_OPENED", "Opening the calendar")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the calendar","action":"open_calendar","params":{},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open my calendar", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("open_calendar must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.OpenCalendar })
+    }
+
+    @Test
+    fun openCalendarFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenCalendar -> ActionResult(false, "CALENDAR_UNAVAILABLE", "No calendar app is available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the calendar","action":"open_calendar","params":{},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open my calendar", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed calendar dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- set_torch: the "turn on the flashlight" primitive ---
 
     @Test
@@ -3792,6 +3955,16 @@ class CapabilityUpgradeTest {
         override fun openPanel(panel: SettingsPanel): SettingsResult {
             calls += panel
             return result ?: SettingsResult(true, "SETTINGS_OPENED", "Opening ${panel.key} settings")
+        }
+    }
+
+    private class RecordingCalendarViewer(
+        private val result: CalendarViewResult? = null
+    ) : CalendarViewer {
+        var calls = 0
+        override fun openCalendar(nowMillis: Long): CalendarViewResult {
+            calls++
+            return result ?: CalendarViewResult(true, "CALENDAR_OPENED", "Opening the calendar")
         }
     }
 

@@ -291,6 +291,16 @@ sealed class AgentAction {
      * performed by the primitive itself (section 3.5).
      */
     data class OpenSettings(val panel: String) : AgentAction()
+    /**
+     * Opens the device's calendar app at the current day, e.g. "open my calendar" /
+     * "show the calendar" / "what's on today". Like [AddCalendarEvent] the calendar app
+     * is a separate process no accessibility tap can open reliably on an arbitrary
+     * screen, so the platform's documented calendar time URI is dispatched (with a
+     * documented calendar-app launch fallback) and resolved before the
+     * accessibility-service gate. It only *opens* the calendar for the user to look at;
+     * it never adds or changes an event (use [AddCalendarEvent] to create one).
+     */
+    object OpenCalendar : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -370,6 +380,7 @@ sealed class AgentAction {
             is SetTorch -> if (on) "Turn the flashlight on" else "Turn the flashlight off"
             is Speak -> "Say: \"$text\""
             is OpenSettings -> "Open ${panel} settings"
+            is OpenCalendar -> "Open the calendar"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

@@ -203,7 +203,8 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // an arbitrary screen). It only opens the panel; the user decides what to
                 // change there, so nothing consequential is performed and it never claims
                 // a setting was changed.
-                settingsController = com.example.agent.AndroidSettingsController(this)
+                settingsController = com.example.agent.AndroidSettingsController(this),
+                calendarViewer = com.example.agent.AndroidCalendarViewer(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
