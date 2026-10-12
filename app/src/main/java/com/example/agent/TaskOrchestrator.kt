@@ -965,8 +965,7 @@ class TaskOrchestrator(
             is AgentAction.AddContact, is AgentAction.DialNumber,
             is AgentAction.SendSms, is AgentAction.ShareText,
             is AgentAction.SendEmail, is AgentAction.NavigateTo,
-            is AgentAction.OpenAppInfo -> true,
-            is AgentAction.SetTorch -> true
+            is AgentAction.OpenAppInfo, is AgentAction.SetTorch -> true
             else -> false
         }
     }

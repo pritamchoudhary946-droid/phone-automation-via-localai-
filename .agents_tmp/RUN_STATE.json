@@ -1,9 +1,9 @@
 {
   "project_done": false,
-  "sessions_done": 33,
+  "sessions_done": 34,
   "session_cap": 48,
-  "current_milestone": "Capability: open_app_info app-settings primitive (AgentAction.OpenAppInfo + AppInfoController/AndroidAppInfoController -> Intent ACTION_APPLICATION_DETAILS_SETTINGS with a package: URI), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed intents. Opens an app's Settings/App-info page so the user can act on it; never changes a setting itself (section 3.5).",
-  "milestone_status": "done",
+  "current_milestone": "Capability: set_torch flashlight primitive (AgentAction.SetTorch + TorchController/AndroidTorchController -> CameraManager.setTorchMode with a read-back via TorchCallback), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed primitives. Reads the state back so an ignored toggle is TORCH_UNCHANGED (failure), never a fake success.",
+  "milestone_status": "in_progress",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
     "recording: saveWatchedSkill now stores the catalog tool name (ToolRegistry.TOOL_*) instead of the Kotlin class name, so a watched skill is replayable",
@@ -150,36 +150,42 @@
     "capability 2026-10-12 (session 33): new com.example.agent.AppInfoController interface + AndroidAppInfoController (Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, package: Uri); normalizePackageName() is a pure, unit-tested gate that trims a usable package and rejects blank / over-MAX_PACKAGE_CHARS(200) / control-character values). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication; a <queries> APPLICATION_DETAILS_SETTINGS package: entry added to AndroidManifest so the Settings app is visible on API 30+.",
     "regression tests 2026-10-12 (session 33, CapabilityUpgradeTest +10): openAppInfoExecutesWithoutAnAccessibilityService, openAppInfoRefusesHonestlyWhenUnwired, openAppInfoRejectsABlankPackage, openAppInfoNormalizesAndRejectsUnsafePackages, openAppInfoParserCarriesThePackage, validationAcceptsOpenAppInfoAndRejectsABlankPackage, openAppInfoSkillKeepsItsPackageOnReplay, promptAdvertisesOpenAppInfo, openAppInfoStepCompletesFromItsOwnHonestResult, openAppInfoFailureIsNotMaskedByTheSelfEvidencingRule.",
     "validation 2026-10-12 (session 33, toolchain bootstrapped): installed JDK21 (already present) + Android SDK cmdline-tools -> /opt/android-sdk, platforms;android-36.1 + build-tools;36.1.0; SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 4m45s, 402 tests 0 failures 0 errors 0 skipped (392 baseline + 10 new open_app_info tests).",
-    "AGENTS.md 2026-10-12 (session 33): documented the open_app_info service-backed primitive and added it to the self-evidencing service-backed list (Settings app via Intent.ACTION_APPLICATION_DETAILS_SETTINGS package:)."
+    "AGENTS.md 2026-10-12 (session 33): documented the open_app_info service-backed primitive and added it to the self-evidencing service-backed list (Settings app via Intent.ACTION_APPLICATION_DETAILS_SETTINGS package:).",
+    "capability 2026-10-12 (session 34): new AgentAction.SetTorch(on) + tool set_torch ('turn on the flashlight' / 'switch the torch off'). The torch is a camera-hardware setting (CameraManager.setTorchMode), not an accessibility-tree control, so like the audio/ringer primitives it is resolved before the a11y-service gate and never relies on a UI tap. Implemented across all action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (TOOL_SET_TORCH, ToolDefinition, validateAction), TaskPlanParser.mapAction + parseTorchOn (boolean/number/string aliases on/off/enable/disable/yes/no/1/0), HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, PlanVariables.substitute, AndroidDeviceAutomation.execute (service-free, before the a11y gate), TaskPlanSerializer (toParams/toolNameFor), and TaskOrchestrator selfEvidencingToolSatisfied.",
+    "capability 2026-10-12 (session 34): new com.example.agent.TorchController interface + TorchResult + AndroidTorchController (resolves the back camera with a flash unit, drives CameraManager.setTorchMode, registers CameraManager.TorchCallback and reads the state back: TORCH_ON/TORCH_OFF only on a confirmed change, TORCH_UNCHANGED when the hardware ignored it, TORCH_UNAVAILABLE/TORCH_PERMISSION/TORCH_ERROR otherwise). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication; CAMERA permission not required for setTorchMode.",
+    "fix 2026-10-12 (session 34): comma typo in TaskOrchestrator.selfEvidencingToolSatisfied when-list (is AgentAction.OpenAppInfo -> true, is AgentAction.SetTorch -> true) produced a Kotlin syntax error; the unit gate caught it before merge (rewritten as a single comma-joined condition list).",
+    "regression tests 2026-10-12 (session 34, CapabilityUpgradeTest +10): setTorchExecutesWithoutAnAccessibilityService, setTorchOffReachesTheController, setTorchRefusesHonestlyWhenUnwired, setTorchUnchangedIsReportedAsFailure, setTorchParserCarriesTheOnValue, validationAcceptsSetTorch, setTorchSkillKeepsItsStateOnReplay, promptAdvertisesSetTorch, setTorchStepCompletesFromItsOwnHonestResult, setTorchFailureIsNotMaskedByTheSelfEvidencingRule.",
+    "validation 2026-10-12 (session 34, toolchain bootstrapped): apt openjdk-21-jdk-headless + Android SDK cmdline-tools -> /opt/android-sdk platforms;android-36.1 build-tools;36.1.0; SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 3m11s, 412 tests 0 failures 0 errors 0 skipped (402 baseline + 10 new set_torch tests).",
+    "AGENTS.md 2026-10-12 (session 34): documented the set_torch service-backed primitive and added it to the self-evidencing service-backed list (torch via CameraManager.setTorchMode)."
   ],
   "in_progress": {
-    "item": "",
-    "step": "",
-    "note": ""
+    "item": "set_torch capability",
+    "step": "unit gate green (412 tests); APK build pending; PR pending",
+    "note": "Toolchain bootstrapped in-sandbox: JDK21 apt + Android SDK platform 36.1 / build-tools 36.1.0 into /opt/android-sdk."
   },
   "next_items": [
-    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Remaining investigated gaps: torch/flashlight (CameraManager.setTorchMode or a torch TileService), on-device TTS speak (TextToSpeech), file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
+    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Remaining investigated gaps: on-device TTS speak (TextToSpeech), file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
     "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - reconcile the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2).",
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session.",
     "send_sms is compose-only by design; do not silently widen the primitive."
   ],
-  "branch": "auto/jarvis-autonomy-20261012-1650",
+  "branch": "auto/jarvis-autonomy-20261012-1848",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261012T1650Z",
-  "last_updated": "2026-10-12T17:00:00Z",
+  "last_run_id": "internal-20261012T1850Z",
+  "last_updated": "2026-10-12T19:00:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": {
-    "summary": "Added an open_app_info app-settings capability (open an app's Settings/App-info page so the user can act on it; never changes a setting itself), wired through all seven action-vocabulary seams, self-evidencing like the other service-backed intents, and validated by 10 new unit tests and the unit-test gate.",
-    "evidence_reviewed": "main @00b275e; RUN_STATE.json (session 32 navigate_to done); AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the navigate_to/send_email/dial_number reference implementations; AppInfoController/AppDirectory.resolvePackage; ToolRegistry, TaskPlanParser, TaskPlanSerializer, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, AndroidDeviceAutomation, TaskOrchestrator, OmniAgentApplication, AndroidManifest.xml.",
-    "findings": "The section 2.1 gap 'app settings' had no vocabulary - a launch_app can open an app but cannot reach its own Settings/App-info page, and driving that page through arbitrary taps is app/device-specific. The dialer/sms/email/nav service-free intent pattern is the exact template for an ACTION_APPLICATION_DETAILS_SETTINGS dispatch.",
-    "milestone_implemented": "open_app_info (AgentAction.OpenAppInfo + AppInfoController/AndroidAppInfoController).",
-    "validation": "toolchain bootstrapped (JDK21 + Android SDK platform 36.1 / build-tools 36.1.0 into /opt/android-sdk); SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 4m45s, 402 tests 0 failures 0 errors 0 skipped.",
-    "remaining_work": "Open PR and merge per section 18; continue capability backlog (torch, TTS, file pick).",
-    "honesty": "The Settings app is a separate process the app cannot read back, so the primitive reports only that the ACTION_APPLICATION_DETAILS_SETTINGS intent was delivered (APP_INFO_OPENED) and never claims a setting was changed; the model prompt is told the same. Real-device validation not performed in this sandbox (unit gate only)."
+    "summary": "Added a set_torch flashlight capability (turn the device torch on/off, read-back confirmed), wired through all seven action-vocabulary seams, self-evidencing like the other service-backed primitives, and validated by 10 new unit tests and the unit-test gate.",
+    "evidence_reviewed": "main @8605663 (session 33 open_app_info done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the open_app_info/navigate_to reference implementations; AudioController/RingerModeController read-back pattern; ToolRegistry, TaskPlanParser, TaskPlanSerializer, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, AndroidDeviceAutomation, TaskOrchestrator, OmniAgentApplication.",
+    "findings": "The section 2.1 gap 'torch/flashlight' had no vocabulary - a launch_app cannot toggle the torch, and no accessibility read/tap toggles it reliably on an arbitrary screen (it may be off-screen in quick settings). The AudioManager/RingerMode service-free + read-back pattern is the exact template.",
+    "milestone_implemented": "set_torch (AgentAction.SetTorch + TorchController/AndroidTorchController via CameraManager.setTorchMode).",
+    "validation": "Toolchain bootstrapped in-sandbox (JDK21 + Android SDK platform 36.1 / build-tools 36.1.0); SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL, 412 tests 0 failures 0 errors 0 skipped.",
+    "remaining_work": "Run :app:assembleDebug; open PR and merge per section 18; continue capability backlog (TTS speak, file pick).",
+    "honesty": "The torch state is read back via CameraManager.TorchCallback, so set_torch reports TORCH_ON/TORCH_OFF only on a confirmed change and TORCH_UNCHANGED otherwise; it never claims success on a device with no flash (TORCH_UNAVAILABLE). Real-device validation not performed in this sandbox (unit gate only)."
   }
 }

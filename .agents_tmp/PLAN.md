@@ -2132,3 +2132,19 @@ state, the screen/action sequence, expected vs observed postconditions, the exac
 failure stage + logs, and whether the run was simulated / emulator / physical. No
 physical-device pass is claimed unless it actually ran on the device.
 
+
+## Run 2026-10-12 (session 34) - set_torch capability
+- Milestone: new AgentAction.SetTorch + tool set_torch (turn the device
+  flashlight/torch on or off). Torch is a camera-hardware setting
+  (CameraManager.setTorchMode), not an accessibility-tree control, so it is
+  resolved before the a11y gate like the audio/ringer primitives.
+- TorchController seam + AndroidTorchController: registers
+  CameraManager.TorchCallback and reads the state back, so a request the
+  hardware ignored is TORCH_UNCHANGED (failure), never a fake success.
+- Wired through all action-vocabulary seams (AgentAction, ToolRegistry,
+  TaskPlanParser, HybridStepExecutor, PlannerPromptBuilder, PlanVariables,
+  AndroidDeviceAutomation, TaskPlanSerializer, TaskOrchestrator self-evidencing).
+- Fix during validation: comma typo in TaskOrchestrator.selfEvidencingToolSatisfied
+  when list caused a Kotlin syntax error (caught by the gate, not merged).
+- Validation: SKIP_APK=1 verify.sh -> BUILD SUCCESSFUL, 412 tests 0 failures
+  (402 baseline + 10 new set_torch tests).
