@@ -2,7 +2,6 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import com.example.planning.HttpCloudPlannerProvider
 import com.example.ui.canStartTask
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,30 +28,36 @@ class Phase8BugSweepTest {
         context = ApplicationProvider.getApplicationContext()
     }
 
-    // --- BS4: cloud fallback configurable end to end ---------------------------
+    // --- LLM API config is the single source of truth for planning --------------
 
     @Test
-    fun cloudFallbackIsUnreachableUntilEndpointAndKeyAreSaved() {
-        val provider = HttpCloudPlannerProvider(context)
-        // Toggle on alone is not enough: the provider still refuses without config.
-        com.example.settings.CapabilitySettings(context).cloudFallbackEnabled = true
-        assertFalse("no endpoint/key yet: must not be enabled", provider.isEnabled())
+    fun llmApiIsUnconfiguredUntilProviderAndKeyAreSaved() {
+        val config = com.example.model.LlmProviderConfig(context)
+        config.clear()
+        assertFalse("no key yet: must not be configured", config.isConfigured())
 
-        provider.saveConfiguration("https://api.example.com/v1/chat/completions", "sk-test-123", "gpt-4o-mini")
+        config.save(
+            com.example.model.LlmProvider.OPENAI,
+            "sk-test-123",
+            "",
+            ""
+        )
 
-        assertTrue(provider.isEnabled())
-        assertEquals("https://api.example.com/v1/chat/completions", provider.currentEndpoint())
-        assertEquals("sk-test-123", provider.currentApiKey())
-        assertEquals("gpt-4o-mini", provider.currentModel())
+        assertTrue(config.isConfigured())
+        assertEquals("https://api.openai.com/v1", config.effectiveBaseUrl())
+        assertEquals("gpt-4o-mini", config.effectiveModel())
     }
 
     @Test
-    fun cloudFallbackOffByDefaultEvenAfterConfiguration() {
-        val provider = HttpCloudPlannerProvider(context)
-        provider.saveConfiguration("https://api.example.com/v1/chat/completions", "sk-test-123", "gpt-4o-mini")
-        // Config is present but the master toggle is off (default): still disabled.
-        assertFalse(provider.isEnabled())
-        assertNull(kotlinx.coroutines.runBlocking { provider.complete("hi", null) })
+    fun openAiCompatibleProviderNeedsABaseUrlToBeConfigured() {
+        val config = com.example.model.LlmProviderConfig(context)
+        config.clear()
+        // The catch-all provider has no default endpoint, so a key alone is not enough.
+        config.save(com.example.model.LlmProvider.OPENAI_COMPATIBLE, "sk-test-123", "", "")
+        assertFalse("no base URL for the catch-all provider: must not be configured", config.isConfigured())
+
+        config.save(com.example.model.LlmProvider.OPENAI_COMPATIBLE, "sk-test-123", "https://my-gateway.local/v1", "my-model")
+        assertTrue(config.isConfigured())
     }
 
     // --- BS8: honest start gating ----------------------------------------------
@@ -89,10 +94,6 @@ class Phase8BugSweepTest {
             }
         )
         assertFalse(com.example.model.UnavailableNanoSummarizer.isAvailable())
-        assertFalse(com.example.planning.DisabledCloudPlannerProvider.isEnabled())
-        assertNull(
-            kotlinx.coroutines.runBlocking { com.example.planning.DisabledCloudPlannerProvider.complete("x", null) }
-        )
     }
 
     @Test

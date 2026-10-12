@@ -20,7 +20,7 @@ enum class VerificationMethod {
 }
 
 /**
- * A single validated subgoal produced by the local model. It never carries
+ * A single validated subgoal produced by the model. It never carries
  * free-form executable text: [action] is always one of the approved, mapped
  * [AgentAction] variants produced by [TaskPlanParser].
  */

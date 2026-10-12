@@ -686,7 +686,7 @@ class FloatingAgentDotService : Service() {
     /**
      * Core Command Dispatcher:
      * Dispatches phone-controlling functions instantly when told via voice or text,
-     * or delegates to multi-step autonomous Gemma agent for complex tasks.
+     * or delegates to the multi-step autonomous agent for complex tasks.
      */
     fun handlePhoneOrAgentCommand(rawCommand: String) {
         val cmd = rawCommand.trim().lowercase()
@@ -775,7 +775,7 @@ class FloatingAgentDotService : Service() {
             return
         }
 
-        // 4. Multi-step Autonomous Task (Pass to Gemma Orchestrator)
+        // 4. Multi-step Autonomous Task (Pass to the Orchestrator)
         Toast.makeText(this, "Jarvis executing: \"$rawCommand\"", Toast.LENGTH_SHORT).show()
         OmniAgentApplication.instance.orchestrator.startTask(rawCommand)
     }
@@ -816,7 +816,7 @@ class FloatingAgentDotService : Service() {
 
         val (color, text) = when (state) {
             is OrchestratorState.Idle -> Color.parseColor("#12B886") to "Ready • Gol dot se phone control karein"
-            is OrchestratorState.Planning -> Color.parseColor("#F59E0B") to "Thinking: Gemma Planning Step ${state.stepIndex}..."
+            is OrchestratorState.Planning -> Color.parseColor("#F59E0B") to "Thinking: Planning Step ${state.stepIndex}..."
             is OrchestratorState.Executing -> Color.parseColor("#5B5BE8") to "Acting: ${state.action.getDisplayName()}"
             is OrchestratorState.Replanning -> Color.parseColor("#F59E0B") to "Replanning alternative path..."
             is OrchestratorState.WaitingConfirmation -> Color.parseColor("#F43F5E") to "Waiting Confirmation for ${state.riskType}!"

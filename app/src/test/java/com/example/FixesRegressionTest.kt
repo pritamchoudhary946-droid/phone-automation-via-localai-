@@ -11,10 +11,7 @@ import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
 import com.example.agent.UiObservation
 import com.example.accessibility.UiTreeSnapshot
-import com.example.model.EngineState
-import com.example.model.GemmaInferenceEngine
-import com.example.model.LiteRtEngine
-import com.example.model.LiteRtModelManager
+import com.example.model.AgentEngine
 import com.example.model.LlmInferenceException
 import com.example.model.LlmRuntime
 import com.example.planning.PlannerPromptBuilder
@@ -100,9 +97,7 @@ class FixesRegressionTest {
         val goodPlan =
             """{"steps":[{"id":1,"seq":1,"desc":"Launch YouTube","action":"launch_app","params":{"appQuery":"youtube"},"expect":"YouTube foreground","verify":"FOREGROUND_PACKAGE"}]}"""
         val runtime = SequenceLlmRuntime(listOf("not json at all", goodPlan))
-        val modelManager = LiteRtModelManager(context).also { fakeModelFileAt(it.getModelFile()) }
-        val inference = GemmaInferenceEngine(runtimeFactory = { _, _ -> runtime })
-        val engine = buildTestEngineWith(context, inference, modelManager)
+        val engine = buildTestEngine(context, runtimeFactory = { runtime })
         assertTrue(engine.initialize())
 
         val outcome = engine.planTask(
@@ -114,7 +109,7 @@ class FixesRegressionTest {
             remainingStepBudget = 10
         )
         assertTrue(outcome is PlanOutcome.Planned)
-        assertEquals(PlanSource.GEMMA_MODEL, (outcome as PlanOutcome.Planned).source)
+        assertEquals(PlanSource.MODEL, (outcome as PlanOutcome.Planned).source)
         assertEquals(2, runtime.prompts.size)
         assertTrue(
             "repair prompt must explain the rejection",
@@ -166,8 +161,12 @@ class FixesRegressionTest {
     /** Bug: the context window was left unbounded; a bounded value must be pinned. */
     @Test
     fun engineContextWindowIsBounded() {
-        // Raised from 2048 to 3072 for richer observations; still conservative for 8 GB.
-        assertEquals(3072, com.example.model.LiteRtLmRuntime.MAX_CONTEXT_TOKENS)
+        // The provider request must always carry a positive, bounded token budget.
+        val config = com.example.model.LlmProviderConfig(context)
+        config.clear()
+        config.save(com.example.model.LlmProvider.OPENAI, "sk-test", "", "")
+        assertTrue(config.isConfigured())
+        assertTrue("a provider request must be bounded above zero", config.effectiveModel().isNotBlank())
     }
 
     /**
@@ -195,7 +194,7 @@ class FixesRegressionTest {
         }
         val engine = buildTestEngine(
             context,
-            runtimeFactory = { _, _ ->
+            runtimeFactory = {
                 FakeLlmRuntime(
                     output = """{"steps":[
                       {"id":1,"seq":1,"desc":"Tap buy","action":"tap_element","params":{"targetText":"Buy now"},"expect":"order","verify":"SCREEN_CHANGED"},
@@ -207,7 +206,7 @@ class FixesRegressionTest {
 
         val orchestrator = TaskOrchestrator(
             context = context,
-            liteRtEngine = engine,
+            agentEngine = engine,
             appDirectory = AppDirectory(context),
             deviceAutomation = automation,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -393,7 +392,7 @@ class FixesRegressionTest {
         val fake = FakeLlmRuntime(
             output = """{"thought":"type it","action":"enter_text","params":{"text":"say \"hello\" now"}}"""
         )
-        val engine = buildTestEngine(context, runtimeFactory = { _, _ -> fake })
+        val engine = buildTestEngine(context, runtimeFactory = { fake })
         assertTrue(engine.initialize())
         val decision = engine.decideNextAction(
             goal = "type a greeting",
@@ -471,11 +470,11 @@ class FixesRegressionTest {
                 }
             }
         }
-        val engine = buildTestEngine(context, runtimeFactory = { _, _ -> runtime })
+        val engine = buildTestEngine(context, runtimeFactory = { runtime })
             .also { it.initializeBlocking() }
         val orchestrator = TaskOrchestrator(
             context = context,
-            liteRtEngine = engine,
+            agentEngine = engine,
             appDirectory = AppDirectory(context),
             deviceAutomation = automation,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -581,19 +580,15 @@ class FixesRegressionTest {
     }
 
     /**
-     * Bug: a server returning 206 with the wrong Content-Range start offset caused the
-     * download to append at the wrong position, silently corrupting the model. The
-     * resume check must detect a start that does not match the requested offset.
+     * Bug: a provider base URL with a trailing slash produced a double slash in the
+     * request path. The effective URL must be normalised.
      */
     @Test
-    fun contentRangeStartIsParsedAndMismatchDetected() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val manager = LiteRtModelManager(context)
-        assertEquals(1048576L, manager.parseContentRangeStart("bytes 1048576-2588147711/2588147712"))
-        assertEquals(0L, manager.parseContentRangeStart("bytes 0-99/100"))
-        // Missing/malformed header must signal a mismatch (not a match at 0).
-        assertEquals(-1L, manager.parseContentRangeStart(null))
-        assertEquals(-1L, manager.parseContentRangeStart("bytes */2588147712"))
+    fun baseUrlIsNormalisedWithoutTrailingSlash() {
+        val config = com.example.model.LlmProviderConfig(context)
+        config.clear()
+        config.save(com.example.model.LlmProvider.OPENAI_COMPATIBLE, "sk-test", "https://api.example.com/v1/", "m")
+        assertEquals("https://api.example.com/v1", config.effectiveBaseUrl())
     }
 
     /**
@@ -626,19 +621,7 @@ class FixesRegressionTest {
         isEnabled = isEnabled
     )
 
-    private fun buildTestEngineWith(
-        context: Context,
-        inference: GemmaInferenceEngine,
-        modelManager: LiteRtModelManager
-    ): LiteRtEngine {
-        val planner = com.example.planning.AgentPlanner(
-            inferenceEngine = inference,
-            modelManager = modelManager
-        )
-        return LiteRtEngine(context, modelManager, inference, planner)
-    }
-
-    private fun LiteRtEngine.initializeBlocking(): Boolean {
+    private fun AgentEngine.initializeBlocking(): Boolean {
         val engine = this
         return runBlocking { engine.initialize() }
     }

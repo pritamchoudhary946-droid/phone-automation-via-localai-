@@ -7,7 +7,7 @@ import org.json.JSONObject
 
 /**
  * High-performance parser that converts an Android [AccessibilityNodeInfo] tree
- * into a simplified, token-efficient JSON representation optimized for the Gemma model.
+ * into a simplified, token-efficient JSON representation optimized for the model.
  *
  * Focuses strictly on extracting actionable elements:
  * - Clickable elements (buttons, links, clickable items)

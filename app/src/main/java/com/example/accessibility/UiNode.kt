@@ -143,7 +143,7 @@ data class UiTreeSnapshot(
     }
 
     /**
-     * Converts the snapshot into a token-efficient JSON representation for the Gemma model.
+     * Converts the snapshot into a token-efficient JSON representation for the model.
      */
     fun toJson(maxElements: Int = 30, indentSpaces: Int = 0): String {
         return AccessibilityTreeJsonParser(maxElements = maxElements).parseSnapshotToJson(this, indentSpaces)

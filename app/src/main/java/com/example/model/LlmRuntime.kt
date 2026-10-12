@@ -1,18 +1,19 @@
 package com.example.model
 
 /**
- * Thin, injectable seam over a local text-generation runtime.
+ * Thin, injectable seam over a text-generation runtime.
  *
- * The production implementation wraps the official LiteRT-LM Kotlin API
- * ([com.google.ai.edge.litertlm.Engine]). Tests inject fakes so the planning
- * pipeline can be exercised deterministically without a 2.59 GB model.
+ * The production implementation is a remote API client ([ApiLlmRuntime]) that speaks
+ * the OpenAI / Anthropic / Gemini request shapes, so the app reasons through whichever
+ * provider the user configures with their own key. Tests inject fakes so the planning
+ * pipeline can be exercised deterministically without any network.
  *
  * Implementations must be safe to call only after [initialize] succeeded, and
  * [generate] must never be invoked on the main thread by callers.
  */
 interface LlmRuntime : AutoCloseable {
 
-    /** Loads the model and native runtime. Idempotent; safe to call more than once. */
+    /** Verifies the runtime is usable (e.g. an API key is configured). Idempotent. */
     suspend fun initialize()
 
     /** True once the underlying engine is loaded and able to serve requests. */

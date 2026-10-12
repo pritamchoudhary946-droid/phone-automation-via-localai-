@@ -12,7 +12,7 @@ sealed class FastPathDecision {
     /** The step's intended outcome already holds in the current observation. */
     data class Satisfied(val reason: String) : FastPathDecision()
 
-    /** The step needs semantic reasoning; defer to the local model. */
+    /** The step needs semantic reasoning; defer to the model. */
     data class ModelReason(val reason: String) : FastPathDecision()
 }
 
@@ -22,7 +22,7 @@ sealed class FastPathDecision {
  * For a step whose intent can be satisfied purely from the accessibility tree
  * (launch an installed app, open the search interface, type into an observed
  * field, press Home/Back, or open an observed result), the fast path returns the
- * concrete native action directly, so the on-device model never has to be
+ * concrete native action directly, so the model never has to be
  * invoked for that step. That keeps the automation layer fast: a typical
  * "open app -> search -> open result -> home" run needs at most one model call
  * (for the initial plan) instead of one call per step.

@@ -44,7 +44,7 @@ data class StepDecisionRequest(
 )
 
 /** Why a plan came from the model or from the labelled fallback. */
-enum class PlanSource { GEMMA_MODEL, BASIC_FALLBACK }
+enum class PlanSource { MODEL, BASIC_FALLBACK }
 
 sealed class PlanOutcome {
     data class Planned(val plan: TaskPlan, val source: PlanSource) : PlanOutcome()

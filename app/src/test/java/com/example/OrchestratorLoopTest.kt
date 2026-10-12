@@ -9,8 +9,7 @@ import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
 import com.example.agent.ToolRegistry
 import com.example.agent.UiObservation
-import com.example.model.LiteRtEngine
-import com.example.model.LiteRtModelManager
+import com.example.model.AgentEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -230,8 +229,8 @@ class OrchestratorLoopTest {
         val terminal = awaitTerminal(orchestrator)
         assertTrue("expected an honest block, got $terminal", terminal is OrchestratorState.Failed)
         assertTrue(
-            "block reason must name the local model",
-            (terminal as OrchestratorState.Failed).reason.contains("Local AI not loaded", ignoreCase = true)
+            "block reason must name the missing LLM API",
+            (terminal as OrchestratorState.Failed).reason.contains("No LLM API", ignoreCase = true)
         )
         assertTrue("no automation may run without the model", automation.executed.isEmpty())
     }
@@ -625,14 +624,14 @@ class OrchestratorLoopTest {
     }
 
     private fun newOrchestrator(
-        engine: LiteRtEngine,
+        engine: AgentEngine,
         automation: FakeDeviceAutomation,
         registry: ToolRegistry = ToolRegistry()
     ): TaskOrchestrator {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         return TaskOrchestrator(
             context = context,
-            liteRtEngine = engine,
+            agentEngine = engine,
             appDirectory = AppDirectory(context),
             deviceAutomation = automation,
             scope = scope,
@@ -640,13 +639,13 @@ class OrchestratorLoopTest {
         )
     }
 
-    private fun modelEngine(json: String): LiteRtEngine =
-        buildTestEngine(context, runtimeFactory = { _, _ -> FakeLlmRuntime(output = json) }).also { it.initializeBlocking() }
+    private fun modelEngine(json: String): AgentEngine =
+        buildTestEngine(context, runtimeFactory = { FakeLlmRuntime(output = json) }).also { it.initializeBlocking() }
 
-    private fun basicEngine(): LiteRtEngine =
-        buildTestEngine(context, runtimeFactory = { _, _ -> FakeLlmRuntime() })
+    private fun basicEngine(): AgentEngine =
+        buildTestEngine(context, runtimeFactory = { FakeLlmRuntime() })
 
-    private fun LiteRtEngine.initializeBlocking(): Boolean =
+    private fun AgentEngine.initializeBlocking(): Boolean =
         kotlinx.coroutines.runBlocking { initialize() }
 
     private suspend fun awaitTerminal(

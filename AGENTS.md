@@ -3,8 +3,9 @@
 Repository memory for `phone-automation-via-localai-` (OmniAgent Android app).
 
 ## What this is
-On-device Android AI phone agent. A local Gemma model (LiteRT-LM) plans tasks;
-an `AccessibilityService` executes them. No cloud calls for inference.
+Android AI phone agent. A remote LLM API plans tasks; an `AccessibilityService`
+executes them. There is no on-device model: the user supplies a provider, key and
+(optionally) endpoint/model in Setup, and every plan/decision is a remote API call.
 
 ## Build & test
 Requires JDK 21 and an Android SDK with platform 36.1. Set `local.properties`
@@ -49,13 +50,19 @@ Notes:
 - Tests are Robolectric (`@Config(sdk = [34])`). To make `AppDirectory` resolve
   an app, call `installLauncherPackage(context, pkg, label)` from `TestFakes.kt`.
 - `TestFakes.kt` provides `FakeDeviceAutomation`, `FakeLlmRuntime`,
-  `modelEngine(...)`, and `observation(...)`. `observation(...)` fakes are
+  `buildTestEngine(...)`, and `observation(...)`. `buildTestEngine` wires a real
+  `AgentEngine`/`ApiInferenceEngine` to an injected `LlmRuntime` factory, so no
+  network or on-device model is ever needed. `observation(...)` fakes are
   clickable by default (realistic for tappable text/labels).
 
 ## Architecture seams
 - `DeviceAutomation` is the execution boundary (injectable; fake in tests).
-- `LiteRtEngine` + `AgentPlanner` are the planning boundary; `LlmRuntime` is the
-  injectable inference seam.
+- `AgentEngine` + `AgentPlanner` are the planning boundary; `LlmRuntime` is the
+  injectable inference seam. `ApiLlmRuntime` is the real remote implementation
+  (OpenAI / Anthropic / Gemini wire shapes); `ApiInferenceEngine` is the engine
+  that loads it and reports `EngineState`. `LlmProviderConfig` persists the
+  user-supplied provider/key/endpoint/model and is the single truth for whether
+  the app can plan (`isConfigured()`).
 - `TaskOrchestrator.runAgentLoop(task, resumePlan)` drives the loop. A resume
   passes the existing `TaskPlan` so completed steps are not replayed.
 - `HybridStepExecutor.decide(...)` is the deterministic fast path; it returns
@@ -226,12 +233,14 @@ claim an email was sent.
   omits the line, it must never fabricate a time.
 
 ## Audit invariants (do not regress)
-- `LiteRtModelManager`: a `.part` file at exactly the pinned byte count is
-  verified and finalized in place (`finalizeVerifiedPart`) — never re-downloaded.
-  Free-space is checked only when new bytes are needed, so a complete part file
-  finalizes without demanding 3.2 GB. Oversized part files are discarded.
+- `LlmProviderConfig` is the single truth for whether the app can plan
+  (`isConfigured()`): a non-blank key, plus a base URL for the catch-all
+  `OPENAI_COMPATIBLE` provider. Never gate planning on anything else.
+- `ApiLlmRuntime` sends only over HTTPS to the configured base URL, reads every
+  response body through `response.use { }`, and throws `LlmInferenceException`
+  on a non-2xx status — it must never fabricate output.
 - OkHttp responses are always read through `response.use { }` (CloudflareGateway,
-  model download) so the body/connection is closed on every path.
+  API client) so the body/connection is closed on every path.
 - `FloatingAgentDotService` owns a `SupervisorJob` scope cancelled in `onDestroy`;
   never reintroduce a Job-less scope there.
 - `HybridStepExecutor` must not `Execute` an action that `validateAction` rejects
@@ -244,10 +253,10 @@ claim an email was sent.
   `CloudflareGateway.searchWeb` reports an honest error when there is no instant
   answer; `readUrlContent` fetches and size-caps ordinary HTML pages (not just
   PDFs) via `htmlToText`.
-- Model tuning for the 8 GB target is pinned in `OmniAgentApplication`
-  (`USE_GPU_BACKEND`, Adreno with automatic CPU fallback) and
-  `LiteRtLmRuntime.MAX_CONTEXT_TOKENS` (3072). `FixesRegressionTest` asserts the
-  context value, so keep the test and constant in step.
+- Model tuning is pinned in `LlmProviderConfig`: `effectiveBaseUrl()` and
+  `effectiveModel()` normalise the user's endpoint/model and fall back to the
+  provider defaults. `FixesRegressionTest` asserts the normalisation, so keep the
+  test and the config in step.
 - Memory: `UserMemoryEntity`/`TaskOutcomeEntity` live in `AgentDatabase` (now v3,
   `fallbackToDestructiveMigration`). `TaskOrchestrator.loadMemoryDigest(...)`
   injects a bounded (untrusted-labelled) digest into the planning prompt, and
@@ -337,17 +346,15 @@ claim an email was sent.
   lesson; `loadLessons` injects a bounded digest (`MAX_LESSONS_CHARS`) into the
   planning prompt. Keep the destructive migration and bump the DB version when
   entities change.
-- Optional, OFF-by-default seams: `model/NanoSummarizer` (4.7) and
-  `planning/CloudPlannerProvider` (4.8, consulted only after a local failure).
-  Disabled/unconfigured providers must return null and never touch the network;
-  a cloud plan is re-validated through the same `TaskPlanParser` as local output.
+- Optional, OFF-by-default seam: `model/NanoSummarizer` (4.7) delegates to the
+  configured engine. An unconfigured engine must return null and never touch the
+  network; a plan is always re-validated through the same `TaskPlanParser`.
 
 ## Phase 7 (completion & hardening) invariants
 - Every optional capability is owned by `settings/CapabilitySettings` and
   defaults OFF. `ui/SettingsScreen.kt` is the single surface; when adding a
-  capability toggle, add it there too. Cloud on/off lives in that one place
-  (`CloudPlannerProvider.isEnabled()` reads it); endpoint/key stay in the
-  provider's own prefs.
+  capability toggle, add it there too. The LLM API provider/key/endpoint/model
+  live in `model/LlmProviderConfig`, configured from the Setup screen.
 - Privileged actions go through `privileged/GatedPrivilegedBridge` exposed as
   `OmniAgentApplication.privilegedActions`; `isAvailable()` is true only when the
   user opted in AND Shizuku is running. Never execute privileged commands
@@ -371,17 +378,15 @@ claim an email was sent.
   `app_name`, dashboard/setup/settings copy, notifications, overlay toasts, the
   agent prompt identity). Internal class names (`OmniAgentApplication`) and the
   package stay `com.example` on purpose — do NOT rename them.
-- Model load (8.1): `GemmaInferenceEngine.initialize` makes the primary attempt
-  with the GPU flag from `OmniAgentApplication.USE_GPU_BACKEND`, then ONE bounded
-  retry on a fresh CPU-only runtime (`cpuRuntimeFactory`) before reporting
-  `EngineState.Failed`. A runtime that never reports ready is closed and is not
-  kept as the active engine. `LiteRtEngine.MAX_CONTEXT_TOKENS` now delegates to
-  `LiteRtLmRuntime.MAX_CONTEXT_TOKENS` — keep the single source of truth; do not
-  re-introduce a literal.
-- Honest failure (8.2): never a silent "not loaded". `GemmaInferenceEngine`
-  records the real init/ smoke-test reason via `EngineState.Failed(message)` and
+- Engine load (8.1): `ApiInferenceEngine.initialize` builds ONE `ApiLlmRuntime`
+  from the configured provider and reports `EngineState.Failed` when it throws
+  (e.g. no API key). A runtime that never reports ready is closed and is not kept
+  as the active engine. There is no GPU/CPU two-attempt scheme and no context-token
+  literal: the request budget is bounded in `AgentPlanner`.
+- Honest failure (8.2): never a silent "not loaded". `ApiInferenceEngine` records
+  the real init/smoke-test reason via `EngineState.Failed(message)` and
   `reportUnavailable(reason)`; both `AgentDashboardScreen` and `SetupScreen` show
-  that message plus a Retry (`initializeEngineIfModelReady()` re-attempts). The
+  that message plus a Retry (`initializeEngineIfConfigured()` re-attempts). The
   old "Basic mode" claim on the header is gone.
 - Theme (8.4): `MyApplicationTheme` defaults to the dark Jarvis HUD (cyan/violet,
   near-black surfaces). If you add a screen, use the `ui/theme` tokens and the
@@ -395,32 +400,33 @@ claim an email was sent.
 - Bug sweep (8.7, BS1-BS10): the previously "written but not working" seams are
   now real or honestly gated:
   * BS1 `SetupScreen` actually calls `EngineLoadStatusCard(app)`; keep it wired —
-    it is the only place the load/failure reason shows next to download progress.
+    it is the only place the load/failure reason shows next to the API config.
   * BS2 Shizuku: `OmniAgentApplication.privilegedActions` is referenced by the
     Settings self-test (real status); the bridge refuses unless opted in AND
     Shizuku runs. Do NOT advertise it as available by default.
   * BS3 Wake word: `OptInWakeWordDetector` fronts the hands-free flow in
     `AgentDashboardScreen` (armed only with opt-in + mic permission). Keep it
     gated; never capture audio silently.
-  * BS4 Cloud fallback: configurable end to end via `SettingsScreen` ->
-    `HttpCloudPlannerProvider.saveConfiguration(endpoint, key, model)`. Still
-    OFF by default; `isEnabled()` requires the toggle AND non-blank endpoint/key.
-    There is one shared provider instance on the application (`cloudPlannerProvider`).
-  * BS5 `MAX_CONTEXT_TOKENS` stays a single source of truth (LiteRtLmRuntime).
+  * BS4 LLM API: configurable end to end via `SetupScreen` ->
+    `LlmProviderConfig.save(provider, key, endpoint, model)`. `isConfigured()`
+    requires a non-blank key (and a base URL for `OPENAI_COMPATIBLE`). There is one
+    shared config on the application (`llmProviderConfig`). The old
+    `CloudPlannerProvider` / `cloudFallbackEnabled` escape hatch is gone — the API
+    *is* the planner now, so there is nothing to fall back from.
   * BS8 start gating: `canStartTask(modelReady, basicFallbackExplicit)` is the
     single truth; the dashboard shows "Model required • tasks are blocked" and
     routes to Setup instead of pretending a "Basic mode" runs.
-  * BS9 `LiteRtEngine.reasonAndPlan` is a legacy diagnostic-only path, NOT in the
+  * BS9 `AgentEngine.reasonAndPlan` is a legacy diagnostic-only path, NOT in the
     live loop; its fixed budget/foreground are documented as such.
   * BS10 no reachable `Unavailable*` default: the app wires real OCR/vision/
-    summarizer/cloud; the stubs are inert constructor defaults for tests only.
-- Smoke probe (8.8): a blank smoke answer is NOT a load failure. A healthy Gemma-4
-  E2B build can return an empty string for a tiny probe. `LiteRtLmRuntime.smokeTest`
-  routes through the shared, unit-tested `runTolerantSmokeProbe(...)` — up to 2
-  bounded attempts with a growing token budget; non-blank OR empty-without-exception
-  succeeds; only a THROWN generation on every attempt fails. Never close a working
-  runtime on an inconclusive probe. Keep the `LlmRuntime.smokeTest` contract ("empty
-  is usable") in step with any new runtime.
+    summarizer; the stubs are inert constructor defaults for tests only.
+- Smoke probe (8.8): a blank smoke answer is NOT a load failure. A provider can
+  return an empty string for a tiny probe. `ApiLlmRuntime.smokeTest` routes through
+  the shared, unit-tested `runTolerantSmokeProbe(...)` — up to 2 bounded attempts
+  with a growing token budget; non-blank OR empty-without-exception succeeds; only
+  a THROWN generation on every attempt fails. Never close a working runtime on an
+  inconclusive probe. Keep the `LlmRuntime.smokeTest` contract ("empty is usable")
+  in step with any new runtime.
 - Learn-from-demonstration (4.17): the dashboard's "Watch me / Save skill" card is
   the entry point. `TaskOrchestrator.startWatching()` records each executed step;
   `saveWatchedSkill(name, goal)` persists it via `skillDao`. Do not remove the UI
@@ -521,20 +527,18 @@ claim an email was sent.
 - Always run the full gate locally before pushing:
   `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug`.
 
-## Loader invariants (8.9/8.10) - do not regress the phone hang
-- ONE load path: `GemmaInferenceEngine` takes a single CPU-first `runtimeFactory`.
-  Do not reintroduce a GPU-primary + CPU two-attempt scheme (`cpuRuntimeFactory`):
-  a failed GPU delegate doubles the ~2.6 GB init work and thrashes memory.
+## Loader invariants - do not regress
+- ONE load path: `ApiInferenceEngine` takes a single `runtimeFactory` that builds an
+  `ApiLlmRuntime`. Do not reintroduce a multi-attempt load scheme.
 - `initialize()` is single-flight: the Ready check is repeated INSIDE
   `mutex.withLock`, and any previous runtime is closed before it is replaced. Two
   concurrent initializers must never leave two runtimes alive.
-- `USE_GPU_BACKEND` is `false` (CPU-first). GPU is strictly opt-in.
 - Smoke probe runs once: call `ensureReady()` (load + one probe + remember), not
   `initialize()` + a manual probe on every re-open. `reportUnavailable()`/`shutdown()`
   clear the probe flag so a genuine reload re-verifies.
-- Memory trims must not thrash the engine: `MemoryTrimPolicy.shouldReleaseEngine`
-  releases only at `TRIM_MEMORY_COMPLETE`; `onLowMemory()` is advisory and keeps the
-  engine. A release bumps `trimGeneration`; the next explicit use reloads.
+- There is no on-device runtime to release on memory pressure, so
+  `OmniAgentApplication` no longer tears the engine down on a trim. Keep it that way;
+  the API client holds no multi-GB state.
 
 ## Phase 10.7 target resolution invariant (do not regress)
 - `perception/TargetResolver.resolve(...)` must reject any invisible node before

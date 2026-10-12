@@ -14,7 +14,7 @@ import com.example.agent.TaskOrchestrator
 import com.example.agent.ToolRegistry
 import com.example.agent.ToolValidationResult
 import com.example.agent.UiObservation
-import com.example.model.LiteRtEngine
+import com.example.model.AgentEngine
 import com.example.planning.PlanStep
 import com.example.planning.PlannerPromptBuilder
 import com.example.planning.VerificationMethod
@@ -213,7 +213,7 @@ class JarvisUpgradeTest {
         val runtime = FakeLlmRuntime(
             output = """{"steps":[{"id":1,"seq":1,"desc":"Launch Settings","action":"launch_app","params":{"appQuery":"settings"},"expect":"Settings foreground","verify":"FOREGROUND_PACKAGE"}]}"""
         )
-        val engine = buildTestEngine(context, runtimeFactory = { _, _ -> runtime }).also {
+        val engine = buildTestEngine(context, runtimeFactory = { runtime }).also {
             kotlinx.coroutines.runBlocking { it.initialize() }
         }
         installLauncherPackage(context, "com.android.settings", "Settings")
@@ -282,15 +282,15 @@ class JarvisUpgradeTest {
         isFocused = editable
     )
 
-    private fun modelEngine(json: String): LiteRtEngine =
-        buildTestEngine(context, runtimeFactory = { _, _ -> FakeLlmRuntime(output = json) }).also {
+    private fun modelEngine(json: String): AgentEngine =
+        buildTestEngine(context, runtimeFactory = { FakeLlmRuntime(output = json) }).also {
             kotlinx.coroutines.runBlocking { it.initialize() }
         }
 
-    private fun newOrchestrator(engine: LiteRtEngine, automation: FakeDeviceAutomation): TaskOrchestrator =
+    private fun newOrchestrator(engine: AgentEngine, automation: FakeDeviceAutomation): TaskOrchestrator =
         TaskOrchestrator(
             context = context,
-            liteRtEngine = engine,
+            agentEngine = engine,
             appDirectory = AppDirectory(context),
             deviceAutomation = automation,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),

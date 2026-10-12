@@ -35,21 +35,12 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var shizuku by remember { mutableStateOf(settings?.shizukuEnabled == true) }
     var automations by remember { mutableStateOf(settings?.automationsEnabled == true) }
     var basicFallback by remember { mutableStateOf(settings?.basicFallbackExplicit == true) }
-    var cloudFallback by remember { mutableStateOf(settings?.cloudFallbackEnabled == true) }
     // Phase 9 opt-in capabilities; all default OFF.
     var proactive by remember { mutableStateOf(settings?.proactiveAwarenessEnabled == true) }
     var locationTriggers by remember { mutableStateOf(settings?.locationTriggersEnabled == true) }
     var briefing by remember { mutableStateOf(settings?.briefingEnabled == true) }
     var triage by remember { mutableStateOf(settings?.notificationTriageEnabled == true) }
-    // 8.7/BS4: cloud endpoint/key/model entry, so the opt-in fallback is reachable.
-    val cloudProvider = app?.cloudPlannerProvider
-    var cloudEndpoint by remember { mutableStateOf(cloudProvider?.currentEndpoint() ?: "") }
-    var cloudApiKey by remember { mutableStateOf(cloudProvider?.currentApiKey() ?: "") }
-    var cloudModel by remember { mutableStateOf(cloudProvider?.currentModel() ?: "") }
-    var cloudSaved by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-
-    val fit = remember { app?.modelManager?.isFitForDevice() }
 
     Column(
         modifier = modifier
@@ -68,22 +59,6 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-
-        if (fit != null) {
-            Card(shape = RoundedCornerShape(12.dp)) {
-                Column(Modifier.padding(14.dp)) {
-                    Text("Device fit", fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(4.dp))
-                    Text("RAM: ${fit.totalRamMb} MB · Free storage: ${fit.availableStorageMb} MB", fontSize = 12.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = fit.recommendation,
-                        fontSize = 12.sp,
-                        color = if (fit.fits) MintSuccess else MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-        }
 
         ToggleRow(
             title = "Voice output",
@@ -125,90 +100,12 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         }
         ToggleRow(
             title = "Allow keyword fallback",
-            subtitle = "When the local model is unavailable, run an explicitly-labelled basic mode instead of blocking",
+            subtitle = "When the LLM API is unavailable, run an explicitly-labelled basic mode instead of blocking",
             checked = basicFallback,
             testTag = "toggle_basic_fallback"
         ) {
             basicFallback = it
             app?.applyBasicFallbackSetting(it) ?: settings?.let { s -> s.basicFallbackExplicit = it }
-        }
-        ToggleRow(
-            title = "Cloud planner fallback",
-            subtitle = "Opt-in: only used after repeated local failures. Off by default; no data leaves the device unless enabled",
-            checked = cloudFallback,
-            testTag = "toggle_cloud_fallback"
-        ) {
-            cloudFallback = it
-            settings?.cloudFallbackEnabled = it
-        }
-
-        // 8.7/BS4: without somewhere to enter these, the cloud fallback could never be
-        // turned on end to end. Endpoint/key/model are stored locally and only used
-        // after repeated local failures when the toggle above is on.
-        if (cloudFallback && cloudProvider != null) {
-            Card(shape = RoundedCornerShape(12.dp)) {
-                Column(
-                    Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("Cloud planner configuration", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "OpenAI-style chat-completions endpoint. The key is stored only on this device.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = cloudEndpoint,
-                        onValueChange = { cloudEndpoint = it; cloudSaved = false },
-                        label = { Text("Endpoint URL") },
-                        placeholder = { Text("https://api.example.com/v1/chat/completions") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("cloud_endpoint_field")
-                    )
-                    OutlinedTextField(
-                        value = cloudApiKey,
-                        onValueChange = { cloudApiKey = it; cloudSaved = false },
-                        label = { Text("API key") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("cloud_api_key_field")
-                    )
-                    OutlinedTextField(
-                        value = cloudModel,
-                        onValueChange = { cloudModel = it; cloudSaved = false },
-                        label = { Text("Model") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("cloud_model_field")
-                    )
-                    Row(
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                cloudProvider.saveConfiguration(cloudEndpoint, cloudApiKey, cloudModel)
-                                cloudSaved = true
-                            },
-                            enabled = cloudEndpoint.isNotBlank() && cloudApiKey.isNotBlank(),
-                            modifier = Modifier.testTag("cloud_config_save_button")
-                        ) {
-                            Text("Save")
-                        }
-                        if (cloudSaved) {
-                            Text(
-                                "Saved. The fallback will use these credentials.",
-                                fontSize = 12.sp,
-                                color = MintSuccess
-                            )
-                        }
-                    }
-                }
-            }
         }
 
         Spacer(Modifier.height(4.dp))
@@ -318,12 +215,10 @@ private fun SelfTestCard(app: OmniAgentApplication?) {
                     lines += "Accessibility service: ${if (a11y) "PASS" else "FAIL"}"
                     val overlay = android.provider.Settings.canDrawOverlays(context)
                     lines += "Overlay permission: ${if (overlay) "PASS" else "FAIL"}"
-                    val model = app?.modelManager?.downloadState?.value
-                    lines += "Model ready: ${if (model is com.example.model.ModelDownloadState.Ready) "PASS" else "FAIL"}"
-                    val engine = app?.liteRtEngine?.isReady() == true
+                    val configured = app?.llmProviderConfig?.isConfigured() == true
+                    lines += "LLM API configured: ${if (configured) "PASS" else "FAIL"}"
+                    val engine = app?.agentEngine?.isReady() == true
                     lines += "Engine ready: ${if (engine) "PASS" else "FAIL"}"
-                    val fit = app?.modelManager?.isFitForDevice()
-                    lines += "Device fit: ${if (fit?.fits == true) "PASS" else "WARN"}"
                     // 8.7/BS2: report the real Shizuku bridge status instead of leaving
                     // privilegedActions as dead wiring. Available only when opted in AND
                     // Shizuku is running; refused (false) otherwise.

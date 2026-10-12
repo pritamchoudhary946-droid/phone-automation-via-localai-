@@ -20,8 +20,7 @@ import com.example.data.local.AgentDatabase
 import com.example.data.local.CheckpointEntity
 import com.example.data.local.TaskEntity
 import com.example.data.local.TaskStepEntity
-import com.example.model.LiteRtEngine
-import com.example.model.LiteRtModelManager
+import com.example.model.AgentEngine
 import com.example.model.SubGoalKind
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -345,8 +344,7 @@ class ExampleRobolectricTest {
     @Test
     fun `litert engine decomposes multi-step sequential goals correctly`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val modelManager = LiteRtModelManager(context)
-        val engine = buildTestEngine(context, modelManager = modelManager)
+        val engine = buildTestEngine(context)
 
         val complexGoal = "Open YouTube, search for educational video, open it, and then return to the home screen"
         val subGoals = engine.heuristicPlanner().decomposeGoalIntoSubGoals(complexGoal)
@@ -365,8 +363,7 @@ class ExampleRobolectricTest {
     @Test
     fun `litert engine plans full youtube search sequence correctly`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val modelManager = LiteRtModelManager(context)
-        val engine = buildTestEngine(context, modelManager = modelManager)
+        val engine = buildTestEngine(context)
 
         val goal = "Open YouTube and search for lo-fi beats"
 
@@ -436,8 +433,7 @@ class ExampleRobolectricTest {
     @Test
     fun `litert engine plans settings dark mode toggle correctly`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val modelManager = LiteRtModelManager(context)
-        val engine = buildTestEngine(context, modelManager = modelManager)
+        val engine = buildTestEngine(context)
 
         val goal = "Open Settings and turn on Dark mode"
 

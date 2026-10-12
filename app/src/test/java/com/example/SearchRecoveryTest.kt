@@ -15,7 +15,7 @@ import com.example.agent.ToolRegistry
 import com.example.agent.ToolValidationResult
 import com.example.agent.UiObservation
 import com.example.model.HeuristicPlanner
-import com.example.model.LiteRtEngine
+import com.example.model.AgentEngine
 import com.example.planning.PlanParseResult
 import com.example.planning.PlanStepStatus
 import com.example.planning.TaskPlanParser
@@ -305,11 +305,11 @@ class SearchRecoveryTest {
 
     // ---- helpers ----
 
-    private fun newOrchestrator(engine: LiteRtEngine, automation: FakeDeviceAutomation): TaskOrchestrator {
+    private fun newOrchestrator(engine: AgentEngine, automation: FakeDeviceAutomation): TaskOrchestrator {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         return TaskOrchestrator(
             context = context,
-            liteRtEngine = engine,
+            agentEngine = engine,
             appDirectory = AppDirectory(context),
             deviceAutomation = automation,
             scope = scope,
@@ -317,8 +317,8 @@ class SearchRecoveryTest {
         )
     }
 
-    private fun modelEngine(json: String): LiteRtEngine =
-        buildTestEngine(context, runtimeFactory = { _, _ -> FakeLlmRuntime(output = json) })
+    private fun modelEngine(json: String): AgentEngine =
+        buildTestEngine(context, runtimeFactory = { FakeLlmRuntime(output = json) })
             .also { kotlinx.coroutines.runBlocking { it.initialize() } }
 
     private fun editableObservation(pkg: String?, fieldText: String = "", seed: Int): UiObservation {

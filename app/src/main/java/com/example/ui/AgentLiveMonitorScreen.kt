@@ -122,7 +122,7 @@ fun AgentLiveMonitorScreen(
 
             AssistChip(
                 onClick = {},
-                label = { Text("Gemma 4 E2B", fontSize = 11.sp) },
+                label = { Text("LLM API", fontSize = 11.sp) },
                 leadingIcon = {
                     Box(
                         modifier = Modifier
@@ -187,7 +187,7 @@ fun AgentLiveMonitorScreen(
 
                 val subText = when (val state = orchestratorState) {
                     is OrchestratorState.Idle -> "Standing by for user tasks."
-                    is OrchestratorState.Planning -> "Gemma 4 E2B is reasoning on UI hierarchy (Step ${state.stepIndex})."
+                    is OrchestratorState.Planning -> "The LLM is reasoning on the UI hierarchy (Step ${state.stepIndex})."
                     is OrchestratorState.Executing -> "Performing ${state.action.getDisplayName()}."
                     is OrchestratorState.Replanning -> "Resolving stuck loop: ${state.reason}"
                     is OrchestratorState.WaitingConfirmation -> "Waiting for safety approval for: ${state.riskType}"
@@ -207,14 +207,14 @@ fun AgentLiveMonitorScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // 6.12: the model-use trace — GEMMA vs BASIC, with per-step counts.
+                // 6.12: the model-use trace — MODEL vs BASIC, with per-step counts.
                 AssistChip(
                     onClick = {},
                     modifier = Modifier.testTag("model_use_trace"),
                     label = {
                         Text(
                             text = if (usesModelPlanning) {
-                                "Source: GEMMA · $modelCalls model calls · $fastPathSteps fast-path"
+                                "Source: MODEL · $modelCalls model calls · $fastPathSteps fast-path"
                             } else {
                                 "Source: BASIC (rule-based) · degraded mode"
                             },

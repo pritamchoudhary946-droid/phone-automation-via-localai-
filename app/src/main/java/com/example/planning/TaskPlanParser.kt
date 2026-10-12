@@ -7,7 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Strict parser that turns the local model's JSON plan into a validated [TaskPlan].
+ * Strict parser that turns the model's JSON plan into a validated [TaskPlan].
  *
  * Rejects anything unsafe or malformed instead of executing it:
  * - Unknown action names (only the approved tool catalog is accepted).
@@ -116,7 +116,7 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
     }
 
     /**
-     * 6.18: tolerant root extraction. The small on-device model often wraps its JSON
+     * 6.18: tolerant root extraction. The model often wraps its JSON
      * in prose or code fences, and emits trailing commas or single quotes. Rather than
      * failing the whole task on such a near-miss, strip fences/prose, extract the first
      * balanced object, and retry after a light normalisation. Returns null only when no

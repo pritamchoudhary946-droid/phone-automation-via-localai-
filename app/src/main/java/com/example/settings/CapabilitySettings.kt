@@ -38,11 +38,6 @@ class CapabilitySettings(context: Context) {
         get() = prefs.getBoolean(KEY_BASIC_FALLBACK, false)
         set(v) = prefs.edit().putBoolean(KEY_BASIC_FALLBACK, v).apply()
 
-    /** Cloud planner fallback enable switch (endpoint/key live in the cloud provider). */
-    var cloudFallbackEnabled: Boolean
-        get() = prefs.getBoolean(KEY_CLOUD_FALLBACK, false)
-        set(v) = prefs.edit().putBoolean(KEY_CLOUD_FALLBACK, v).apply()
-
     // --- Phase 9 opt-in capabilities. Every one defaults OFF and must be enabled
     // explicitly by the user; nothing always-on runs without it. ---
 
@@ -78,7 +73,6 @@ class CapabilitySettings(context: Context) {
         const val KEY_SHIZUKU = "shizuku_enabled"
         const val KEY_AUTOMATIONS = "automations_enabled"
         const val KEY_BASIC_FALLBACK = "basic_fallback_explicit"
-        const val KEY_CLOUD_FALLBACK = "cloud_fallback_enabled"
         const val KEY_PROACTIVE_AWARENESS = "proactive_awareness_enabled"
         const val KEY_LOCATION_TRIGGERS = "location_triggers_enabled"
         const val KEY_BRIEFING = "briefing_enabled"

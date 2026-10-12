@@ -11,15 +11,13 @@ import com.example.data.local.TaskOutcomeEntity
 import com.example.data.local.TaskStepEntity
 import com.example.data.local.UserMemoryEntity
 import com.example.memory.rag.Retriever
-import com.example.model.LiteRtEngine
+import com.example.model.AgentEngine
 import com.example.perception.OcrReader
 import com.example.perception.ScreenshotDiffer
 import com.example.perception.ScreenAwareness
 import com.example.perception.UnavailableOcrReader
 import com.example.perception.UnavailableVisionGrounder
 import com.example.perception.VisionGrounder
-import com.example.planning.CloudPlannerProvider
-import com.example.planning.DisabledCloudPlannerProvider
 import com.example.planning.EpisodeDeriver
 import com.example.planning.ExplorationRequest
 import com.example.planning.PlanOutcome
@@ -80,14 +78,14 @@ sealed class OrchestratorState {
  * Controlled execution loop: Understand -> Plan -> Validate -> Execute one action
  * -> Observe -> Verify -> Update plan -> Repeat.
  *
- * Gemma produces the plan and the per-step action selection when ready; the
+ * The configured LLM API produces the plan and the per-step action selection when ready; the
  * native automation layer executes exactly one approved action at a time. A step
  * is only marked complete when its goal-specific postcondition is verified over a
  * fresh observation. `ReadScreen` success can never satisfy an unrelated goal.
  */
 class TaskOrchestrator(
     private val context: Context,
-    private val liteRtEngine: LiteRtEngine,
+    private val agentEngine: AgentEngine,
     private val appDirectory: AppDirectory,
     private val deviceAutomation: DeviceAutomation = AndroidDeviceAutomation(appDirectory),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
@@ -99,7 +97,6 @@ class TaskOrchestrator(
     private val retriever: Retriever? = null,
     private val completionNotifier: com.example.notifications.CompletionNotifier? = null,
     private val autoSaveSkills: Boolean = false,
-    private val cloudPlannerProvider: CloudPlannerProvider = DisabledCloudPlannerProvider,
     private val nanoSummarizer: com.example.model.NanoSummarizer = com.example.model.UnavailableNanoSummarizer,
     private val speechOutput: com.example.voice.SpeechOutput? = null,
     /** Live opt-in gate for the notification-triage capability (plan 9.9). */
@@ -382,7 +379,7 @@ class TaskOrchestrator(
                     Log.i(TAG, "[RESUME] Continuing existing plan at step ${plan.completedCount()} of ${plan.size}")
                 } else {
                     val planOutcome = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
-                        liteRtEngine.planTask(
+                        agentEngine.planTask(
                             goal = task.userGoal,
                             screenSummary = initialObservation.summary,
                             foregroundPackage = initialObservation.packageName,
@@ -398,11 +395,11 @@ class TaskOrchestrator(
 
                     plan = when (planOutcome) {
                         is PlanOutcome.Planned -> {
-                            _usesModelPlanning.value = planOutcome.source == PlanSource.GEMMA_MODEL
+                            _usesModelPlanning.value = planOutcome.source == PlanSource.MODEL
                             planOutcome.plan
                         }
                         is PlanOutcome.Unavailable -> {
-                            // 6.1: Local AI is not loaded. Do not silently run keywords —
+                            // 6.1: No LLM API is loaded. Do not silently run keywords —
                             // block with a clear, user-visible reason. The planner only
                             // returns BASIC_FALLBACK here when the user explicitly enabled
                             // the labelled degraded mode.
@@ -413,9 +410,9 @@ class TaskOrchestrator(
                         }
                         is PlanOutcome.Rejected -> {
                             _usesModelPlanning.value = false
-                            if (liteRtEngine.isFallbackExplicit()) {
+                            if (agentEngine.isFallbackExplicit()) {
                                 Log.w(TAG, "Using explicitly enabled fallback planner due to: ${planOutcome.reason}")
-                                liteRtEngine.fallbackPlan(task.userGoal)
+                                agentEngine.fallbackPlan(task.userGoal)
                             } else {
                                 val reason = "Model plan rejected and basic fallback is disabled: ${planOutcome.reason}"
                                 Log.w(TAG, reason)
@@ -425,7 +422,7 @@ class TaskOrchestrator(
                         }
                         null -> {
                             _usesModelPlanning.value = false
-                            val fallbackPlan = liteRtEngine.fallbackPlan(task.userGoal)
+                            val fallbackPlan = agentEngine.fallbackPlan(task.userGoal)
                             Log.w(TAG, "Using fallback planner due to: plan timeout or null result")
                             fallbackPlan
                         }
@@ -433,7 +430,7 @@ class TaskOrchestrator(
                 }
                 _activePlan.value = plan
                 completedCount = plan.completedCount()
-                Log.i(TAG, "[PLAN] goal=\"${task.userGoal}\" steps=${plan.size} source=${if (_usesModelPlanning.value) "GEMMA" else "BASIC"}")
+                Log.i(TAG, "[PLAN] goal=\"${task.userGoal}\" steps=${plan.size} source=${if (_usesModelPlanning.value) "MODEL" else "BASIC"}")
 
                 var observation = initialObservation
                 var previousObservation = initialObservation
@@ -561,8 +558,8 @@ class TaskOrchestrator(
                     // deterministically from the current accessibility tree (launch an
                     // installed app, open the search UI, type into an observed field,
                     // press Home/Back, open an observed result), the native action is
-                    // executed directly and the local model is never invoked. Only when
-                    // the fast path cannot decide is Gemma asked to choose/refresh the
+                    // executed directly and the model is never invoked. Only when
+                    // the fast path cannot decide is the model asked to choose/refresh the
                     // action. Model output, when present, overrides the nominal action.
                     val nudgeUsed = nudgedStepId == effectiveStep.id
                     val fastPath = hybridStepExecutor.decide(
@@ -576,7 +573,7 @@ class TaskOrchestrator(
                         val screenshot = if (observation.nodes.size < 3) captureScreenshotBytes() else null
                         if (screenshot != null) Log.i(TAG, "[MODEL_STEP] tree-miss: sending screenshot to model")
                         withTimeoutOrNull(STEP_DECISION_TIMEOUT_MS) {
-                            liteRtEngine.decideNextAction(
+                            agentEngine.decideNextAction(
                                 goal = task.userGoal,
                                 activeSubGoal = effectiveStep.description,
                                 screenSummary = decisionScreenSummary(observation, effectiveStep.description),
@@ -1050,7 +1047,7 @@ class TaskOrchestrator(
             RecoveryStrategy.REPLAN_NEW_APPROACH
         )
         val outcome = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
-            liteRtEngine.planTask(
+            agentEngine.planTask(
                 goal = task.userGoal,
                 screenSummary = observation.summary,
                 foregroundPackage = observation.packageName,
@@ -1065,18 +1062,14 @@ class TaskOrchestrator(
         }
         val newPlan = when (outcome) {
             is PlanOutcome.Planned -> {
-                _usesModelPlanning.value = outcome.source == PlanSource.GEMMA_MODEL
+                _usesModelPlanning.value = outcome.source == PlanSource.MODEL
                 outcome.plan
             }
-            is PlanOutcome.Unavailable ->
-                cloudReplan(task, observation, completedCount, failureDetail)
-                    ?: liteRtEngine.fallbackPlan(task.userGoal)
-            is PlanOutcome.Rejected ->
-                cloudReplan(task, observation, completedCount, failureDetail)
-                    ?: liteRtEngine.fallbackPlan(task.userGoal)
-            null ->
-                cloudReplan(task, observation, completedCount, failureDetail)
-                    ?: liteRtEngine.fallbackPlan(task.userGoal)
+            // The reasoning already runs through the configured LLM API, so a failed
+            // replan falls straight to the explicitly-enabled basic fallback plan.
+            is PlanOutcome.Unavailable -> agentEngine.fallbackPlan(task.userGoal)
+            is PlanOutcome.Rejected -> agentEngine.fallbackPlan(task.userGoal)
+            null -> agentEngine.fallbackPlan(task.userGoal)
         }
         val merged = mergeReplan(currentPlan, newPlan)
         _activePlan.value = merged
@@ -1682,7 +1675,7 @@ class TaskOrchestrator(
 
         // 5.4: reflection-on-demand — only here (failure/stall), never on a clean run.
         val reflection = withTimeoutOrNull(REFLECTION_TIMEOUT_MS) {
-            liteRtEngine.reflect(
+            agentEngine.reflect(
                 ReflectionRequest(
                     goal = task.userGoal,
                     activeSubGoal = failedStep.description,
@@ -1720,7 +1713,7 @@ class TaskOrchestrator(
         if (explorationFits && progressBudget.canExplore()) {
             progressBudget.recordExplore()
             val probe = withTimeoutOrNull(EXPLORATION_TIMEOUT_MS) {
-                liteRtEngine.exploreNextAction(
+                agentEngine.exploreNextAction(
                     ExplorationRequest(
                         goal = task.userGoal,
                         missingTarget = failedStep.description,
@@ -1748,61 +1741,6 @@ class TaskOrchestrator(
     /** The package a launch step targets, so WRONG_PACKAGE failures can be classified. */
     private fun packageForAction(action: AgentAction): String? =
         if (action is AgentAction.OpenApp) action.packageName ?: appDirectory.resolvePackage(action.appQuery) else null
-
-    /**
-     * Optional cloud fallback (plan 4.8): consulted ONLY when the local planner failed,
-     * the user explicitly enabled it, and the app is not in local-only mode. It is
-     * parsed through the same strict validator as local output, so a cloud response can
-     * never introduce an action the local planner would have rejected. Returns null when
-     * disabled/unconfigured/unreachable, keeping the honest local fallback in place.
-     */
-    private suspend fun cloudReplan(
-        task: TaskEntity,
-        observation: UiObservation,
-        completedCount: Int,
-        failureDetail: String
-    ): TaskPlan? {
-        if (!cloudPlannerProvider.isEnabled()) return null
-        return try {
-            val prompt = PlannerPromptBuilder.buildPlanningPrompt(
-                com.example.planning.PlanningRequest(
-                    userCommand = task.userGoal,
-                    desiredOutcome = task.userGoal,
-                    foregroundPackage = observation.packageName,
-                    screenSummary = observation.summary,
-                    completedStepsSummary = historySummary(),
-                    lastActionResult = failureDetail,
-                    remainingStepBudget = (task.maxSteps - completedCount).coerceAtLeast(1),
-                    availableActions = PlannerPromptBuilder.availableActions(
-                        toolRegistry,
-                        notificationTriageEnabled()
-                    ),
-                    memorySummary = memoryDigest,
-                    retrievedContext = retrievedContext,
-                    lessonsSummary = lessonsDigest,
-                    variableSummary = variableSummary(),
-                    currentDateTime = PlannerPromptBuilder.formatDateTime(System.currentTimeMillis())
-                ),
-                notificationTriageEnabled()
-            )
-            val raw = cloudPlannerProvider.complete(prompt, PlannerPromptBuilder.SYSTEM_INSTRUCTION)
-            if (raw.isNullOrBlank()) return null
-            when (val parsed = com.example.planning.TaskPlanParser(toolRegistry).parse(raw, task.userGoal)) {
-                is com.example.planning.PlanParseResult.Success -> {
-                    _usesModelPlanning.value = true
-                    Log.i(TAG, "[CLOUD_FALLBACK] cloud planner produced a validated plan")
-                    parsed.plan
-                }
-                is com.example.planning.PlanParseResult.Invalid -> {
-                    Log.w(TAG, "[CLOUD_FALLBACK] cloud plan rejected: ${parsed.reason}")
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "[CLOUD_FALLBACK] failed: ${e.message}")
-            null
-        }
-    }
 
     /** The best "what should I try next" hint for an honest escalation (plan 5.8). */
     private fun escalationSuggestion(): String = when (lastFailureType) {
