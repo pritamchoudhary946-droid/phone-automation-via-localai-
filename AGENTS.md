@@ -126,6 +126,13 @@ prompt never advertises a capability the executor cannot run.
   `PlannerPromptBuilder.sanitizeUntrusted(...)` before embedding in prompts.
 - Keep the model's JSON wrapper construction in `JSONObject`/`JSONArray`, never
   string interpolation.
+- The planning prompt carries the device clock: `PlanningRequest.currentDateTime`
+  (rendered by the pure `PlannerPromptBuilder.formatDateTime(...)`) is emitted as
+  `Current date/time: ...` so the model can resolve a relative time ("in 20
+  minutes", "tomorrow at 7am") into the absolute hour/minute `set_alarm` requires.
+  `AgentPlanner.plan` fills it when the caller left it blank (a supplied value
+  wins, so tests stay deterministic). Keep it blank-degrading — a missing clock
+  omits the line, it must never fabricate a time.
 
 ## Audit invariants (do not regress)
 - `LiteRtModelManager`: a `.part` file at exactly the pinned byte count is
