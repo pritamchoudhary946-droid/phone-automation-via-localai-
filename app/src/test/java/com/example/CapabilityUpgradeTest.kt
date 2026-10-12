@@ -21,6 +21,8 @@ import com.example.agent.CalendarViewer
 import com.example.agent.CalendarViewResult
 import com.example.agent.ContactController
 import com.example.agent.ContactResult
+import com.example.agent.NoteController
+import com.example.agent.NoteResult
 import com.example.agent.AndroidDialerController
 import com.example.agent.AndroidSmsController
 import com.example.agent.DialResult
@@ -2266,6 +2268,182 @@ class CapabilityUpgradeTest {
         assertTrue("a failed calendar dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- create_note: the "note down that ..." primitive ---
+
+    @Test
+    fun createNoteExecutesWithoutAnAccessibilityService() {
+        // create_note is dispatched through the platform's documented ACTION_CREATE_NOTE
+        // intent, so like add_contact it is service-free and must resolve before the a11y gate.
+        val recorder = RecordingNoteController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            noteController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.Note(title = "Shopping", content = "milk, eggs"))
+        }
+        assertTrue("a note must be created without a bound a11y service: $result", result.success)
+        assertEquals("NOTE_DISPATCHED", result.method)
+        assertEquals("the controller must be asked exactly once", 1, recorder.calls.size)
+        assertEquals("Shopping" to "milk, eggs", recorder.calls[0])
+    }
+
+    @Test
+    fun createNoteRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            noteController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.Note(content = "hello"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("NOTE_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun createNoteReportsFailureHonestlyWhenNoNotesAppExists() {
+        val recorder = RecordingNoteController(
+            NoteResult(false, "NOTE_UNAVAILABLE", "No notes app is available")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            noteController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.Note(title = "x"))
+        }
+        assertFalse("a missing notes app must not be reported as success", result.success)
+        assertEquals("NOTE_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun createNoteParserMapsTheToolNameWithTitleAndContent() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Note the wifi password","action":"create_note","params":{"title":"Wifi","content":"password 1234","text":"ignored"},"expect":"note editor open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "make a note that the wifi password is 1234")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val action = (result as PlanParseResult.Success).plan.steps[0].action
+        assertEquals(AgentAction.Note("Wifi", "password 1234"), action)
+    }
+
+    @Test
+    fun validationRejectsAnEmptyNoteButAcceptsEitherField() {
+        val registry = ToolRegistry()
+        assertTrue(
+            "a note with neither title nor content must be rejected so an empty note is never created",
+            registry.validateAction(AgentAction.Note()) is ToolValidationResult.Invalid
+        )
+        assertTrue(
+            "a content-only note is valid",
+            registry.validateAction(AgentAction.Note(content = "just text")) is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "a title-only note is valid",
+            registry.validateAction(AgentAction.Note(title = "just a title")) is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "an oversized title must be rejected",
+            registry.validateAction(
+                AgentAction.Note(title = "x".repeat(ToolRegistry.MAX_NOTE_TITLE_CHARS + 1))
+            ) is ToolValidationResult.Invalid
+        )
+    }
+
+    @Test
+    fun createNoteSkillKeepsTitleAndContentOnReplay() {
+        val action = AgentAction.Note(title = "Shopping", content = "milk")
+        val params = com.example.planning.TaskPlanSerializer.toJson(
+            com.example.planning.TaskPlan(
+                goal = "note", fromModel = true,
+                steps = listOf(
+                    com.example.planning.PlanStep(
+                        id = 1, sequence = 1, description = "note",
+                        action = action, rawActionName = "create_note",
+                        expectedPostcondition = "note", verification = com.example.planning.VerificationMethod.NONE
+                    )
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(params, goalOverride = "note")
+        assertTrue("a saved note skill must be replayable", restored != null)
+        assertEquals(
+            "title and content must survive a skill round-trip (toParams)",
+            action, restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun promptAdvertisesCreateNote() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_CREATE_NOTE}",
+            actions.contains(ToolRegistry.TOOL_CREATE_NOTE)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "make a note titled Shopping",
+                desiredOutcome = "note editor open",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing create_note", prompt.contains("create_note"))
+    }
+
+    @Test
+    fun createNoteStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.Note -> ActionResult(true, "NOTE_DISPATCHED", "Opening notes to create the note")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Create a note","action":"create_note","params":{"content":"buy milk"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("make a note to buy milk", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("create_note must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.Note })
+    }
+
+    @Test
+    fun createNoteFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.Note -> ActionResult(false, "NOTE_UNAVAILABLE", "No notes app is available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Create a note","action":"create_note","params":{"content":"buy milk"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("make a note to buy milk", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed note dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- set_torch: the "turn on the flashlight" primitive ---
 
     @Test
@@ -3975,6 +4153,16 @@ class CapabilityUpgradeTest {
         override fun setTorch(on: Boolean): TorchResult {
             calls += on
             return result ?: TorchResult(true, if (on) "TORCH_ON" else "TORCH_OFF", "Flashlight is ${if (on) "on" else "off"}")
+        }
+    }
+
+    private class RecordingNoteController(
+        private val result: NoteResult? = null
+    ) : NoteController {
+        val calls = mutableListOf<Pair<String?, String?>>()
+        override fun createNote(title: String?, content: String?): NoteResult {
+            calls += title to content
+            return result ?: NoteResult(true, "NOTE_DISPATCHED", "Opening notes to create the note")
         }
     }
 

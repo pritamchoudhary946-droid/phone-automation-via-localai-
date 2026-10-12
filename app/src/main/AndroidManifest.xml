@@ -50,6 +50,9 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="content" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.CREATE_NOTE" />
+        </intent>
     </queries>
 
     <application

@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 37,
+  "sessions_done": 38,
   "session_cap": 48,
-  "current_milestone": "Capability: open_calendar (CalendarViewer seam + AgentAction.OpenCalendar. AgentAction.OpenCalendar is a no-arg action that dispatches the documented CalendarContract time URI, with a CATEGORY_APP_CALENDAR launch fallback; a new CalendarViewer/AndroidCalendarViewer seam reports CALENDAR_OPENED only after the intent was delivered, and CALENDAR_UNAVAILABLE/CALENDAR_PERMISSION/CALENDAR_ERROR otherwise - never a fake success. Wired through all seven action-vocabulary seams and self-evidencing like the other service-free intent-dispatch primitives. Distinct from add_calendar_event, which opens the editor to create an event.)",
+  "current_milestone": "Capability: create_note (NoteController seam + AgentAction.Note(title?, content?). Dispatches the documented Intent.ACTION_CREATE_NOTE with EXTRA_TITLE/EXTRA_TEXT; a new NoteController/AndroidNoteController seam reports NOTE_DISPATCHED only after the intent was delivered, and NOTE_UNAVAILABLE/NOTE_PERMISSION/INVALID_NOTE/NOTE_ERROR otherwise - never a fake success. Wired through all seven action-vocabulary seams and self-evidencing like the other service-free intent-dispatch primitives. Distinct from add_calendar_event/add_contact; opens the notes editor for the user and never claims the note was saved.)",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -174,41 +174,45 @@
     "capability 2026-10-12 (session 37): AndroidManifest <queries> gains a CalendarContract time-URI VIEW intent + CATEGORY_APP_CALENDAR MAIN intent so Android 11+ package visibility resolves the calendar handler.",
     "validation 2026-10-12 (session 37, toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64, ANDROID_HOME=/workspace/tools/android-sdk): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 440 tests 0 failures 0 errors 0 skipped (431 baseline + 9 new open_calendar tests).",
     "validation 2026-10-12 (session 37): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m39s; app-debug.apk produced. Both gates green.",
-    "AGENTS.md 2026-10-12 (session 37): documented the open_calendar service-free primitive and added it to the service-backed self-evidencing list + the delivered-intent list (CALENDAR_OPENED only after the CalendarContract time-URI intent was delivered; CALENDAR_UNAVAILABLE otherwise)."
+    "AGENTS.md 2026-10-12 (session 37): documented the open_calendar service-free primitive and added it to the service-backed self-evidencing list + the delivered-intent list (CALENDAR_OPENED only after the CalendarContract time-URI intent was delivered; CALENDAR_UNAVAILABLE otherwise).",
+    "capability 2026-10-12 (session 38): new AgentAction.Note(title?, content?) + tool create_note ('make a note that ...' / 'create a note titled Shopping'). A service-free intent-dispatch primitive mapped across all seven action-vocabulary seams (AgentAction + getDisplayName, ToolRegistry const/ToolDefinition/validation, TaskPlanParser.mapAction, HybridStepExecutor deterministic fast path, PlannerPromptBuilder.ACTION_CATALOG, DeviceAutomation.execute service-free branch before the a11y gate, TaskPlanSerializer toParams/toolNameFor) plus PlanVariables.substitute and both TaskOrchestrator self-evidencing lists.",
+    "capability 2026-10-12 (session 38): new com.example.agent.NoteController seam + AndroidNoteController (dispatches Intent.ACTION_CREATE_NOTE with EXTRA_TITLE/EXTRA_TEXT). Reports NOTE_DISPATCHED only after the intent was delivered to a notes handler; ActivityNotFoundException -> NOTE_UNAVAILABLE, SecurityException -> NOTE_PERMISSION, blank title+content -> INVALID_NOTE, else NOTE_ERROR - never a fake success. Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication (noteController = AndroidNoteController(this)). Validation bounds MAX_NOTE_TITLE_CHARS 200 / MAX_NOTE_CONTENT_CHARS 2000.",
+    "capability 2026-10-12 (session 38): AndroidManifest <queries> gains a CREATE_NOTE intent so Android 11+ package visibility resolves the notes handler.",
+    "validation 2026-10-12 (session 38, toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64, ANDROID_HOME=/workspace/tools/android-sdk): SKIP_APK=1 bash .github/scripts/verify.sh -> VERIFY OK, 449 tests 0 failures 0 errors (440 baseline + 9 new create_note tests). ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced. Both gates green.",
+    "AGENTS.md 2026-10-12 (session 38): documented the create_note service-free primitive and added it to the service-backed self-evidencing list + the delivered-intent list (NOTE_DISPATCHED only after the ACTION_CREATE_NOTE intent was delivered; NOTE_UNAVAILABLE otherwise)."
   ],
   "in_progress": [],
   "next_items": [
-    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Remaining investigated gap: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT). The on-device TTS speak gap is now closed.",
+    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Remaining investigated gap: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
     "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - reconcile the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2).",
-    "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session.",
-    "send_sms is compose-only by design; do not silently widen the primitive."
+    "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
   ],
-  "branch": "auto/jarvis-autonomy-20261012-2131",
-  "open_pr": 70,
+  "branch": "auto/jarvis-autonomy-20261012-2231",
+  "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "auto/jarvis-autonomy-20261012-2131",
-  "last_updated": "2026-10-12T21:45:00Z",
+  "last_run_id": "auto/jarvis-autonomy-20261012-2231",
+  "last_updated": "2026-10-12T22:45:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": {
-    "summary": "Added a speak (on-device text-to-speech) capability, opt-in gated by the existing voiceOutputEnabled setting, wired through all seven action-vocabulary seams, self-evidencing like the other service-backed primitives, and validated by 9 new unit tests and the unit-test gate.",
-    "evidence_reviewed": "main @1fd99e8 (session 34 set_torch done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the set_torch reference implementation; AudioController/RingerModeController read-back pattern and the notificationTriageEnabled opt-in gate pattern; ToolRegistry, TaskPlanParser, TaskPlanSerializer, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, AgentPlanner, AndroidDeviceAutomation, TaskOrchestrator, OmniAgentApplication.",
-    "findings": "The section 2.1 capability gap 'on-device TTS speak' had no vocabulary - a launch_app cannot make the phone talk, and no accessibility read/tap produces speech. The Torch/Audio service-free + honest-result pattern is the exact template; the notificationTriageEnabled live-lambda gate is the exact opt-in template.",
-    "milestone_implemented": "speak (AgentAction.Speak(text) + SpeakController/AndroidSpeakController via the platform TextToSpeech engine), opt-in gated by voiceOutputEnabled.",
-    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 421 tests 0 failures 0 errors 0 skipped (412 baseline + 9 new speak tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.",
-    "remaining_work": "Build the debug APK (assembleDebug); open/merge the PR per section 18 (this run); continue capability backlog (file/document picking).",
-    "honesty": "Speech is reported SPOKEN only once the platform TTS engine accepted the utterance (waits briefly for UtteranceProgressListener.onDone); an engine that never became ready is TTS_UNAVAILABLE and an opt-out is SPEAK_DISABLED - never a fake success. Real-device audio validation not performed in this sandbox (unit gate only)."
+    "summary": "Added create_note: a service-free primitive that opens the notes app to create a note pre-filled with a title and/or text. A new NoteController/AndroidNoteController seam dispatches the documented Intent.ACTION_CREATE_NOTE intent and reports NOTE_DISPATCHED only after the intent was delivered. Wired through all seven action-vocabulary seams and self-evidencing like the other intent-dispatch primitives.",
+    "evidence_reviewed": "main@0335310 (open_calendar PR #72 done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + self-evidencing invariants; DeviceAutomation.execute branch ordering (service-free primitives before the a11y gate); TaskOrchestrator.verifyAction/selfEvidencingToolSatisfied lists; TaskPlanSerializer.toParams/toolNameFor; the existing add_contact/app_info/settings intent-dispatch pattern and the toolchain (.github/scripts/verify.sh, /workspace/tools/android-sdk).",
+    "findings": "A section 2.1 capability gap: 'note down that ...' had no vocabulary. No accessibility read/tap creates a note reliably on an arbitrary screen (and driving a specific notes app's UI would be app-specific); the add_contact service-free + honest-delivery pattern is the exact template. The toolchain is present in this sandbox, so the pre-merge gate could actually run.",
+    "milestone_implemented": "AgentAction.Note(title?, content?) + NoteController/AndroidNoteController (Intent.ACTION_CREATE_NOTE), resolved before the a11y gate.",
+    "validation": "SKIP_APK=1 bash .github/scripts/verify.sh -> VERIFY OK, 449 tests 0 failures 0 errors (440 baseline + 9 new create_note tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced. Both gates green.",
+    "remaining_work": "Continue capability backlog: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
+    "honesty": "NOTE_DISPATCHED is reported only after the ACTION_CREATE_NOTE intent was delivered to a notes handler; a missing handler is NOTE_UNAVAILABLE, a denied dispatch NOTE_PERMISSION, a blank title+content INVALID_NOTE, and an unwired controller NOTE_UNAVAILABLE - never a fake success. The primitive never saves the note. Real-device validation of the notes editor opening was not performed in this sandbox (unit + build gate only)."
   },
   "report": {
-    "summary": "Added open_calendar: a service-free primitive that opens the device's calendar at the current day. A new CalendarViewer/AndroidCalendarViewer seam dispatches the documented CalendarContract time URI (with a calendar-app launch fallback) and reports CALENDAR_OPENED only after the intent was delivered. Wired through all seven action-vocabulary seams and self-evidencing like the other intent-dispatch primitives. Distinct from add_calendar_event (which pre-fills the editor to create an event).",
-    "evidence_reviewed": "main@4126fa7 (open_settings PR #71 done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + self-evidencing invariants; DeviceAutomation.execute branch ordering (service-free primitives before the a11y gate); TaskOrchestrator.verifyAction/selfEvidencingToolSatisfied lists; TaskPlanSerializer.toParams/toolNameFor; the existing app_info/settings/navigation intent-dispatch pattern and the existing AndroidCalendarController for the CalendarContract usage.",
-    "findings": "A section 2.1 capability gap: 'view the calendar' had no vocabulary. add_calendar_event only opens the editor to *create* an event; launch_app('calendar') cannot reach the app at the current day and depends on a package alias. The app_info/settings service-free + honest-delivery pattern is the exact template.",
-    "milestone_implemented": "AgentAction.OpenCalendar + CalendarViewer/AndroidCalendarViewer (CalendarContract time URI), resolved before the a11y gate.",
-    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 440 tests 0 failures 0 errors 0 skipped (431 baseline + 9 new open_calendar tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.",
-    "remaining_work": "Continue capability backlog: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT), split-screen/multi-window handling.",
-    "honesty": "CALENDAR_OPENED is reported only after the CalendarContract time-URI intent was delivered to a calendar handler; a missing handler is CALENDAR_UNAVAILABLE, a denied dispatch CALENDAR_PERMISSION, and an unwired viewer CALENDAR_UNAVAILABLE - never a fake success. Real-device validation of the calendar opening was not performed in this sandbox (unit + build gate only)."
+    "summary": "Added create_note: a service-free primitive that opens the notes app to create a note pre-filled with a title and/or text. A new NoteController/AndroidNoteController seam dispatches the documented Intent.ACTION_CREATE_NOTE intent and reports NOTE_DISPATCHED only after the intent was delivered. Wired through all seven action-vocabulary seams and self-evidencing like the other intent-dispatch primitives.",
+    "evidence_reviewed": "main@0335310 (open_calendar PR #72 done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + self-evidencing invariants; DeviceAutomation.execute branch ordering (service-free primitives before the a11y gate); TaskOrchestrator.verifyAction/selfEvidencingToolSatisfied lists; TaskPlanSerializer.toParams/toolNameFor; the existing add_contact/app_info/settings intent-dispatch pattern and the toolchain (.github/scripts/verify.sh, /workspace/tools/android-sdk).",
+    "findings": "A section 2.1 capability gap: 'note down that ...' had no vocabulary. No accessibility read/tap creates a note reliably on an arbitrary screen (and driving a specific notes app's UI would be app-specific); the add_contact service-free + honest-delivery pattern is the exact template. The toolchain is present in this sandbox, so the pre-merge gate could actually run.",
+    "milestone_implemented": "AgentAction.Note(title?, content?) + NoteController/AndroidNoteController (Intent.ACTION_CREATE_NOTE), resolved before the a11y gate.",
+    "validation": "SKIP_APK=1 bash .github/scripts/verify.sh -> VERIFY OK, 449 tests 0 failures 0 errors (440 baseline + 9 new create_note tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced. Both gates green.",
+    "remaining_work": "Continue capability backlog: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
+    "honesty": "NOTE_DISPATCHED is reported only after the ACTION_CREATE_NOTE intent was delivered to a notes handler; a missing handler is NOTE_UNAVAILABLE, a denied dispatch NOTE_PERMISSION, a blank title+content INVALID_NOTE, and an unwired controller NOTE_UNAVAILABLE - never a fake success. The primitive never saves the note. Real-device validation of the notes editor opening was not performed in this sandbox (unit + build gate only)."
   }
 }

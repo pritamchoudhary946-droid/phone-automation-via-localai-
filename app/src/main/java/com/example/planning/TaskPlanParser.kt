@@ -320,6 +320,10 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                     .trim().lowercase().replace(' ', '_').replace('-', '_')
             )
             ToolRegistry.TOOL_OPEN_CALENDAR -> AgentAction.OpenCalendar
+            ToolRegistry.TOOL_CREATE_NOTE -> AgentAction.Note(
+                title = str(params, "title", "name", "subject").ifBlank { null },
+                content = str(params, "content", "text", "body", "message", "note").ifBlank { null }
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications

@@ -273,6 +273,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic calendar dispatch"
             )
 
+            is AgentAction.Note -> FastPathDecision.Execute(
+                action,
+                "deterministic note-editor dispatch"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"

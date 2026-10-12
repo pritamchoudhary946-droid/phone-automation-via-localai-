@@ -60,6 +60,7 @@ open class ToolRegistry {
         const val TOOL_SPEAK = "speak"
         const val TOOL_OPEN_SETTINGS = "open_settings"
         const val TOOL_OPEN_CALENDAR = "open_calendar"
+        const val TOOL_CREATE_NOTE = "create_note"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -76,6 +77,9 @@ open class ToolRegistry {
         const val MAX_TIMER_SECONDS = 24 * 60 * 60
         /** Longest text a single speak step may utter, to bound TTS work. */
         const val MAX_SPEAK_CHARS = 1000
+        /** Upper bound on a note title/body so a runaway model value cannot flood the notes editor. */
+        const val MAX_NOTE_TITLE_CHARS = 200
+        const val MAX_NOTE_CONTENT_CHARS = 2000
         /** Longest forward day offset a calendar event may be scheduled for. */
         const val MAX_EVENT_DAY_OFFSET = 30
 
@@ -305,6 +309,12 @@ open class ToolRegistry {
             name = TOOL_OPEN_CALENDAR,
             description = "Opens the device's calendar app. Use for 'open my calendar', 'show the calendar', 'what's on today'. It only opens the calendar for the user to look at; it never adds or changes an event (use add_calendar_event to create one)",
             requiredParameters = emptyList()
+        ),
+        TOOL_CREATE_NOTE to ToolDefinition(
+            name = TOOL_CREATE_NOTE,
+            description = "Opens the notes app to create a note. Use for 'make a note that the wifi password is 1234', 'note down to call Sam tomorrow', 'create a note titled Shopping'. Provide a title and/or the note text. No screen read or tap can create a note reliably",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("title", "content", "text", "body", "message", "name")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -649,6 +659,17 @@ open class ToolRegistry {
             // open_calendar carries no parameter (it always opens the current day), so
             // there is no blank/unsafe value to reject; it is always a valid request.
             is AgentAction.OpenCalendar -> ToolValidationResult.Valid
+            is AgentAction.Note -> {
+                when {
+                    action.title.isNullOrBlank() && action.content.isNullOrBlank() ->
+                        ToolValidationResult.Invalid("create_note requires a non-blank title or content")
+                    (action.title?.length ?: 0) > MAX_NOTE_TITLE_CHARS ->
+                        ToolValidationResult.Invalid("create_note title is too long (max $MAX_NOTE_TITLE_CHARS chars)")
+                    (action.content?.length ?: 0) > MAX_NOTE_CONTENT_CHARS ->
+                        ToolValidationResult.Invalid("create_note content is too long (max $MAX_NOTE_CONTENT_CHARS chars)")
+                    else -> ToolValidationResult.Valid
+                }
+            }
             is AgentAction.Wait -> {
                 if (action.durationMs < 0 || action.durationMs > 30_000) {
                     ToolValidationResult.Invalid("Wait duration must be between 0ms and 30000ms: ${action.durationMs}")

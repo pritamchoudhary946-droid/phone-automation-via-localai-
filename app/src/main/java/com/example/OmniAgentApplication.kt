@@ -204,7 +204,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // change there, so nothing consequential is performed and it never claims
                 // a setting was changed.
                 settingsController = com.example.agent.AndroidSettingsController(this),
-                calendarViewer = com.example.agent.AndroidCalendarViewer(this)
+                calendarViewer = com.example.agent.AndroidCalendarViewer(this),
+                // Note-creation primitive: dispatches the platform's documented
+                // ACTION_CREATE_NOTE intent with the title/text pre-filled, service-free
+                // like the contact/calendar inserts (no UI tap creates a note reliably on
+                // an arbitrary screen). It opens the notes editor for the user and never
+                // claims the note was saved.
+                noteController = com.example.agent.AndroidNoteController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

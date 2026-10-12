@@ -301,6 +301,18 @@ sealed class AgentAction {
      * it never adds or changes an event (use [AddCalendarEvent] to create one).
      */
     object OpenCalendar : AgentAction()
+    /**
+     * Opens the notes app to create a note titled [title] with [content] - the "note
+     * down that ..." / "make a note titled Shopping" primitive. Like [AddContact] the
+     * notes app is a separate process no accessibility tap can drive reliably on an
+     * arbitrary screen, so the platform's documented
+     * [android.content.Intent.ACTION_CREATE_NOTE] intent (the notes app's own editor,
+     * pre-filled) is dispatched and resolved before the accessibility-service gate. At
+     * least one of [title]/[content] is required so an empty note is never created. It
+     * only *opens* the editor for the user to save; it never saves the note itself
+     * (section 3.5).
+     */
+    data class Note(val title: String? = null, val content: String? = null) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -381,6 +393,7 @@ sealed class AgentAction {
             is Speak -> "Say: \"$text\""
             is OpenSettings -> "Open ${panel} settings"
             is OpenCalendar -> "Open the calendar"
+            is Note -> title?.takeIf { it.isNotBlank() }?.let { "Create note '$it'" } ?: "Create a note"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

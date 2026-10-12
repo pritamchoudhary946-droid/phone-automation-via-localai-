@@ -285,6 +285,21 @@ unwired viewer returns `CALENDAR_UNAVAILABLE`, never a fabricated success. It is
 injectable via the `AndroidDeviceAutomation` constructor and wired in
 `OmniAgentApplication`.
 
+`create_note` (`AgentAction.Note(title?, content?)` + `NoteController` -> the documented
+`Intent.ACTION_CREATE_NOTE` with the `EXTRA_TITLE`/`EXTRA_TEXT` extras) follows the same
+rule: no accessibility-tree read or UI tap opens the notes app's own editor pre-filled
+with a note reliably on an arbitrary screen (and driving a specific notes app's UI would
+be app-specific), so it is resolved before the a11y gate and opens the notes app for the
+user to review and save. It carries an optional `title` and `content`, and requires at
+least one of the two so an empty note is never created (`ToolRegistry` validation rejects
+both-null; bounds are `MAX_NOTE_TITLE_CHARS` 200 / `MAX_NOTE_CONTENT_CHARS` 2000). It
+deliberately opens the editor and never saves the note itself: saving is the user's action
+(section 3.5). Because the notes app is a separate process the app cannot read back that
+the note was saved, so it reports only that the intent was *delivered* (`NOTE_DISPATCHED`)
+and never claims the note was created (`NOTE_UNAVAILABLE` / `NOTE_PERMISSION` /
+`INVALID_NOTE` / `NOTE_ERROR` otherwise). The prompt must never let the model claim a
+note was saved.
+
 `set_torch` (`AgentAction.SetTorch` + `TorchController` -> `CameraManager.setTorchMode`
 on the back camera with a flash unit) follows the same rule: the torch is a
 camera-hardware setting no accessibility-tree read or UI tap toggles reliably on an
@@ -557,7 +572,7 @@ output is off, read live per call by `AgentPlanner`.
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
   `open_app_info`, `open_settings`, `set_torch`,
-  `speak`, `open_calendar` and
+  `speak`, `open_calendar`, `create_note` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
@@ -566,7 +581,8 @@ output is off, read live per call by `AgentPlanner`.
   `mailto:`, the maps app via `Intent.ACTION_VIEW` `geo:`, the Settings app via
   `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` (app info) or the named
   `Settings.ACTION_*` panels (open_settings), the text-to-speech engine via
-  `TextToSpeech`, the calendar app via the `CalendarContract` time URI (open_calendar))
+  `TextToSpeech`, the calendar app via the `CalendarContract` time URI (open_calendar),
+  the notes app via `Intent.ACTION_CREATE_NOTE` (create_note))
   that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
@@ -596,6 +612,8 @@ output is off, read live per call by `AgentPlanner`.
   intent was delivered to the Settings app (`SETTINGS_UNAVAILABLE` otherwise), and
   `open_calendar` reports `CALENDAR_OPENED` only after the `CalendarContract` time-URI
   intent was delivered to a calendar app (`CALENDAR_UNAVAILABLE` otherwise), and
+  `create_note` reports `NOTE_DISPATCHED` only after the `Intent.ACTION_CREATE_NOTE`
+  intent was delivered to a notes app (`NOTE_UNAVAILABLE` otherwise), and
   `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
   confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the
