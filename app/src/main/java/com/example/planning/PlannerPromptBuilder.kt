@@ -94,6 +94,7 @@ object PlannerPromptBuilder {
     ): String = buildString {
         appendLine("Task: produce the ordered subgoals needed to satisfy the user command.")
         appendLine("User command: \"${request.userCommand}\"")
+        appendLine("Current date/time: ${request.currentDateTime}")
         appendLine("Desired final outcome: ${request.desiredOutcome}")
         appendLine("Foreground package now: ${request.foregroundPackage ?: "unknown"}")
         appendLine("Remaining step budget: ${request.remainingStepBudget}")
@@ -242,6 +243,19 @@ object PlannerPromptBuilder {
         .replace(Regex("(?i)^\\s*(system|assistant|user|developer)\\s*:", RegexOption.MULTILINE), "text:")
         .replace(Regex("[\\r\\n]+"), " ")
         .trim()
+
+    /**
+     * Renders [epochMillis] in the device's local timezone as
+     * "yyyy-MM-dd HH:mm <Weekday>" for the planning prompt. Pure so the exact
+     * planner-visible text is unit-testable without a device; the model uses it to
+     * resolve relative times ("in 20 minutes", "tomorrow at 7") into the absolute
+     * hour/minute that set_alarm requires.
+     */
+    fun formatDateTime(epochMillis: Long, zone: java.util.TimeZone = java.util.TimeZone.getDefault()): String {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm EEEE", java.util.Locale.US)
+        fmt.timeZone = zone
+        return fmt.format(java.util.Date(epochMillis))
+    }
 
     const val MAX_SCREEN_CHARS = 1200
     const val MAX_MEMORY_CHARS = 600

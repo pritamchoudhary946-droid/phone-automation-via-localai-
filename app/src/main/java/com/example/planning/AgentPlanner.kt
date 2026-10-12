@@ -38,6 +38,16 @@ class AgentPlanner(
     private val reflector = Reflector(inferenceEngine)
 
     /**
+     * Fills the current date/time when the caller did not already provide one, so the
+     * model can resolve a relative time ("in 20 minutes", "tomorrow at 7") into the
+     * absolute hour/minute that set_alarm needs. A caller-supplied value (tests) is
+     * kept, which also makes the prompt deterministic in unit tests.
+     */
+    private fun PlanningRequest.withCurrentDateTime(): PlanningRequest =
+        if (currentDateTime.isNotBlank()) this
+        else copy(currentDateTime = PlannerPromptBuilder.formatDateTime(System.currentTimeMillis()))
+
+    /**
      * When false (the default), a task is [PlanOutcome.Unavailable] instead of being
      * silently planned by the keyword fallback while the local model is not loaded
      * (plan 6.1: never quietly run keywords). A user-visible, explicitly enabled
@@ -64,7 +74,10 @@ class AgentPlanner(
             }
         }
 
-        val prompt = PlannerPromptBuilder.buildPlanningPrompt(request, notificationTriageEnabled())
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            request.withCurrentDateTime(),
+            notificationTriageEnabled()
+        )
         var lastRaw = ""
         var lastReason = "unknown"
 

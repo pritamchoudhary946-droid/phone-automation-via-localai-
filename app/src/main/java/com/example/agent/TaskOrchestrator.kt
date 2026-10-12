@@ -1769,7 +1769,8 @@ class TaskOrchestrator(
                     memorySummary = memoryDigest,
                     retrievedContext = retrievedContext,
                     lessonsSummary = lessonsDigest,
-                    variableSummary = variableSummary()
+                    variableSummary = variableSummary(),
+                    currentDateTime = PlannerPromptBuilder.formatDateTime(System.currentTimeMillis())
                 ),
                 notificationTriageEnabled()
             )

@@ -19,7 +19,14 @@ data class PlanningRequest(
     /** Bounded lessons from past episodes relevant to this goal (plan 5.9), or blank. */
     val lessonsSummary: String = "",
     /** Values captured by earlier steps (plan 9.4), so later steps can use `{{name}}`. */
-    val variableSummary: String = ""
+    val variableSummary: String = "",
+    /**
+     * The device's current local date and time, e.g. "2026-10-12 07:30 Sunday".
+     * Without it the model cannot resolve a relative time ("in 20 minutes", "tomorrow
+     * at 7") into the absolute hour/minute that set_alarm needs. Blank when the caller
+     * did not supply it, so the prompt simply omits the line.
+     */
+    val currentDateTime: String = ""
 )
 
 /** Everything the model needs to pick the single next action during execution. */
