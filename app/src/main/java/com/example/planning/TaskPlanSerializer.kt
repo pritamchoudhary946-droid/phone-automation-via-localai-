@@ -122,6 +122,7 @@ object TaskPlanSerializer {
         is AgentAction.NavigateTo -> JSONObject().put("target", target)
         is AgentAction.OpenAppInfo -> JSONObject().put("packageName", packageName)
         is AgentAction.OpenSettings -> JSONObject().put("panel", panel)
+        is AgentAction.OpenCalendar -> JSONObject()
         is AgentAction.SetTorch -> JSONObject().put("on", on)
         is AgentAction.Speak -> JSONObject().put("text", text)
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
@@ -230,6 +231,7 @@ object TaskPlanSerializer {
         is AgentAction.NavigateTo -> com.example.agent.ToolRegistry.TOOL_NAVIGATE_TO
         is AgentAction.OpenAppInfo -> com.example.agent.ToolRegistry.TOOL_OPEN_APP_INFO
         is AgentAction.OpenSettings -> com.example.agent.ToolRegistry.TOOL_OPEN_SETTINGS
+        is AgentAction.OpenCalendar -> com.example.agent.ToolRegistry.TOOL_OPEN_CALENDAR
         is AgentAction.SetTorch -> com.example.agent.ToolRegistry.TOOL_SET_TORCH
         is AgentAction.Speak -> com.example.agent.ToolRegistry.TOOL_SPEAK
         is AgentAction.PlayMedia -> com.example.agent.ToolRegistry.TOOL_PLAY_MEDIA

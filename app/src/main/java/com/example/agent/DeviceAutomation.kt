@@ -240,7 +240,13 @@ class AndroidDeviceAutomation(
     // app-info/audio primitives it is resolved before the a11y-service gate. An unwired
     // controller gets an honest "unavailable" result, never a silent no-op. It only opens
     // the panel; it never changes anything there.
-    private val settingsController: SettingsController? = null
+    private val settingsController: SettingsController? = null,
+    // Opening the calendar is dispatched through the platform's documented calendar time
+    // URI (with a CATEGORY_APP_CALENDAR launch fallback), not an accessibility-tree
+    // control, so like the app-info/settings primitives it is resolved before the
+    // a11y-service gate. An unwired viewer gets an honest "unavailable" result, never a
+    // silent no-op. It only opens the calendar; it never adds or changes an event.
+    private val calendarViewer: CalendarViewer? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -573,6 +579,17 @@ class AndroidDeviceAutomation(
             val controller = settingsController
                 ?: return@withContext ActionResult(false, "SETTINGS_UNAVAILABLE", "Settings dispatch is not available")
             val result = controller.openPanel(panel)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Opening the calendar is likewise service-free: it is dispatched through the
+        // platform's documented calendar time URI (with a calendar-app launch fallback),
+        // so it is resolved before the a11y-service gate. This is the "open my calendar"
+        // primitive; it only opens the calendar for the user to look at and changes
+        // nothing itself, so it reports only that the intent was delivered.
+        if (action is AgentAction.OpenCalendar) {
+            val viewer = calendarViewer
+                ?: return@withContext ActionResult(false, "CALENDAR_UNAVAILABLE", "Calendar dispatch is not available")
+            val result = viewer.openCalendar(System.currentTimeMillis())
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

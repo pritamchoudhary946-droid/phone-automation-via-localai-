@@ -59,6 +59,7 @@ open class ToolRegistry {
         const val TOOL_SET_TORCH = "set_torch"
         const val TOOL_SPEAK = "speak"
         const val TOOL_OPEN_SETTINGS = "open_settings"
+        const val TOOL_OPEN_CALENDAR = "open_calendar"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -299,6 +300,11 @@ open class ToolRegistry {
             description = "Opens a named system Settings panel. Use for 'open wifi settings', 'show bluetooth settings', 'open display settings', 'take me to accessibility settings'. Provide a panel name such as wifi, bluetooth, display, sound, battery, location, apps, accessibility, network, data_usage, airplane_mode, nfc, date, language, storage, security, privacy, cast, night_display, keyboard, dnd, home or settings. It only opens the panel; it never changes a setting there",
             requiredParameters = listOf("panel"),
             optionalParameters = listOf("name", "setting", "settingsPanel", "section", "target", "value")
+        ),
+        TOOL_OPEN_CALENDAR to ToolDefinition(
+            name = TOOL_OPEN_CALENDAR,
+            description = "Opens the device's calendar app. Use for 'open my calendar', 'show the calendar', 'what's on today'. It only opens the calendar for the user to look at; it never adds or changes an event (use add_calendar_event to create one)",
+            requiredParameters = emptyList()
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -640,6 +646,9 @@ open class ToolRegistry {
                     ToolValidationResult.Valid
                 }
             }
+            // open_calendar carries no parameter (it always opens the current day), so
+            // there is no blank/unsafe value to reject; it is always a valid request.
+            is AgentAction.OpenCalendar -> ToolValidationResult.Valid
             is AgentAction.Wait -> {
                 if (action.durationMs < 0 || action.durationMs > 30_000) {
                     ToolValidationResult.Invalid("Wait duration must be between 0ms and 30000ms: ${action.durationMs}")

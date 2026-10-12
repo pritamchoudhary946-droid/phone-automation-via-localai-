@@ -270,6 +270,21 @@ back that the panel was shown, so it reports only that the intent was *delivered
 `SETTINGS_PERMISSION` / `INVALID_SETTINGS_PANEL` otherwise). The prompt must never let the
 model claim a setting was changed.
 
+`open_calendar` (`AgentAction.OpenCalendar` + `CalendarViewer` ->
+`Intent.ACTION_VIEW` with the documented `CalendarContract.CONTENT_URI` `time/`
+URI of today's midnight) follows the same rule: no accessibility-tree read or UI tap
+opens the calendar app at a chosen day reliably on an arbitrary screen (and the calendar
+app's own UI is app/device-specific), so it is resolved before the a11y gate and shows
+the user their day. It is distinct from `add_calendar_event` (which opens the calendar
+*editor* pre-filled to create an event) - `open_calendar` only *views* the calendar.
+Because the calendar app is a separate process the app cannot read back that the day was
+shown, so it reports only that the intent was *delivered* (`CALENDAR_OPENED`) and never
+claims an event was created or read (`CALENDAR_UNAVAILABLE` / `CALENDAR_PERMISSION`
+otherwise). `AndroidCalendarViewer.openCalendar(nowMillis)` resolves today's midnight; an
+unwired viewer returns `CALENDAR_UNAVAILABLE`, never a fabricated success. It is
+injectable via the `AndroidDeviceAutomation` constructor and wired in
+`OmniAgentApplication`.
+
 `set_torch` (`AgentAction.SetTorch` + `TorchController` -> `CameraManager.setTorchMode`
 on the back camera with a flash unit) follows the same rule: the torch is a
 camera-hardware setting no accessibility-tree read or UI tap toggles reliably on an
@@ -542,7 +557,7 @@ output is off, read live per call by `AgentPlanner`.
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
   `open_app_info`, `open_settings`, `set_torch`,
-  `speak` and
+  `speak`, `open_calendar` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
@@ -551,7 +566,8 @@ output is off, read live per call by `AgentPlanner`.
   `mailto:`, the maps app via `Intent.ACTION_VIEW` `geo:`, the Settings app via
   `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` (app info) or the named
   `Settings.ACTION_*` panels (open_settings), the text-to-speech engine via
-  `TextToSpeech`) that no
+  `TextToSpeech`, the calendar app via the `CalendarContract` time URI (open_calendar))
+  that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
@@ -578,6 +594,8 @@ output is off, read live per call by `AgentPlanner`.
   intent was delivered to a settings app (`APP_INFO_UNAVAILABLE` otherwise), and
   `open_settings` reports `SETTINGS_OPENED` only after the `Settings.ACTION_*` panel
   intent was delivered to the Settings app (`SETTINGS_UNAVAILABLE` otherwise), and
+  `open_calendar` reports `CALENDAR_OPENED` only after the `CalendarContract` time-URI
+  intent was delivered to a calendar app (`CALENDAR_UNAVAILABLE` otherwise), and
   `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
   confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the

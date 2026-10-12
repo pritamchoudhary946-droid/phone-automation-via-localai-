@@ -82,6 +82,7 @@ object PlannerPromptBuilder {
         """- set_torch: {"on":<true|false>}   (turns the device flashlight/torch on or off; use for "turn on the flashlight" / "switch the torch off" - the state is read back, so never claim it changed unless it actually did)""",
         """- speak: {"text":"<what to say>"}   (speaks text aloud through the device's text-to-speech engine; use for "say good morning" / "tell me what it says" / "read that out loud" - opt-in, and never claim it spoke unless the platform confirmed)""",
         """- open_settings: {"panel":"<wifi|bluetooth|display|sound|battery|location|apps|accessibility|network|data_usage|airplane_mode|nfc|date|language|storage|security|privacy|cast|night_display|keyboard|dnd|home|settings>"}   (opens a named system Settings panel; use for "open wifi settings" / "show bluetooth settings" / "take me to display settings" - it only opens the panel and never changes anything there, so never claim a setting was changed)""",
+        """- open_calendar: {}   (opens the device's calendar app at the current day; use for "open my calendar" / "show the calendar" / "what's on today" - it only opens the calendar and never adds or changes an event, so never claim an event was created)""",
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",

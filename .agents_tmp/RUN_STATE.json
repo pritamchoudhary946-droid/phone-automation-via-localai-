@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 36,
+  "sessions_done": 37,
   "session_cap": 48,
-  "current_milestone": "Capability: open_settings (named system Settings panel primitive; AgentAction.OpenSettings + SettingsController/AndroidSettingsController. A *closed* SettingsPanel enum maps each named panel to a documented Settings.ACTION_* constant; an unknown panel is refused honestly with INVALID_SETTINGS_PANEL before any intent is built (and at the tool boundary). Wired through all seven action-vocabulary seams and self-evidencing like the other service-free intent-dispatch primitives.)",
+  "current_milestone": "Capability: open_calendar (CalendarViewer seam + AgentAction.OpenCalendar. AgentAction.OpenCalendar is a no-arg action that dispatches the documented CalendarContract time URI, with a CATEGORY_APP_CALENDAR launch fallback; a new CalendarViewer/AndroidCalendarViewer seam reports CALENDAR_OPENED only after the intent was delivered, and CALENDAR_UNAVAILABLE/CALENDAR_PERMISSION/CALENDAR_ERROR otherwise - never a fake success. Wired through all seven action-vocabulary seams and self-evidencing like the other service-free intent-dispatch primitives. Distinct from add_calendar_event, which opens the editor to create an event.)",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -168,7 +168,13 @@
     "capability 2026-10-12 (session 36): new AgentAction.OpenSettings + tool open_settings ('open wifi/bluetooth/display/accessibility settings'). A closed SettingsPanel enum (24 panels) maps named panels to documented Settings.ACTION_* constants; SettingsPanel.fromKey resolves keys and natural aliases and returns null for an unknown value, so an unrecognised panel is INVALID_SETTINGS_PANEL. Wired through all seven seams (AgentAction, ToolRegistry const/ToolDefinition/validateAction, TaskPlanParser, HybridStepExecutor fast path, PlannerPromptBuilder.ACTION_CATALOG, AndroidDeviceAutomation.execute service-free branch before the a11y gate, TaskPlanSerializer toParams/toVerificationTarget/toolNameFor) plus PlanVariables.substitute and the TaskOrchestrator self-evidencing lists. Distinct from open_app_info (one app's page) and open_quick_settings (the shade).",
     "validation 2026-10-12 (session 36, toolchain present: JAVA_HOME=/workspace/tools/jdk-21.0.5+11, ANDROID_HOME=/workspace/tools/android-sdk): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m10s, 431 tests 0 failures 0 errors (421 baseline + 10 new open_settings tests).",
     "validation 2026-10-12 (session 36): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m38s; app-debug.apk produced.",
-    "AGENTS.md 2026-10-12 (session 36): open_settings added to the service-backed self-evidencing list, the service list and the delivered-intent list (SETTINGS_OPENED only after the Settings.ACTION_* panel intent was delivered; SETTINGS_UNAVAILABLE otherwise)."
+    "AGENTS.md 2026-10-12 (session 36): open_settings added to the service-backed self-evidencing list, the service list and the delivered-intent list (SETTINGS_OPENED only after the Settings.ACTION_* panel intent was delivered; SETTINGS_UNAVAILABLE otherwise).",
+    "capability 2026-10-12 (session 37): new AgentAction.OpenCalendar + tool open_calendar ('open my calendar' / 'show the calendar' / 'what's on today'). A no-arg action mapped across all seven action-vocabulary seams (AgentAction + getDisplayName, ToolRegistry const/ToolDefinition/always-Valid validation, TaskPlanParser.mapAction, HybridStepExecutor deterministic fast path, PlannerPromptBuilder.ACTION_CATALOG, DeviceAutomation.execute service-free branch before the a11y gate, TaskPlanSerializer toParams/toolNameFor) plus PlanVariables.substitute (no params -> else branch) and both TaskOrchestrator self-evidencing lists.",
+    "capability 2026-10-12 (session 37): new com.example.agent.CalendarViewer seam + AndroidCalendarViewer (dispatches the documented CalendarContract.CONTENT_URI 'time/<millis>' ACTION_VIEW intent, with a CATEGORY_APP_CALENDAR ACTION_MAIN launch fallback). Reports CALENDAR_OPENED only after the intent was delivered to a calendar handler; ActivityNotFoundException -> CALENDAR_UNAVAILABLE, SecurityException -> CALENDAR_PERMISSION, else CALENDAR_ERROR - never a fake success. Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication (calendarViewer = AndroidCalendarViewer(this)).",
+    "capability 2026-10-12 (session 37): AndroidManifest <queries> gains a CalendarContract time-URI VIEW intent + CATEGORY_APP_CALENDAR MAIN intent so Android 11+ package visibility resolves the calendar handler.",
+    "validation 2026-10-12 (session 37, toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64, ANDROID_HOME=/workspace/tools/android-sdk): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 440 tests 0 failures 0 errors 0 skipped (431 baseline + 9 new open_calendar tests).",
+    "validation 2026-10-12 (session 37): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m39s; app-debug.apk produced. Both gates green.",
+    "AGENTS.md 2026-10-12 (session 37): documented the open_calendar service-free primitive and added it to the service-backed self-evidencing list + the delivered-intent list (CALENDAR_OPENED only after the CalendarContract time-URI intent was delivered; CALENDAR_UNAVAILABLE otherwise)."
   ],
   "in_progress": [],
   "next_items": [
@@ -177,12 +183,12 @@
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session.",
     "send_sms is compose-only by design; do not silently widen the primitive."
   ],
-  "branch": "auto/jarvis-autonomy-20261012-1931",
+  "branch": "auto/jarvis-autonomy-20261012-2131",
   "open_pr": 70,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "auto/jarvis-autonomy-20261012-2040",
-  "last_updated": "2026-10-12T20:55:00Z",
+  "last_run_id": "auto/jarvis-autonomy-20261012-2131",
+  "last_updated": "2026-10-12T21:45:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
@@ -197,12 +203,12 @@
     "honesty": "Speech is reported SPOKEN only once the platform TTS engine accepted the utterance (waits briefly for UtteranceProgressListener.onDone); an engine that never became ready is TTS_UNAVAILABLE and an opt-out is SPEAK_DISABLED - never a fake success. Real-device audio validation not performed in this sandbox (unit gate only)."
   },
   "report": {
-    "summary": "Added open_settings: a named system Settings panel primitive. A closed SettingsPanel enum (24 panels) maps each name to a documented Settings.ACTION_* constant; an unknown panel is refused honestly before any intent is built. Wired through all seven action-vocabulary seams and self-evidencing like the other service-free intent-dispatch primitives.",
-    "evidence_reviewed": "main@ab5b712 (speak PR #70); AGENTS.md action-vocabulary checklist + self-evidencing invariants; DeviceAutomation.execute branch ordering (service-free primitives before the a11y gate); TaskOrchestrator.verifyAction/selfEvidencingToolSatisfied lists; TaskPlanSerializer.toParams/toolNameFor; existing open_app_info/dial_number patterns.",
-    "findings": "The section 2.1 capability gap 'open a named system settings panel' had no vocabulary: launch_app cannot open a specific panel and no accessibility tap reaches the Settings app reliably on an arbitrary screen. open_app_info covers one app's page; open_quick_settings covers the shade, not a named panel. The open_app_info service-free + honest-delivery pattern is the exact template.",
-    "milestone_implemented": "AgentAction.OpenSettings(panel) + SettingsController/SettingsPanel/AndroidSettingsController (documented Settings.ACTION_* intents), resolved before the a11y gate.",
-    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 431 tests 0 failures 0 errors (421 baseline + 10 new open_settings tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.",
-    "remaining_work": "Continue capability backlog (file/document picking, split-screen/multi-window handling).",
-    "honesty": "SETTINGS_OPENED is reported only after the panel intent was delivered to a Settings handler; an unknown panel is INVALID_SETTINGS_PANEL and a missing/denied handler is SETTINGS_UNAVAILABLE/SETTINGS_PERMISSION/SETTINGS_ERROR - never a fake success. Real-device validation of the panels was not performed in this sandbox (unit + build gate only)."
+    "summary": "Added open_calendar: a service-free primitive that opens the device's calendar at the current day. A new CalendarViewer/AndroidCalendarViewer seam dispatches the documented CalendarContract time URI (with a calendar-app launch fallback) and reports CALENDAR_OPENED only after the intent was delivered. Wired through all seven action-vocabulary seams and self-evidencing like the other intent-dispatch primitives. Distinct from add_calendar_event (which pre-fills the editor to create an event).",
+    "evidence_reviewed": "main@4126fa7 (open_settings PR #71 done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + self-evidencing invariants; DeviceAutomation.execute branch ordering (service-free primitives before the a11y gate); TaskOrchestrator.verifyAction/selfEvidencingToolSatisfied lists; TaskPlanSerializer.toParams/toolNameFor; the existing app_info/settings/navigation intent-dispatch pattern and the existing AndroidCalendarController for the CalendarContract usage.",
+    "findings": "A section 2.1 capability gap: 'view the calendar' had no vocabulary. add_calendar_event only opens the editor to *create* an event; launch_app('calendar') cannot reach the app at the current day and depends on a package alias. The app_info/settings service-free + honest-delivery pattern is the exact template.",
+    "milestone_implemented": "AgentAction.OpenCalendar + CalendarViewer/AndroidCalendarViewer (CalendarContract time URI), resolved before the a11y gate.",
+    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 440 tests 0 failures 0 errors 0 skipped (431 baseline + 9 new open_calendar tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.",
+    "remaining_work": "Continue capability backlog: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT), split-screen/multi-window handling.",
+    "honesty": "CALENDAR_OPENED is reported only after the CalendarContract time-URI intent was delivered to a calendar handler; a missing handler is CALENDAR_UNAVAILABLE, a denied dispatch CALENDAR_PERMISSION, and an unwired viewer CALENDAR_UNAVAILABLE - never a fake success. Real-device validation of the calendar opening was not performed in this sandbox (unit + build gate only)."
   }
 }

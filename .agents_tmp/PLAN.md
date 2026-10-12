@@ -2148,3 +2148,25 @@ physical-device pass is claimed unless it actually ran on the device.
   when list caused a Kotlin syntax error (caught by the gate, not merged).
 - Validation: SKIP_APK=1 verify.sh -> BUILD SUCCESSFUL, 412 tests 0 failures
   (402 baseline + 10 new set_torch tests).
+
+
+## Run 2026-10-12 (session 37) - open_calendar capability
+- Milestone: new AgentAction.OpenCalendar + tool open_calendar ("open my calendar" /
+  "show the calendar" / "what's on today"). The calendar app is a separate process no
+  accessibility tap opens at a chosen day reliably on an arbitrary screen, so it is
+  resolved before the a11y gate like the app_info/settings/navigation primitives.
+- New CalendarViewer seam + AndroidCalendarViewer: dispatches the documented
+  CalendarContract time URI (`content://com.android.calendar/time/<millis>`) with a
+  CATEGORY_APP_CALENDAR ACTION_MAIN launch fallback; reports CALENDAR_OPENED only after
+  the intent was delivered (CALENDAR_UNAVAILABLE / CALENDAR_PERMISSION / CALENDAR_ERROR
+  otherwise), never a fake success. Distinct from add_calendar_event (opens the editor
+  to create an event).
+- Wired through all seven action-vocabulary seams (AgentAction, ToolRegistry,
+  TaskPlanParser, HybridStepExecutor, PlannerPromptBuilder, DeviceAutomation,
+  TaskPlanSerializer) plus PlanVariables.substitute and both TaskOrchestrator
+  self-evidencing lists; AndroidManifest <queries> extended for calendar visibility.
+- Validation: ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 440
+  tests 0 failures 0 errors 0 skipped (431 baseline + 9 new open_calendar tests);
+  ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.
+- Next: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT),
+  split-screen/multi-window handling.
