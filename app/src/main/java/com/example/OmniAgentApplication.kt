@@ -170,7 +170,10 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 alarmController = com.example.agent.AndroidAlarmController(this),
                 // Countdown-timer primitive: dispatches AlarmClock ACTION_SET_TIMER,
                 // service-free like the alarm (distinct from it - a timer counts down).
-                timerController = com.example.agent.AndroidTimerController(this)
+                timerController = com.example.agent.AndroidTimerController(this),
+                // Calendar-event primitive: dispatches CalendarContract ACTION_INSERT,
+                // service-free like the alarm/timer (no UI tap adds an event reliably).
+                calendarController = com.example.agent.AndroidCalendarController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

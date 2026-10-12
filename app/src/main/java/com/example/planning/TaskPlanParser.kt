@@ -275,6 +275,14 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 seconds = parseTimerSeconds(params),
                 label = str(params, "label", "message", "name").ifBlank { null }
             )
+            ToolRegistry.TOOL_ADD_CALENDAR_EVENT -> AgentAction.AddCalendarEvent(
+                title = str(params, "title", "name", "summary", "event").ifBlank { "New event" },
+                dayOffset = parseEventDayOffset(params),
+                startHour = parseEventStartHour(params),
+                startMinute = parseEventStartMinute(params),
+                durationMinutes = parseEventDurationMinutes(params),
+                location = str(params, "location", "place", "where").ifBlank { null }
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
@@ -392,6 +400,66 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
         val minutes = params.optInt("minutes", Int.MIN_VALUE)
         if (minutes != Int.MIN_VALUE) return minutes * 60
         return 5 * 60
+    }
+
+    /**
+     * Resolves a calendar event's day offset. The model may emit `dayOffset` (0=today,
+     * 1=tomorrow) or a natural `day`/`when` string ("today", "tomorrow"). A missing or
+     * unrecognised value defaults to today; the tool boundary still rejects an
+     * out-of-range offset, so a bad value cannot reach the executor as a fake success.
+     */
+    private fun parseEventDayOffset(params: JSONObject): Int {
+        if (params.has("dayOffset")) return params.optInt("dayOffset", 0)
+        if (params.has("daysFromNow")) return params.optInt("daysFromNow", 0)
+        return when (str(params, "day", "when", "date").trim().lowercase()) {
+            "tomorrow" -> 1
+            "day after tomorrow" -> 2
+            "today", "" -> 0
+            else -> params.optInt("day", 0)
+        }
+    }
+
+    /**
+     * Resolves a calendar event's start hour. The model may emit a 24-hour `startHour`
+     * or a 12-hour `startHour` with a meridiem (`amPm`/`period` of am/pm), so a "1pm"
+     * that arrived as hour=1, meridiem="pm" is converted to 13. Bounded to 0..23; the
+     * tool boundary still rejects an out-of-range value.
+     */
+    private fun parseEventStartHour(params: JSONObject): Int {
+        val raw = when {
+            params.has("startHour") -> params.optInt("startHour", 9)
+            params.has("hour") -> params.optInt("hour", 9)
+            else -> 9
+        }
+        val meridiem = str(params, "amPm", "period", "meridiem").trim().lowercase()
+        return when {
+            meridiem.startsWith("p") && raw in 1..11 -> raw + 12
+            meridiem.startsWith("a") && raw == 12 -> 0
+            else -> raw
+        }
+    }
+
+    private fun parseEventStartMinute(params: JSONObject): Int {
+        return when {
+            params.has("startMinute") -> params.optInt("startMinute", 0)
+            params.has("minute") -> params.optInt("minute", 0)
+            else -> 0
+        }
+    }
+
+    /**
+     * Resolves a calendar event's duration in minutes. Accepts `durationMinutes`,
+     * `duration` (minutes), or `durationSeconds`/`seconds`. Falls back to the tool
+     * default (60 minutes); the tool boundary rejects a non-positive value.
+     */
+    private fun parseEventDurationMinutes(params: JSONObject): Int {
+        if (params.has("durationMinutes")) return params.optInt("durationMinutes", 60)
+        if (params.has("duration")) return params.optInt("duration", 60)
+        for (key in listOf("durationSeconds", "seconds")) {
+            val value = params.optInt(key, Int.MIN_VALUE)
+            if (value != Int.MIN_VALUE) return (value / 60).coerceAtLeast(1)
+        }
+        return 60
     }
 
     companion object {

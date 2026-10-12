@@ -92,6 +92,14 @@ object TaskPlanSerializer {
             put("seconds", seconds)
             if (!label.isNullOrBlank()) put("label", label)
         }
+        is AgentAction.AddCalendarEvent -> JSONObject().apply {
+            put("title", title)
+            put("dayOffset", dayOffset)
+            put("startHour", startHour)
+            put("startMinute", startMinute)
+            put("durationMinutes", durationMinutes)
+            if (!location.isNullOrBlank()) put("location", location)
+        }
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
         else -> null
     }
@@ -189,6 +197,7 @@ object TaskPlanSerializer {
         is AgentAction.SetRingerMode -> com.example.agent.ToolRegistry.TOOL_SET_RINGER_MODE
         is AgentAction.SetAlarm -> com.example.agent.ToolRegistry.TOOL_SET_ALARM
         is AgentAction.SetTimer -> com.example.agent.ToolRegistry.TOOL_SET_TIMER
+        is AgentAction.AddCalendarEvent -> com.example.agent.ToolRegistry.TOOL_ADD_CALENDAR_EVENT
         is AgentAction.PlayMedia -> com.example.agent.ToolRegistry.TOOL_PLAY_MEDIA
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS
         is AgentAction.ReadDeviceStatus -> com.example.agent.ToolRegistry.TOOL_READ_DEVICE_STATUS

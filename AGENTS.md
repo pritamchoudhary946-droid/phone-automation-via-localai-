@@ -124,7 +124,18 @@ the same rule and is distinct from `set_alarm`: a countdown timer counts down fr
 `ToolRegistry.MAX_TIMER_SECONDS`, 24 h) plus an optional `label`, is resolved before
 the a11y gate, and — because the clock app is a separate process — reports
 `TIMER_DISPATCHED` only after the intent was delivered (`TIMER_UNAVAILABLE` /
-`TIMER_PERMISSION` / `INVALID_TIMER_DURATION` otherwise).
+`TIMER_PERMISSION` / `INVALID_TIMER_DURATION` otherwise). `add_calendar_event`
+(`AgentAction.AddCalendarEvent` + `CalendarController` -> the documented
+`Intent.ACTION_INSERT` with `CalendarContract.Events.CONTENT_URI`) follows the same
+rule: no accessibility-tree read or UI tap adds an event reliably on an arbitrary
+screen, so it is resolved before the a11y gate and opens the calendar's own editor
+pre-filled. It carries `title` plus `dayOffset`/`startHour`/`startMinute`/
+`durationMinutes`/`location`, resolving a relative day ("tomorrow") to a numeric
+offset the parser and prompt both explain; `AndroidCalendarController.beginMillis(...)`
+is the pure relative-day -> absolute-instant resolver. Because the event is created by
+the calendar app (a separate process) the app cannot read it back, so it reports only
+that the intent was *delivered* (`CALENDAR_DISPATCHED`) and never claims the event now
+exists (`CALENDAR_UNAVAILABLE` / `CALENDAR_PERMISSION` / `INVALID_EVENT_*` otherwise).
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
@@ -362,8 +373,10 @@ the a11y gate, and — because the clock app is a separate process — reports
   so it never reaches a later step or the prompt. Do not regress the read's
   self-satisfaction or the secret guard.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
-  `set_ringer_mode`, `set_alarm`, `set_timer` and `read_notifications` act on a system
-  service (`AudioManager`, the notification bus, the clock app via `AlarmClock`) that no
+  `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event` and
+  `read_notifications` act on a system
+  service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
+  calendar app via `CalendarContract`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
@@ -372,8 +385,10 @@ the a11y gate, and — because the clock app is a separate process — reports
   read the stream level / `isMusicActive()` / `ringerMode` back and return
   `AUDIO_UNCHANGED` / `MEDIA_UNCHANGED` / `RINGER_UNCHANGED` when nothing moved,
   `set_alarm` reports `ALARM_DISPATCHED` only after the intent was delivered to a clock
-  app (`ALARM_UNAVAILABLE` otherwise), and `set_timer` reports `TIMER_DISPATCHED` on the
-  same honest delivery basis (`TIMER_UNAVAILABLE` otherwise). Never widen this to an
+  app (`ALARM_UNAVAILABLE` otherwise), `set_timer` reports `TIMER_DISPATCHED` on the
+  same honest delivery basis (`TIMER_UNAVAILABLE` otherwise), and `add_calendar_event`
+  reports `CALENDAR_DISPATCHED` only after the insert intent was delivered to a calendar
+  app (`CALENDAR_UNAVAILABLE` otherwise). Never widen this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
   the device-state read primitive: battery level/charging, screen on/off, ringer
