@@ -279,6 +279,18 @@ sealed class AgentAction {
      * fake "spoken".
      */
     data class Speak(val text: String) : AgentAction()
+    /**
+     * Opens a named system Settings panel, e.g. "open wifi settings" / "show me
+     * bluetooth settings" / "open accessibility settings". Like [OpenAppInfo], the
+     * system Settings app is a separate process no accessibility tap can drive reliably
+     * on an arbitrary screen, so the platform's documented `Settings.ACTION_*` intent
+     * for a known panel is dispatched and resolved before the accessibility-service
+     * gate. The panel name is a closed set ([SettingsPanel]); an unknown panel is
+     * refused honestly rather than dispatched as an arbitrary intent. It only *opens*
+     * the panel; the user decides what to change there, so no consequential action is
+     * performed by the primitive itself (section 3.5).
+     */
+    data class OpenSettings(val panel: String) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -357,6 +369,7 @@ sealed class AgentAction {
             is OpenAppInfo -> "Open app info for '$packageName'"
             is SetTorch -> if (on) "Turn the flashlight on" else "Turn the flashlight off"
             is Speak -> "Say: \"$text\""
+            is OpenSettings -> "Open ${panel} settings"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

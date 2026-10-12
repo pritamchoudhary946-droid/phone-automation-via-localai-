@@ -58,6 +58,7 @@ open class ToolRegistry {
         const val TOOL_OPEN_APP_INFO = "open_app_info"
         const val TOOL_SET_TORCH = "set_torch"
         const val TOOL_SPEAK = "speak"
+        const val TOOL_OPEN_SETTINGS = "open_settings"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -292,6 +293,12 @@ open class ToolRegistry {
             description = "Speaks text aloud through the device's text-to-speech engine. Use for 'say good morning', 'tell me what it says', 'read that out loud'. Speech output is opt-in; when it is off the step is refused honestly rather than silently ignored",
             requiredParameters = listOf("text"),
             optionalParameters = listOf("message", "say", "content", "value")
+        ),
+        TOOL_OPEN_SETTINGS to ToolDefinition(
+            name = TOOL_OPEN_SETTINGS,
+            description = "Opens a named system Settings panel. Use for 'open wifi settings', 'show bluetooth settings', 'open display settings', 'take me to accessibility settings'. Provide a panel name such as wifi, bluetooth, display, sound, battery, location, apps, accessibility, network, data_usage, airplane_mode, nfc, date, language, storage, security, privacy, cast, night_display, keyboard, dnd, home or settings. It only opens the panel; it never changes a setting there",
+            requiredParameters = listOf("panel"),
+            optionalParameters = listOf("name", "setting", "settingsPanel", "section", "target", "value")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -620,6 +627,15 @@ open class ToolRegistry {
                     ToolValidationResult.Invalid("speak requires non-blank text")
                 } else if (action.text.length > ToolRegistry.MAX_SPEAK_CHARS) {
                     ToolValidationResult.Invalid("speak text is too long (max ${ToolRegistry.MAX_SPEAK_CHARS} chars)")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.OpenSettings -> {
+                if (SettingsPanel.fromKey(action.panel) == null) {
+                    ToolValidationResult.Invalid(
+                        "open_settings panel must be one of: ${SettingsPanel.keys().joinToString(", ")}"
+                    )
                 } else {
                     ToolValidationResult.Valid
                 }

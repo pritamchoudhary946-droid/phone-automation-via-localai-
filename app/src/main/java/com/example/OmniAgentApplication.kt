@@ -196,7 +196,14 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // arbitrary screen). It is opt-in via the Settings voice-output toggle and
                 // refuses honestly when off, and reports SPOKEN only once the engine
                 // accepted the utterance.
-                speakController = com.example.agent.AndroidSpeakController(this) { settings.voiceOutputEnabled }
+                speakController = com.example.agent.AndroidSpeakController(this) { settings.voiceOutputEnabled },
+                // Settings-panel primitive: dispatches the platform's documented
+                // Settings.ACTION_* intent for a named panel, service-free like the
+                // app-info/audio primitives (no UI tap opens a settings panel reliably on
+                // an arbitrary screen). It only opens the panel; the user decides what to
+                // change there, so nothing consequential is performed and it never claims
+                // a setting was changed.
+                settingsController = com.example.agent.AndroidSettingsController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

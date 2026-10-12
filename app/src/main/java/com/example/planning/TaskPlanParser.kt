@@ -315,6 +315,10 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_SPEAK -> AgentAction.Speak(
                 text = str(params, "text", "message", "say", "content", "value")
             )
+            ToolRegistry.TOOL_OPEN_SETTINGS -> AgentAction.OpenSettings(
+                panel = str(params, "panel", "name", "setting", "settingsPanel", "section", "target", "value")
+                    .trim().lowercase().replace(' ', '_').replace('-', '_')
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
