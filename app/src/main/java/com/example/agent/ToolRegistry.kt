@@ -57,6 +57,7 @@ open class ToolRegistry {
         const val TOOL_NAVIGATE_TO = "navigate_to"
         const val TOOL_OPEN_APP_INFO = "open_app_info"
         const val TOOL_SET_TORCH = "set_torch"
+        const val TOOL_SPEAK = "speak"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -71,7 +72,8 @@ open class ToolRegistry {
 
         /** Longest countdown timer the tool accepts: 24 hours, in seconds. */
         const val MAX_TIMER_SECONDS = 24 * 60 * 60
-
+        /** Longest text a single speak step may utter, to bound TTS work. */
+        const val MAX_SPEAK_CHARS = 1000
         /** Longest forward day offset a calendar event may be scheduled for. */
         const val MAX_EVENT_DAY_OFFSET = 30
 
@@ -284,6 +286,12 @@ open class ToolRegistry {
             description = "Turns the device flashlight/torch on or off. Use for 'turn on the flashlight', 'switch the torch off', 'is the light on'. It reads the state back, so a toggle the hardware ignored is reported as a failure, never a fake success",
             requiredParameters = listOf("on"),
             optionalParameters = listOf("state", "enabled", "enable", "bool")
+        ),
+        TOOL_SPEAK to ToolDefinition(
+            name = TOOL_SPEAK,
+            description = "Speaks text aloud through the device's text-to-speech engine. Use for 'say good morning', 'tell me what it says', 'read that out loud'. Speech output is opt-in; when it is off the step is refused honestly rather than silently ignored",
+            requiredParameters = listOf("text"),
+            optionalParameters = listOf("message", "say", "content", "value")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -607,6 +615,15 @@ open class ToolRegistry {
             // reject; it is always a valid request (the executor reports honestly when no
             // flash is available).
             is AgentAction.SetTorch -> ToolValidationResult.Valid
+            is AgentAction.Speak -> {
+                if (action.text.isBlank()) {
+                    ToolValidationResult.Invalid("speak requires non-blank text")
+                } else if (action.text.length > ToolRegistry.MAX_SPEAK_CHARS) {
+                    ToolValidationResult.Invalid("speak text is too long (max ${ToolRegistry.MAX_SPEAK_CHARS} chars)")
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
             is AgentAction.Wait -> {
                 if (action.durationMs < 0 || action.durationMs > 30_000) {
                     ToolValidationResult.Invalid("Wait duration must be between 0ms and 30000ms: ${action.durationMs}")

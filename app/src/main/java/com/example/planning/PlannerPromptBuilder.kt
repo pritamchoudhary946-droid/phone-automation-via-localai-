@@ -80,6 +80,7 @@ object PlannerPromptBuilder {
         """- navigate_to: {"target":"<place name or street address>"}   (opens the maps app showing a place/address so the user can start directions; use for "navigate to Connaught Place" / "take me to the nearest petrol pump" / "show me the way to <address>" - it never begins navigating by itself, so never claim a route was started)""",
         """- open_app_info: {"packageName":"<installed package or app alias, e.g. com.android.chrome or chrome>"}   (opens the system Settings App-info page for an app; use for "open Chrome's settings" / "show WhatsApp app info" / "app settings for Instagram" - it only opens the page and never changes anything there, so never claim a setting was changed)""",
         """- set_torch: {"on":<true|false>}   (turns the device flashlight/torch on or off; use for "turn on the flashlight" / "switch the torch off" - the state is read back, so never claim it changed unless it actually did)""",
+        """- speak: {"text":"<what to say>"}   (speaks text aloud through the device's text-to-speech engine; use for "say good morning" / "tell me what it says" / "read that out loud" - opt-in, and never claim it spoke unless the platform confirmed)""",
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",
@@ -91,16 +92,19 @@ object PlannerPromptBuilder {
 
     /**
      * The parameter guide shown to the model. The `read_notifications` line is
-     * withheld when the opt-in triage capability is off, matching [availableActions].
+     * withheld when the opt-in triage capability is off, and the `speak` line when
+     * the opt-in speech-output capability is off, matching [availableActions].
      */
-    private fun actionCatalog(notificationTriageEnabled: Boolean): String =
+    private fun actionCatalog(notificationTriageEnabled: Boolean, voiceOutputEnabled: Boolean = false): String =
         ACTION_CATALOG_LINES
             .filter { notificationTriageEnabled || !it.startsWith("- ${ToolRegistry.TOOL_READ_NOTIFICATIONS}:") }
+            .filter { voiceOutputEnabled || !it.startsWith("- ${ToolRegistry.TOOL_SPEAK}:") }
             .joinToString("\n")
 
     fun buildPlanningPrompt(
         request: PlanningRequest,
-        notificationTriageEnabled: Boolean = false
+        notificationTriageEnabled: Boolean = false,
+        voiceOutputEnabled: Boolean = false
     ): String = buildString {
         appendLine("Task: produce the ordered subgoals needed to satisfy the user command.")
         appendLine("User command: \"${request.userCommand}\"")
@@ -136,7 +140,7 @@ object PlannerPromptBuilder {
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
         appendLine()
         appendLine(SCHEMA_HINT)
-        appendLine(actionCatalog(notificationTriageEnabled))
+        appendLine(actionCatalog(notificationTriageEnabled, voiceOutputEnabled))
     }
 
     fun buildStepDecisionPrompt(request: StepDecisionRequest): String = buildString {
@@ -226,13 +230,15 @@ object PlannerPromptBuilder {
      * Short catalogue handed to the model. Never exposes free-form Android APIs.
      *
      * The opt-in `read_notifications` tool is only advertised when notification
-     * triage is enabled: with it off the executor refuses the action, so offering
-     * it would let the model emit a step that is always rejected. The filter is a
-     * live boolean so a toggle flip is honoured on the next prompt.
+     * triage is enabled, and the opt-in `speak` tool only when speech output is
+     * enabled: with either off the executor refuses the action, so offering it would
+     * let the model emit a step that is always rejected. The flags are live booleans
+     * so a toggle flip is honoured on the next prompt.
      */
     fun availableActions(
         registry: ToolRegistry,
-        notificationTriageEnabled: Boolean = false
+        notificationTriageEnabled: Boolean = false,
+        voiceOutputEnabled: Boolean = false
     ): List<String> =
         registry.getRegisteredTools()
             .map { it.name }
@@ -241,6 +247,7 @@ object PlannerPromptBuilder {
             // always rejected, burning attempts and step budget.
             .filter { it != ToolRegistry.TOOL_ASK_CONFIRMATION }
             .filter { notificationTriageEnabled || it != ToolRegistry.TOOL_READ_NOTIFICATIONS }
+            .filter { voiceOutputEnabled || it != ToolRegistry.TOOL_SPEAK }
 
     /**
      * Neutralises instruction-like content in untrusted, app-controlled text before

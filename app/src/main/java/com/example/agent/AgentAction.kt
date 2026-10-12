@@ -268,6 +268,17 @@ sealed class AgentAction {
      * success.
      */
     data class SetTorch(val on: Boolean) : AgentAction()
+    /**
+     * Speaks [text] aloud through the on-device text-to-speech engine - the "say
+     * ..." / "read that out" / "tell me what it says" primitive. Speech output is an
+     * opt-in capability ([AndroidSpeakController] is gated by the user's voice-output
+     * setting), so like [ReadNotifications] it is resolved before the
+     * accessibility-service gate and refuses honestly when the capability is off. The
+     * controller reports success only when the platform confirms the utterance was
+     * accepted or completed, so a muted/broken engine is an honest failure, never a
+     * fake "spoken".
+     */
+    data class Speak(val text: String) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -345,6 +356,7 @@ sealed class AgentAction {
             is NavigateTo -> "Open the map at '$target'"
             is OpenAppInfo -> "Open app info for '$packageName'"
             is SetTorch -> if (on) "Turn the flashlight on" else "Turn the flashlight off"
+            is Speak -> "Say: \"$text\""
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"
