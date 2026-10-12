@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 34,
+  "sessions_done": 35,
   "session_cap": 48,
-  "current_milestone": "Capability: set_torch flashlight primitive (AgentAction.SetTorch + TorchController/AndroidTorchController -> CameraManager.setTorchMode with a read-back via TorchCallback), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed primitives. Reads the state back so an ignored toggle is TORCH_UNCHANGED (failure), never a fake success.",
+  "current_milestone": "Capability: speak (on-device TTS) primitive (AgentAction.Speak + SpeakController/AndroidSpeakController -> platform TextToSpeech), wired through all seven action-vocabulary seams and self-evidencing like the other service-backed primitives. Opt-in gated by the existing voiceOutputEnabled setting (live lambda), refused honestly with SPEAK_DISABLED when off, both in the executor and in the advertised prompt catalogue.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -157,7 +157,14 @@
     "regression tests 2026-10-12 (session 34, CapabilityUpgradeTest +10): setTorchExecutesWithoutAnAccessibilityService, setTorchOffReachesTheController, setTorchRefusesHonestlyWhenUnwired, setTorchUnchangedIsReportedAsFailure, setTorchParserCarriesTheOnValue, validationAcceptsSetTorch, setTorchSkillKeepsItsStateOnReplay, promptAdvertisesSetTorch, setTorchStepCompletesFromItsOwnHonestResult, setTorchFailureIsNotMaskedByTheSelfEvidencingRule.",
     "validation 2026-10-12 (session 34, toolchain bootstrapped): apt openjdk-21-jdk-headless + Android SDK cmdline-tools -> /opt/android-sdk platforms;android-36.1 build-tools;36.1.0; SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 3m11s, 412 tests 0 failures 0 errors 0 skipped (402 baseline + 10 new set_torch tests).",
     "AGENTS.md 2026-10-12 (session 34): documented the set_torch service-backed primitive and added it to the self-evidencing service-backed list (torch via CameraManager.setTorchMode).",
-    "validation 2026-10-12 (session 34, final): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m40s; app-debug.apk produced (66 MB). Both gates green (unit tests + APK)."
+    "validation 2026-10-12 (session 34, final): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m40s; app-debug.apk produced (66 MB). Both gates green (unit tests + APK).",
+    "capability 2026-10-12 (session 35): new AgentAction.Speak(text) + tool speak ('say good morning' / 'read that out loud'). On-device text-to-speech is a platform TTS service, not an accessibility-tree control, so like the audio/ringer/torch primitives it is resolved before the a11y-service gate and never relies on a UI tap. Implemented across all action-vocabulary seams: AgentAction (+getDisplayName 'Say: \"...\"'), ToolRegistry (TOOL_SPEAK, ToolDefinition, validateAction: blank/oversized->Invalid, MAX_SPEAK_CHARS=1000), TaskPlanParser.mapAction, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, PlanVariables.substitute, AndroidDeviceAutomation.execute (service-free, before the a11y gate), TaskPlanSerializer (toParams/toolNameFor), and TaskOrchestrator selfEvidencingToolSatisfied.",
+    "capability 2026-10-12 (session 35): new com.example.agent.SpeakController interface + SpeakResult + AndroidSpeakController (creates the platform TextToSpeech engine lazily, waits a bounded budget for async init, speaks only when the engine is ready, waits briefly for UtteranceProgressListener.onDone, and reports SPOKEN only on acceptance; TTS_ERROR on a rejected utterance, TTS_UNAVAILABLE when the engine never became ready - never a fake success). Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication.",
+    "gate 2026-10-12 (session 35): speak is OPT-IN via the existing voiceOutputEnabled setting threaded as a live () -> Boolean (exactly like notificationTriageEnabled): AndroidDeviceAutomation refuses AgentAction.Speak with SPEAK_DISABLED when off, PlannerPromptBuilder.availableActions(..., voiceOutputEnabled) withholds the tool from the advertised list and actionCatalog(...) withholds its schema line while off, and AgentPlanner reads both live per call.",
+    "regression tests 2026-10-12 (session 35, CapabilityUpgradeTest +9): speakExecutesWithoutAnAccessibilityService, speakRefusesHonestlyWhenUnwired, speakDisabledIsReportedAsFailure, speakParserCarriesTheText, validationAcceptsSpeakAndRejectsBlankOrOversizedText, speakSkillKeepsItsTextOnReplay, promptAdvertisesSpeakOnlyWhenVoiceOutputIsOn, speakStepCompletesFromItsOwnHonestResult, speakFailureIsNotMaskedByTheSelfEvidencingRule.",
+    "validation 2026-10-12 (session 35, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m48s, 421 tests 0 failures 0 errors 0 skipped (412 baseline + 9 new speak tests).",
+    "AGENTS.md 2026-10-12 (session 35): documented the speak service-backed, opt-in primitive and added it to the self-evidencing service-backed list (text-to-speech engine via TextToSpeech).",
+    "validation 2026-10-12 (session 35, final): ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL in 1m41s; app-debug.apk produced. Both gates green (421 unit tests + APK)."
   ],
   "in_progress": {
     "item": "",
@@ -165,28 +172,28 @@
     "note": ""
   },
   "next_items": [
-    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Remaining investigated gaps: on-device TTS speak (TextToSpeech), file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
+    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Remaining investigated gap: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT). The on-device TTS speak gap is now closed.",
     "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - reconcile the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2).",
     "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session.",
     "send_sms is compose-only by design; do not silently widen the primitive."
   ],
-  "branch": "auto/jarvis-autonomy-20261012-1848",
-  "open_pr": null,
+  "branch": "auto/jarvis-autonomy-20261012-1931",
+  "open_pr": 70,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "internal-20261012T1850Z",
-  "last_updated": "2026-10-12T19:05:00Z",
+  "last_run_id": "internal-20261012T1931Z",
+  "last_updated": "2026-10-12T19:48:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": {
-    "summary": "Added a set_torch flashlight capability (turn the device torch on/off, read-back confirmed), wired through all seven action-vocabulary seams, self-evidencing like the other service-backed primitives, and validated by 10 new unit tests and the unit-test gate.",
-    "evidence_reviewed": "main @8605663 (session 33 open_app_info done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the open_app_info/navigate_to reference implementations; AudioController/RingerModeController read-back pattern; ToolRegistry, TaskPlanParser, TaskPlanSerializer, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, AndroidDeviceAutomation, TaskOrchestrator, OmniAgentApplication.",
-    "findings": "The section 2.1 gap 'torch/flashlight' had no vocabulary - a launch_app cannot toggle the torch, and no accessibility read/tap toggles it reliably on an arbitrary screen (it may be off-screen in quick settings). The AudioManager/RingerMode service-free + read-back pattern is the exact template.",
-    "milestone_implemented": "set_torch (AgentAction.SetTorch + TorchController/AndroidTorchController via CameraManager.setTorchMode).",
-    "validation": "Toolchain bootstrapped in-sandbox (JDK21 apt + Android SDK platform 36.1 / build-tools 36.1.0); SKIP_APK=1 bash .github/scripts/verify.sh -> BUILD SUCCESSFUL, 412 tests 0 failures 0 errors 0 skipped (402 baseline + 10 new set_torch tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.",
-    "remaining_work": "Open PR and merge per section 18 (this run); continue capability backlog (on-device TTS speak, file/document picking).",
-    "honesty": "The torch state is read back via CameraManager.TorchCallback, so set_torch reports TORCH_ON/TORCH_OFF only on a confirmed change and TORCH_UNCHANGED otherwise; it never claims success on a device with no flash (TORCH_UNAVAILABLE). Real-device validation not performed in this sandbox (unit gate only)."
+    "summary": "Added a speak (on-device text-to-speech) capability, opt-in gated by the existing voiceOutputEnabled setting, wired through all seven action-vocabulary seams, self-evidencing like the other service-backed primitives, and validated by 9 new unit tests and the unit-test gate.",
+    "evidence_reviewed": "main @1fd99e8 (session 34 set_torch done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + service-backed self-evidencing invariant; the set_torch reference implementation; AudioController/RingerModeController read-back pattern and the notificationTriageEnabled opt-in gate pattern; ToolRegistry, TaskPlanParser, TaskPlanSerializer, HybridStepExecutor, PlannerPromptBuilder, PlanVariables, AgentPlanner, AndroidDeviceAutomation, TaskOrchestrator, OmniAgentApplication.",
+    "findings": "The section 2.1 capability gap 'on-device TTS speak' had no vocabulary - a launch_app cannot make the phone talk, and no accessibility read/tap produces speech. The Torch/Audio service-free + honest-result pattern is the exact template; the notificationTriageEnabled live-lambda gate is the exact opt-in template.",
+    "milestone_implemented": "speak (AgentAction.Speak(text) + SpeakController/AndroidSpeakController via the platform TextToSpeech engine), opt-in gated by voiceOutputEnabled.",
+    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 421 tests 0 failures 0 errors 0 skipped (412 baseline + 9 new speak tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.",
+    "remaining_work": "Build the debug APK (assembleDebug); open/merge the PR per section 18 (this run); continue capability backlog (file/document picking).",
+    "honesty": "Speech is reported SPOKEN only once the platform TTS engine accepted the utterance (waits briefly for UtteranceProgressListener.onDone); an engine that never became ready is TTS_UNAVAILABLE and an opt-out is SPEAK_DISABLED - never a fake success. Real-device audio validation not performed in this sandbox (unit gate only)."
   }
 }

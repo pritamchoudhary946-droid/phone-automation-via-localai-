@@ -39,6 +39,8 @@ import com.example.agent.AppInfoController
 import com.example.agent.AppInfoResult
 import com.example.agent.TorchController
 import com.example.agent.TorchResult
+import com.example.agent.SpeakController
+import com.example.agent.SpeakResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -2111,6 +2113,189 @@ class CapabilityUpgradeTest {
         assertTrue("a failed torch toggle must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- speak: the "say good morning" on-device TTS primitive ---
+
+    @Test
+    fun speakExecutesWithoutAnAccessibilityService() {
+        // Speech output is a platform TTS engine, service-free like the audio/ringer/torch
+        // primitives, so it must resolve before the a11y gate.
+        val recorder = RecordingSpeakController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            speakController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.Speak("Good morning"))
+        }
+
+        assertTrue("speak must work without a bound a11y service: $result", result.success)
+        assertEquals("SPOKEN", result.method)
+        assertEquals(listOf("Good morning"), recorder.calls)
+    }
+
+    @Test
+    fun speakRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            speakController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.Speak("Hello"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("SPEAK_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun speakDisabledIsReportedAsFailure() {
+        // The controller is gated by the opt-in voice-output setting and refuses honestly;
+        // an opt-out must never be dressed up as a spoken result.
+        val recorder = RecordingSpeakController(
+            SpeakResult(false, "SPEAK_DISABLED", "Speech output is turned off")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            speakController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.Speak("Hello"))
+        }
+        assertFalse(result.success)
+        assertEquals("SPEAK_DISABLED", result.method)
+    }
+
+    @Test
+    fun speakParserCarriesTheText() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Say hi","action":"speak","params":{"text":"Hello there"},"verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Read","action":"speak","params":{"say":"Read that out loud"},"verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "say hello")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.Speak("Hello there"), steps[0].action)
+        assertEquals(AgentAction.Speak("Read that out loud"), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsSpeakAndRejectsBlankOrOversizedText() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.Speak("Hello")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.Speak("   ")) is ToolValidationResult.Invalid)
+        assertTrue(
+            registry.validateAction(AgentAction.Speak("x".repeat(ToolRegistry.MAX_SPEAK_CHARS + 1)))
+                is ToolValidationResult.Invalid
+        )
+    }
+
+    @Test
+    fun speakSkillKeepsItsTextOnReplay() {
+        // A learned "say good morning" skill must replay the same words, not a default.
+        val plan = com.example.planning.TaskPlan(
+            goal = "say good morning",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "speak",
+                    action = AgentAction.Speak("Good morning, sir"),
+                    rawActionName = "speak", expectedPostcondition = "",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved speak skill must be replayable", restored != null)
+        assertEquals(AgentAction.Speak("Good morning, sir"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesSpeakOnlyWhenVoiceOutputIsOn() {
+        // The opt-in gate withholds the tool from the prompt while speech output is off,
+        // so the model can never emit a step the executor would refuse.
+        val actionsOff = PlannerPromptBuilder.availableActions(ToolRegistry(), voiceOutputEnabled = false)
+        assertFalse(
+            "speak must not be advertised while voice output is off",
+            actionsOff.contains(ToolRegistry.TOOL_SPEAK)
+        )
+        val actionsOn = PlannerPromptBuilder.availableActions(ToolRegistry(), voiceOutputEnabled = true)
+        assertTrue(actionsOn.contains(ToolRegistry.TOOL_SPEAK))
+
+        val request = PlanningRequest(
+            userCommand = "say good morning",
+            desiredOutcome = "spoken greeting",
+            foregroundPackage = "com.android.launcher",
+            screenSummary = "Home",
+            completedStepsSummary = "",
+            lastActionResult = null,
+            remainingStepBudget = 10,
+            availableActions = actionsOn
+        )
+        val promptOn = PlannerPromptBuilder.buildPlanningPrompt(request, voiceOutputEnabled = true)
+        assertTrue("prompt catalogue is missing speak when on", promptOn.contains("speak"))
+        val promptOff = PlannerPromptBuilder.buildPlanningPrompt(
+            request.copy(availableActions = actionsOff),
+            voiceOutputEnabled = false
+        )
+        assertFalse("prompt catalogue must omit speak when off", promptOff.contains("- speak:"))
+    }
+
+    @Test
+    fun speakStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // Speech acts on the platform TTS engine (no accessibility screen reflects it), so
+        // the step's default NONE verification can never be satisfied from a fresh screen.
+        // The executor's honest, engine-confirmed result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.Speak -> ActionResult(true, "SPOKEN", "Said: Good morning")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Speak","action":"speak","params":{"text":"Good morning"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("say good morning", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("speak must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.Speak })
+    }
+
+    @Test
+    fun speakFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a disabled
+        // engine (SPEAK_DISABLED) must fail the step, not be reported as success.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.Speak -> ActionResult(false, "SPEAK_DISABLED", "Speech output is turned off")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Speak","action":"speak","params":{"text":"Hello"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("say hello", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a refused speak must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- send_sms: the "text Priya that I'll be late" primitive ---
     @Test
     fun sendSmsExecutesWithoutAnAccessibilityService() {
@@ -3429,6 +3614,16 @@ class CapabilityUpgradeTest {
         override fun setTorch(on: Boolean): TorchResult {
             calls += on
             return result ?: TorchResult(true, if (on) "TORCH_ON" else "TORCH_OFF", "Flashlight is ${if (on) "on" else "off"}")
+        }
+    }
+
+    private class RecordingSpeakController(
+        private val result: SpeakResult? = null
+    ) : SpeakController {
+        val calls = mutableListOf<String>()
+        override fun speak(text: String): SpeakResult {
+            calls += text
+            return result ?: SpeakResult(true, "SPOKEN", "Said: $text")
         }
     }
 

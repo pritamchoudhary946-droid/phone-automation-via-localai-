@@ -267,6 +267,24 @@ a confirmed change, `TORCH_UNCHANGED` when the hardware ignored the request, and
 otherwise — never a fake success. It is injectable via the `AndroidDeviceAutomation`
 constructor and wired in `OmniAgentApplication`.
 
+`speak` (`AgentAction.Speak(text)` + `SpeakController` -> the platform `TextToSpeech`
+engine) follows the same rule: speech output is a platform TTS service, not an
+accessibility-tree control, so no screen read or UI tap can produce speech on an
+arbitrary screen. It is therefore resolved *before* the a11y-service gate, carries a
+single `text` (bounded by `ToolRegistry.MAX_SPEAK_CHARS`, 1000 chars — a blank or
+oversized value is `Invalid` at validation), and is *opt-in*: like `read_notifications`
+it is gated by a live `() -> Boolean` (`voiceOutputEnabled`), and the executor refuses
+with `SPEAK_DISABLED` when it is off (never a silent no-op). `AndroidSpeakController`
+creates the engine lazily, waits a bounded budget for async initialisation, and reports
+`SPOKEN` only once the engine accepted the utterance (waits briefly for
+`UtteranceProgressListener.onDone`); a `speak` the engine rejects is `TTS_ERROR`, and an
+engine that never became ready is `TTS_UNAVAILABLE` — never a fake success. It is
+injectable via the `AndroidDeviceAutomation` constructor and wired in
+`OmniAgentApplication`. The opt-in flag also gates the *prompt*:
+`PlannerPromptBuilder.availableActions(..., voiceOutputEnabled)` withholds `speak` from
+the advertised tool list and `actionCatalog(...)` withholds its schema line while speech
+output is off, read live per call by `AgentPlanner`.
+
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
   `NONE` verification never proves completion; every terminal goal needs concrete evidence.
@@ -505,14 +523,16 @@ constructor and wired in `OmniAgentApplication`.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
-  `open_app_info`, `set_torch` and
+  `open_app_info`, `set_torch`,
+  `speak` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
   dialer via `Intent.ACTION_DIAL`, the messaging app via `Intent.ACTION_SENDTO`, the
   platform share sheet via `Intent.ACTION_SEND`, the mail app via `Intent.ACTION_SENDTO`
   `mailto:`, the maps app via `Intent.ACTION_VIEW` `geo:`, the Settings app via
-  `Settings.ACTION_APPLICATION_DETAILS_SETTINGS`) that no
+  `Settings.ACTION_APPLICATION_DETAILS_SETTINGS`, the text-to-speech engine via
+  `TextToSpeech`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
@@ -538,7 +558,9 @@ constructor and wired in `OmniAgentApplication`.
   `APP_INFO_OPENED` only after the `ACTION_APPLICATION_DETAILS_SETTINGS` `package:`
   intent was delivered to a settings app (`APP_INFO_UNAVAILABLE` otherwise), and
   `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
-  confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise). Never widen
+  confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise), and
+  `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the
+  utterance (`TTS_UNAVAILABLE` / `SPEAK_DISABLED` otherwise). Never widen
   this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is

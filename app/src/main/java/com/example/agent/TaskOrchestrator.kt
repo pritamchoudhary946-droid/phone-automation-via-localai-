@@ -100,7 +100,9 @@ class TaskOrchestrator(
     private val nanoSummarizer: com.example.model.NanoSummarizer = com.example.model.UnavailableNanoSummarizer,
     private val speechOutput: com.example.voice.SpeechOutput? = null,
     /** Live opt-in gate for the notification-triage capability (plan 9.9). */
-    private val notificationTriageEnabled: () -> Boolean = { false }
+    private val notificationTriageEnabled: () -> Boolean = { false },
+    /** Live opt-in gate for on-device speech output (the `speak` capability). */
+    private val voiceOutputEnabled: () -> Boolean = { false }
 ) {
     private val TAG = "TaskOrchestrator"
     private val database = AgentDatabase.getInstance(context)
@@ -965,7 +967,10 @@ class TaskOrchestrator(
             is AgentAction.AddContact, is AgentAction.DialNumber,
             is AgentAction.SendSms, is AgentAction.ShareText,
             is AgentAction.SendEmail, is AgentAction.NavigateTo,
-            is AgentAction.OpenAppInfo, is AgentAction.SetTorch -> true
+            is AgentAction.OpenAppInfo, is AgentAction.SetTorch,
+            // Speech output acts on the platform TTS engine (no screen reflects it), and
+            // the executor reports SPOKEN only once the engine accepted the utterance.
+            is AgentAction.Speak -> true
             else -> false
         }
     }
@@ -1155,6 +1160,7 @@ class TaskOrchestrator(
                 action is AgentAction.NavigateTo ||
                 action is AgentAction.OpenAppInfo ||
                 action is AgentAction.SetTorch ||
+                action is AgentAction.Speak ||
                 action is AgentAction.ReadNotifications)
         ) {
             val detail = if (action is AgentAction.ReadNotifications) {
@@ -1726,7 +1732,8 @@ class TaskOrchestrator(
                         foregroundPackage = observation.packageName,
                         availableActions = PlannerPromptBuilder.availableActions(
                             toolRegistry,
-                            notificationTriageEnabled()
+                            notificationTriageEnabled(),
+                            voiceOutputEnabled()
                         )
                     )
                 )

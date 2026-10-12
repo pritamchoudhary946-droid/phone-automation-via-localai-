@@ -229,7 +229,12 @@ class AndroidDeviceAutomation(
     // resolved before the a11y-service gate. An unwired controller gets an honest
     // "unavailable" result, never a silent no-op. The controller reads the state back,
     // so an ignored toggle is reported as failure, not a fake success.
-    private val torchController: TorchController? = null
+    private val torchController: TorchController? = null,
+    // On-device speech output is a platform TTS service, not an accessibility-tree
+    // control, so it is resolved before the a11y-service gate. It is opt-in: the
+    // controller refuses honestly when speech output is off, and an unwired controller
+    // gets an honest "unavailable" result rather than a silent no-op.
+    private val speakController: SpeakController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -533,6 +538,17 @@ class AndroidDeviceAutomation(
             val controller = torchController
                 ?: return@withContext ActionResult(false, "TORCH_UNAVAILABLE", "Flashlight control is not available")
             val result = controller.setTorch(action.on)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Speech output is likewise service-free: it drives the platform TTS engine, so
+        // it is resolved before the a11y-service gate. This is the "say good morning" /
+        // "tell me what it says" primitive. The controller reports success only once the
+        // engine accepted (and finished) the utterance, so a broken/disabled engine is an
+        // honest failure, never a fake "spoken".
+        if (action is AgentAction.Speak) {
+            val controller = speakController
+                ?: return@withContext ActionResult(false, "SPEAK_UNAVAILABLE", "Speech output is not available")
+            val result = controller.speak(action.text)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

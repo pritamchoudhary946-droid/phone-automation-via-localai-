@@ -100,7 +100,10 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         planner = AgentPlanner(
             inferenceEngine,
             // 9.9: only advertise read_notifications to the planner while triage is on.
-            notificationTriageEnabled = { settings.notificationTriageEnabled }
+            notificationTriageEnabled = { settings.notificationTriageEnabled },
+            // Only advertise `speak` to the planner while speech output is on, so the
+            // model can never emit a step the executor would refuse.
+            voiceOutputEnabled = { settings.voiceOutputEnabled }
         )
         agentEngine = AgentEngine(this, inferenceEngine, planner)
 
@@ -187,7 +190,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // service-free like the audio/ringer primitives (no UI tap toggles the
                 // torch reliably on an arbitrary screen). It reads the torch state back,
                 // so an ignored request is reported as failure, not a fake success.
-                torchController = com.example.agent.AndroidTorchController(this)
+                torchController = com.example.agent.AndroidTorchController(this),
+                // Speech-output primitive: drives the platform TTS engine, service-free
+                // like the audio/ringer/torch primitives (no UI tap produces speech on an
+                // arbitrary screen). It is opt-in via the Settings voice-output toggle and
+                // refuses honestly when off, and reports SPOKEN only once the engine
+                // accepted the utterance.
+                speakController = com.example.agent.AndroidSpeakController(this) { settings.voiceOutputEnabled }
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
@@ -203,7 +212,9 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             ),
             speechOutput = speechOutput,
             // 9.9: keep the advertised catalogue in step with the executor gate.
-            notificationTriageEnabled = { settings.notificationTriageEnabled }
+            notificationTriageEnabled = { settings.notificationTriageEnabled },
+            // Keep `speak` in step with the executor's opt-in speech gate.
+            voiceOutputEnabled = { settings.voiceOutputEnabled }
         )
 
         // 7.8: re-arm (or cancel) any persisted automations according to the current
