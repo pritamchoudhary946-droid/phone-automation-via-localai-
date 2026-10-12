@@ -50,6 +50,7 @@ open class ToolRegistry {
         const val TOOL_SET_TIMER = "set_timer"
         const val TOOL_ADD_CALENDAR_EVENT = "add_calendar_event"
         const val TOOL_ADD_CONTACT = "add_contact"
+        const val TOOL_DIAL_NUMBER = "dial_number"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -237,6 +238,11 @@ open class ToolRegistry {
             description = "Adds a contact to the user's address book. Use for 'save Priya's number 9876543210', 'add an email contact for Sam at sam@example.com'. Provide a name and at least one of phone/email. No screen read or tap can add a contact reliably",
             requiredParameters = listOf("name"),
             optionalParameters = listOf("phone", "email")
+        ),
+        TOOL_DIAL_NUMBER to ToolDefinition(
+            name = TOOL_DIAL_NUMBER,
+            description = "Opens the system dialer pre-filled with a phone number; the user presses call to place it. Use for 'dial 9876543210', 'call Priya's number'. It never places the call itself",
+            requiredParameters = listOf("number")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -506,6 +512,13 @@ open class ToolRegistry {
                     action.phone.isNullOrBlank() && action.email.isNullOrBlank() ->
                         ToolValidationResult.Invalid("add_contact requires at least one of phone or email")
                     else -> ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.DialNumber -> {
+                if (action.number.isBlank()) {
+                    ToolValidationResult.Invalid("dial_number requires a non-blank number")
+                } else {
+                    ToolValidationResult.Valid
                 }
             }
             is AgentAction.Wait -> {

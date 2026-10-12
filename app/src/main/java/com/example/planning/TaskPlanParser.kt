@@ -288,6 +288,9 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 phone = str(params, "phone", "number", "tel", "mobile", "phoneNumber").ifBlank { null },
                 email = str(params, "email", "mail", "address").ifBlank { null }
             )
+            ToolRegistry.TOOL_DIAL_NUMBER -> AgentAction.DialNumber(
+                number = str(params, "number", "phone", "tel", "phoneNumber", "target")
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications

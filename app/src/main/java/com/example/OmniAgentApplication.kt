@@ -177,7 +177,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // Contact primitive: dispatches the ContactsContract insert intent,
                 // service-free like the calendar/alarm/timer (no UI tap adds a contact
                 // reliably).
-                contactController = com.example.agent.AndroidContactController(this)
+                contactController = com.example.agent.AndroidContactController(this),
+                // Dialer primitive: dispatches the platform ACTION_DIAL intent with a
+                // tel: URI, service-free like the contact/calendar/alarm primitives (no
+                // UI tap opens a dialer reliably). It opens the dialer for the user to
+                // confirm; it never places the call itself.
+                dialerController = com.example.agent.AndroidDialerController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

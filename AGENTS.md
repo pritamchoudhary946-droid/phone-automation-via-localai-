@@ -145,6 +145,20 @@ of the two so an empty contact is never created. Because the contact is created 
 contacts app (a separate process) the app cannot read it back, so it reports only that
 the intent was *delivered* (`CONTACT_DISPATCHED`) and never claims the contact now
 exists (`CONTACT_UNAVAILABLE` / `CONTACT_PERMISSION` / `INVALID_CONTACT_*` otherwise).
+`dial_number` (`AgentAction.DialNumber` + `DialerController` -> the documented
+`Intent.ACTION_DIAL` with a `tel:` URI) follows the same rule: no accessibility-tree
+read or UI tap opens a dialer pre-filled with a number reliably on an arbitrary screen,
+so it is resolved before the a11y gate and opens the system dialer for the user to
+confirm. It carries a `number`; `AndroidDialerController.normalizeDialNumber(...)` is a
+pure, unit-tested gate that accepts only a dialable `tel:` value (digits plus `+ * # , ;`,
+at least one digit) and rejects a blank or garbage target before any intent is built.
+It deliberately uses `ACTION_DIAL`, not `ACTION_CALL`: placing the call would need the
+`CALL_PHONE` runtime permission and would start a call without the user's confirmation,
+which crosses the section 3.5 boundary. Because the dialer is a separate process the app
+cannot read back that the number was entered, so it reports only that the intent was
+*delivered* (`DIAL_DISPATCHED`) and never claims a call was placed
+(`DIAL_UNAVAILABLE` / `DIAL_PERMISSION` / `INVALID_DIAL_NUMBER` otherwise). The prompt
+must never let the model claim a call was made.
 
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
@@ -382,10 +396,12 @@ exists (`CONTACT_UNAVAILABLE` / `CONTACT_PERMISSION` / `INVALID_CONTACT_*` other
   so it never reaches a later step or the prompt. Do not regress the read's
   self-satisfaction or the secret guard.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
-  `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact` and
+  `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
+  `dial_number` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
-  calendar app via `CalendarContract`, the contacts app via `ContactsContract`) that no
+  calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
+  dialer via `Intent.ACTION_DIAL`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
@@ -397,9 +413,10 @@ exists (`CONTACT_UNAVAILABLE` / `CONTACT_PERMISSION` / `INVALID_CONTACT_*` other
   app (`ALARM_UNAVAILABLE` otherwise), `set_timer` reports `TIMER_DISPATCHED` on the
   same honest delivery basis (`TIMER_UNAVAILABLE` otherwise), `add_calendar_event`
   reports `CALENDAR_DISPATCHED` only after the insert intent was delivered to a calendar
-  app (`CALENDAR_UNAVAILABLE` otherwise), and `add_contact` reports `CONTACT_DISPATCHED`
+  app (`CALENDAR_UNAVAILABLE` otherwise), `add_contact` reports `CONTACT_DISPATCHED`
   only after the insert intent was delivered to a contacts app (`CONTACT_UNAVAILABLE`
-  otherwise). Never widen this to an
+  otherwise), and `dial_number` reports `DIAL_DISPATCHED` only after the `ACTION_DIAL`
+  intent was delivered to a dialer (`DIAL_UNAVAILABLE` otherwise). Never widen this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
   the device-state read primitive: battery level/charging, screen on/off, ringer
