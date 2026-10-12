@@ -1,7 +1,7 @@
 package com.example.planning
 
 import android.util.Log
-import com.example.model.GemmaInferenceEngine
+import com.example.model.ApiInferenceEngine
 
 /**
  * Hierarchical reflection (plan 5.4). Reviews the last action against the current
@@ -11,7 +11,7 @@ import com.example.model.GemmaInferenceEngine
  * it returns the deterministic failure reason rather than a fabricated diagnosis.
  */
 class Reflector(
-    private val inferenceEngine: GemmaInferenceEngine,
+    private val inferenceEngine: ApiInferenceEngine,
     private val maxOutputTokens: Int = 160
 ) {
 

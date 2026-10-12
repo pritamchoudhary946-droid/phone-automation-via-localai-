@@ -26,7 +26,7 @@ class CapabilitySelfTest {
         assertTrue(app.settings.voiceOutputEnabled == false)
         assertTrue(app.settings.shizukuEnabled == false)
         assertTrue(app.settings.automationsEnabled == false)
-        assertTrue(app.settings.cloudFallbackEnabled == false)
+        assertTrue(app.llmProviderConfig.isConfigured() == false)
     }
 
     @Test

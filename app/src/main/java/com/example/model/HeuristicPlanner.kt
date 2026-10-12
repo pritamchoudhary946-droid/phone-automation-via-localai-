@@ -49,11 +49,11 @@ data class SubGoal(
 
 /**
  * Rule-based planner used ONLY as a clearly labelled basic fallback when the
- * local Gemma model is unavailable. This is not the AI path: it is deterministic
+ * configured LLM API is unavailable. This is not the AI path: it is deterministic
  * pattern matching so the previously working native automation stays usable.
  *
  * Every decision produced here is tagged as fallback by [AgentPlanner]; the app
- * must never report Gemma planning when this class produced the plan.
+ * must never report model planning when this class produced the plan.
  */
 class HeuristicPlanner {
 

@@ -1,13 +1,8 @@
 package com.example.ui
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,21 +28,32 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.accessibility.AgentAccessibilityService
-import com.example.model.LiteRtModelManager
-import com.example.model.ModelDownloadState
+import com.example.model.LlmProvider
+import com.example.model.LlmProviderConfig
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanPrimary
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.MintSuccess
 
+/**
+ * Setup surface. The reasoning runs through a remote LLM API, so this screen connects
+ * one (any provider, with the user's own key) instead of downloading a multi-GB model.
+ */
 @Composable
 fun SetupScreen(
-    modelManager: LiteRtModelManager,
+    config: LlmProviderConfig,
     onSetupComplete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val downloadState by modelManager.downloadState.collectAsState()
+    val app = context.applicationContext as? com.example.OmniAgentApplication
+
+    var selectedProvider by remember { mutableStateOf(config.provider) }
+    var apiKey by remember { mutableStateOf(config.apiKey) }
+    var baseUrl by remember { mutableStateOf(config.baseUrlOverride) }
+    var model by remember { mutableStateOf(config.modelOverride) }
+    var saved by remember { mutableStateOf(false) }
+
     var isAccessibilityEnabled by remember {
         mutableStateOf(AgentAccessibilityService.isAccessibilitySettingsEnabled(context))
     }
@@ -64,7 +70,7 @@ fun SetupScreen(
         }
     }
 
-    val (hasEnoughStorage, availableBytes) = remember { modelManager.checkStorageAvailability() }
+    val isConfigured = apiKey.isNotBlank() && (baseUrl.isNotBlank() || selectedProvider.defaultBaseUrl.isNotBlank())
 
     Column(
         modifier = modifier
@@ -107,18 +113,18 @@ fun SetupScreen(
         )
 
         Text(
-            text = "Local Gemma 4 E2B Engine Setup",
+            text = "Connect an LLM API",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Step 1: Storage & Model Download Card
+        // Step 1: LLM API configuration card
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag("model_download_card"),
+                .testTag("llm_api_card"),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
             ),
@@ -131,14 +137,14 @@ fun SetupScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(
-                        imageVector = Icons.Default.CloudDownload,
-                        contentDescription = "Model Download",
+                        imageVector = Icons.Default.Key,
+                        contentDescription = "API key",
                         tint = ElectricBlue,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "1. Local Model Setup (Gemma 4 E2B)",
+                        text = "1. LLM API Setup",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -147,229 +153,99 @@ fun SetupScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Source: Hugging Face (LiteRT Community)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "File: gemma-4-E2B-it.litertlm (~2.59 GB)",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = CyanPrimary
-                )
-                Text(
-                    text = "First-time setup needs internet access and ~3.2 GB free storage. The file is SHA-256 verified before use.",
+                    text = "Pick any provider and paste your own API key. Planning then runs through that API, so it is fast and needs no on-device model.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Storage Status
-                Row(
+                // Provider chooser
+                Text(
+                    text = "Provider",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                LlmProviderDropdown(
+                    selected = selectedProvider,
+                    onSelected = { p ->
+                        selectedProvider = p
+                        // Prefill the model with the provider default when the user has
+                        // not typed their own; leave a custom model untouched.
+                        if (model.isBlank() || model == selectedProvider.defaultModel) {
+                            model = p.defaultModel
+                        }
+                        saved = false
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it; saved = false },
+                    label = { Text("API key") },
+                    placeholder = { Text("sk-…") },
+                    singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .testTag("llm_api_key_field")
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it; saved = false },
+                    label = { Text("Base URL (optional)") },
+                    placeholder = { Text(selectedProvider.defaultBaseUrl.ifBlank { "https://your-endpoint/v1" }) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("llm_base_url_field")
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it; saved = false },
+                    label = { Text("Model (optional)") },
+                    placeholder = { Text(selectedProvider.defaultModel.ifBlank { "model-name" }) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("llm_model_field")
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "Internal Storage:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "${modelManager.formatBytes(availableBytes)} Free",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (hasEnoughStorage) MintSuccess else AmberWarning
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Download Progress & States
-                when (val state = downloadState) {
-                    is ModelDownloadState.Idle -> {
-                        Button(
-                            onClick = { modelManager.startOrResumeDownload() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("start_download_button"),
-                            colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
-                        ) {
-                            Icon(Icons.Default.Download, contentDescription = null, tint = Color.White)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Download Gemma 4 E2B (~2.59 GB)", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
+                    Button(
+                        onClick = {
+                            config.save(selectedProvider, apiKey, baseUrl, model)
+                            saved = true
+                            app?.reloadEngineForConfigChange()
+                        },
+                        enabled = isConfigured,
+                        modifier = Modifier.testTag("llm_config_save_button"),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Save & Connect", color = Color.White, fontWeight = FontWeight.Bold)
                     }
-                    is ModelDownloadState.CheckingStorage -> {
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = CyanPrimary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
+                    if (saved) {
                         Text(
-                            text = "Checking storage space...",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            "Saved. Requests will use this provider.",
+                            fontSize = 12.sp,
+                            color = MintSuccess
                         )
-                    }
-                    is ModelDownloadState.Downloading -> {
-                        val animatedProgress by animateFloatAsState(
-                            targetValue = state.progressPercentage / 100f,
-                            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-                            label = "download_progress"
-                        )
-
-                        LinearProgressIndicator(
-                            progress = { animatedProgress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp)),
-                            color = CyanPrimary,
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "${String.format("%.1f", state.progressPercentage)}% (${modelManager.formatBytes(state.downloadedBytes)} / ${modelManager.formatBytes(state.totalBytes)})",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            val speedStr = modelManager.formatBytes(state.speedBytesPerSec) + "/s"
-                            Text(
-                                text = speedStr,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = ElectricBlue
-                            )
-                        }
-
-                        if (state.etaSeconds > 0) {
-                            val etaMin = state.etaSeconds / 60
-                            val etaSec = state.etaSeconds % 60
-                            Text(
-                                text = "Estimated time remaining: ${etaMin}m ${etaSec}s",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Button(
-                            onClick = { modelManager.pauseDownload() },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Icon(Icons.Default.Pause, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Pause Download")
-                        }
-                    }
-                    is ModelDownloadState.Paused -> {
-                        Text(
-                            text = "Download paused at ${modelManager.formatBytes(state.downloadedBytes)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AmberWarning
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = { modelManager.startOrResumeDownload() },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Resume Download", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    is ModelDownloadState.Verifying -> {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .align(Alignment.CenterHorizontally),
-                            color = CyanPrimary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Verifying LiteRT-LM model integrity...",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.align(Alignment.CenterHorizontally),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    is ModelDownloadState.Ready -> {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MintSuccess.copy(alpha = 0.15f))
-                                .border(1.dp, MintSuccess.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .padding(12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Ready",
-                                tint = MintSuccess,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "Model Verified (${state.sizeFormatted})",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MintSuccess
-                                )
-                                Text(
-                                    text = "Checksum verified. Loading the LiteRT-LM engine and running a smoke test on device…",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                    is ModelDownloadState.Error -> {
-                        Text(
-                            text = state.message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        // Only offer a retry when the failure is transient. Fatal errors
-                        // (checksum mismatch, an HTML error page, insufficient storage)
-                        // will fail identically every time, so re-running them just spins.
-                        if (state.canRetry) {
-                            Button(
-                                onClick = { modelManager.startOrResumeDownload() },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("retry_download_button"),
-                                colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary)
-                            ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Retry Download", color = Color.White, fontWeight = FontWeight.Bold)
-                            }
-                        } else {
-                            Text(
-                                text = "This error cannot be retried automatically. Free up storage or check your connection, then choose the file again.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
                 }
             }
@@ -377,8 +253,8 @@ fun SetupScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // 8.2: engine load status - the real reason it is (or isn't) running, with retry.
-        EngineLoadStatusCard(app = context.applicationContext as? com.example.OmniAgentApplication)
+        // Engine load status - the real reason it is (or isn't) running, with retry.
+        EngineLoadStatusCard(app = app)
 
         Spacer(modifier = Modifier.height(18.dp))
 
@@ -586,13 +462,14 @@ fun SetupScreen(
         Spacer(modifier = Modifier.height(28.dp))
 
         // Complete / Launch Button
+        val canEnter = saved || config.isConfigured() || isAccessibilityEnabled
         Button(
             onClick = onSetupComplete,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
                 .testTag("launch_agent_dashboard_button"),
-            enabled = downloadState is ModelDownloadState.Ready || isAccessibilityEnabled,
+            enabled = canEnter,
             colors = ButtonDefaults.buttonColors(
                 containerColor = CyanPrimary,
                 disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -601,7 +478,7 @@ fun SetupScreen(
         ) {
             Text(
                 text = "Enter Jarvis Dashboard",
-                color = if (downloadState is ModelDownloadState.Ready || isAccessibilityEnabled) Color.White else Color.Gray,
+                color = if (canEnter) Color.White else Color.Gray,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
             )
@@ -609,7 +486,7 @@ fun SetupScreen(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = null,
-                tint = if (downloadState is ModelDownloadState.Ready || isAccessibilityEnabled) Color.White else Color.Gray
+                tint = if (canEnter) Color.White else Color.Gray
             )
         }
 
@@ -617,9 +494,48 @@ fun SetupScreen(
     }
 }
 
+/** Dropdown listing every supported provider; the user can pick any of them. */
+@Composable
+private fun LlmProviderDropdown(
+    selected: LlmProvider,
+    onSelected: (LlmProvider) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("llm_provider_dropdown"),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                text = selected.displayName,
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Icon(Icons.Default.ArrowDropDown, contentDescription = "Choose provider", tint = CyanPrimary)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            LlmProvider.entries.forEach { provider ->
+                DropdownMenuItem(
+                    text = { Text(provider.displayName) },
+                    onClick = {
+                        onSelected(provider)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
 /**
- * 8.2: shows the live engine lifecycle (loading / ready / failed) with the real
- * failure text and a retry, so Setup never leaves the user guessing.
+ * Shows the live engine lifecycle (loading / ready / failed) with the real failure text
+ * and a retry, so Setup never leaves the user guessing.
  */
 @Composable
 private fun EngineLoadStatusCard(app: com.example.OmniAgentApplication?) {
@@ -628,13 +544,13 @@ private fun EngineLoadStatusCard(app: com.example.OmniAgentApplication?) {
 
     val (accent, title, detail) = when (val s = engineState) {
         is com.example.model.EngineState.Ready ->
-            Triple(MintSuccess, "Jarvis engine ready (${s.backend})", "Planning runs on the on-device Gemma 4 E2B model.")
+            Triple(MintSuccess, "Jarvis engine ready (${s.backend})", "Planning runs through your configured LLM API.")
         is com.example.model.EngineState.Loading ->
-            Triple(ElectricBlue, "Loading engine…", "Initializing the LiteRT-LM runtime and running a smoke test.")
+            Triple(ElectricBlue, "Connecting engine…", "Verifying the API configuration and running a smoke test.")
         is com.example.model.EngineState.Failed ->
-            Triple(MaterialTheme.colorScheme.error, "Engine failed to load", s.message)
+            Triple(MaterialTheme.colorScheme.error, "Engine not available", s.message)
         com.example.model.EngineState.NotInitialized ->
-            Triple(AmberWarning, "Engine not loaded", "The model is not loaded yet. Download it, then retry.")
+            Triple(AmberWarning, "Engine not connected", "Add a provider and API key above, then connect.")
     }
 
     Card(
@@ -671,13 +587,13 @@ private fun EngineLoadStatusCard(app: com.example.OmniAgentApplication?) {
             if (engineState !is com.example.model.EngineState.Ready) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
-                    onClick = { app.initializeEngineIfModelReady() },
+                    onClick = { app.initializeEngineIfConfigured() },
                     modifier = Modifier.testTag("setup_engine_retry_button"),
                     colors = ButtonDefaults.buttonColors(containerColor = accent)
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Load / Retry engine", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Connect / Retry engine", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }

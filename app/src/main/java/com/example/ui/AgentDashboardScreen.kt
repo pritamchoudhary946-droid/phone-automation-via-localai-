@@ -50,7 +50,7 @@ import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
 import com.example.data.local.TaskStepEntity
 import com.example.model.EngineState
-import com.example.model.LiteRtEngine
+import com.example.model.AgentEngine
 import com.example.planning.PlanStepStatus
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
@@ -60,19 +60,19 @@ import java.util.Locale
 @Composable
 fun AgentDashboardScreen(
     orchestrator: TaskOrchestrator,
-    liteRtEngine: LiteRtEngine,
+    agentEngine: AgentEngine,
     onNavigateToSetup: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val orchestratorState by orchestrator.orchestratorState.collectAsState()
     val currentTask by orchestrator.currentTask.collectAsState()
     val steps by orchestrator.currentSteps.collectAsState()
-    val engineState by liteRtEngine.engineStateFlow().collectAsState()
+    val engineState by agentEngine.engineStateFlow().collectAsState()
     val activePlan by orchestrator.activePlan.collectAsState()
     val usesModelPlanning by orchestrator.usesModelPlanning.collectAsState()
 
     var goalInput by remember { mutableStateOf("") }
-    var resourceStats by remember { mutableStateOf(liteRtEngine.getResourceStats()) }
+    var resourceStats by remember { mutableStateOf(agentEngine.getResourceStats()) }
     val context = LocalContext.current
     var isDotEnabled by remember { mutableStateOf(FloatingAgentDotService.isRunning) }
     var isListeningVoice by remember { mutableStateOf(false) }
@@ -274,7 +274,7 @@ fun AgentDashboardScreen(
 
     LaunchedEffect(Unit) {
         while (true) {
-            resourceStats = liteRtEngine.getResourceStats()
+            resourceStats = agentEngine.getResourceStats()
             isDotEnabled = FloatingAgentDotService.isRunning
             val handsFreeNow = appSettings?.handsFreeEnabled == true
             // Arm/disarm the opt-in wake-word seam with the live toggle; the dedicated
@@ -379,7 +379,7 @@ fun AgentDashboardScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Top App Bar with RAM & Gemma Status
+        // Top App Bar with RAM & LLM API status
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 2.dp,
@@ -446,10 +446,10 @@ fun AgentDashboardScreen(
                         )
                         Text(
                             text = when (engineState) {
-                                is EngineState.Ready -> "Gemma 4 E2B • LiteRT-LM (${(engineState as EngineState.Ready).backend})"
-                                is EngineState.Loading -> "Loading local Gemma engine…"
-                                is EngineState.Failed -> "Model load failed"
-                                EngineState.NotInitialized -> "Model not loaded"
+                                is EngineState.Ready -> "LLM API • ${(engineState as EngineState.Ready).backend}"
+                                is EngineState.Loading -> "Connecting to LLM API…"
+                                is EngineState.Failed -> "LLM API unavailable"
+                                EngineState.NotInitialized -> "LLM API not configured"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = when (engineState) {
@@ -497,7 +497,7 @@ fun AgentDashboardScreen(
                 reason = failed.message,
                 onRetry = {
                     (context.applicationContext as? com.example.OmniAgentApplication)
-                        ?.initializeEngineIfModelReady()
+                        ?.initializeEngineIfConfigured()
                 }
             )
         }
@@ -736,8 +736,8 @@ fun AgentDashboardScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = when {
-                                        canPlan -> "Run Phone Agent (Gemma 4 E2B)"
-                                        else -> "Set up the model to run tasks"
+                                        canPlan -> "Run Phone Agent"
+                                        else -> "Connect an LLM API to run tasks"
                                     },
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold
@@ -749,7 +749,7 @@ fun AgentDashboardScreen(
             }
 
             item {
-                // Planning Mode Banner: honest about whether Gemma or the explicitly
+                // Planning Mode Banner: honest about whether the LLM API or the explicitly
                 // opted-in degraded fallback is driving. When neither can plan, the app
                 // is BLOCKED (6.1) - say so instead of implying a "Basic mode" runs.
                 val bannerAccent = when {
@@ -782,7 +782,7 @@ fun AgentDashboardScreen(
                         Column {
                             Text(
                                 text = when {
-                                    usesModelPlanning -> "Local Gemma AI planning active"
+                                    usesModelPlanning -> "LLM API planning active"
                                     basicFallbackExplicit -> "Basic (rule-based) plan • degraded mode"
                                     else -> "Model required • tasks are blocked"
                                 },
@@ -793,11 +793,11 @@ fun AgentDashboardScreen(
                             Text(
                                 text = when {
                                     usesModelPlanning ->
-                                        "Plans and next actions are generated by the on-device model. Every step is verified before advancing."
+                                        "Plans and next actions are generated by your configured LLM API. Every step is verified before advancing."
                                     basicFallbackExplicit ->
                                         "You enabled the degraded keyword planner, so a deterministic rule-based plan runs instead of AI. This is not AI planning."
                                     else ->
-                                        "The local Gemma model is not loaded, so a task cannot start. Open Setup to download/load it, or enable the degraded planner in Capabilities."
+                                        "No LLM API is configured, so a task cannot start. Open Setup to add a provider and key, or enable the degraded planner in Capabilities."
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -994,7 +994,7 @@ fun AgentDashboardScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "Type a goal above and click 'Run Phone Agent' to observe Gemma's live planning & execution.",
+                                text = "Type a goal above and click 'Run Phone Agent' to observe the agent's live planning & execution.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(top = 4.dp)
@@ -1031,7 +1031,7 @@ fun StateBanner(
         is OrchestratorState.Planning -> Quad(
             CyanPrimary.copy(alpha = 0.15f),
             CyanPrimary,
-            if (state.fromModel) "Gemma 4 E2B Reasoning • Step ${state.stepIndex}..."
+            if (state.fromModel) "LLM reasoning • Step ${state.stepIndex}..."
             else "Degraded (rule-based) planning • Step ${state.stepIndex}...",
             if (state.fromModel) Icons.Default.Psychology else Icons.Default.Info
         )
@@ -1236,7 +1236,7 @@ private fun NowDoingCard(state: OrchestratorState) {
             "Thinking about the next step",
             buildString {
                 append("Using ")
-                append(if (state.fromModel) "the on-device model" else "the basic rule engine")
+                append(if (state.fromModel) "the configured LLM API" else "the basic rule engine")
                 state.activeSubGoal?.takeIf { it.isNotBlank() }?.let { append(" • $it") }
             }
         )
@@ -1306,7 +1306,7 @@ private fun ModelLoadErrorCard(reason: String, onRetry: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Jarvis could not load the model",
+                    text = "Jarvis could not connect to the LLM API",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = CrimsonDanger
@@ -1327,7 +1327,7 @@ private fun ModelLoadErrorCard(reason: String, onRetry: () -> Unit) {
             ) {
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Retry load")
+                Text("Retry connection")
             }
         }
     }

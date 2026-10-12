@@ -3,7 +3,7 @@ package com.example.planning
 import com.example.agent.ToolRegistry
 
 /**
- * Builds bounded, deterministic prompts for the local Gemma model.
+ * Builds bounded, deterministic prompts for the configured LLM model.
  *
  * Prompts stay small on purpose: an 8 GB device must fit them comfortably and
  * generation must stay fast. Screen context is truncated upstream and clearly

@@ -11,12 +11,11 @@ import com.example.agent.AppDirectory
 import com.example.agent.TaskOrchestrator
 import com.example.cloudflare.CloudflareGateway
 import com.example.data.local.AgentDatabase
-import com.example.model.GemmaInferenceEngine
-import com.example.model.LiteRtEngine
-import com.example.model.LiteRtLmRuntime
-import com.example.model.LiteRtModelManager
+import com.example.model.AgentEngine
+import com.example.model.ApiInferenceEngine
+import com.example.model.ApiLlmRuntime
+import com.example.model.LlmProviderConfig
 import com.example.planning.AgentPlanner
-import com.example.planning.HttpCloudPlannerProvider
 import com.example.settings.CapabilitySettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,11 +26,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
 
     lateinit var database: AgentDatabase
         private set
-    lateinit var modelManager: LiteRtModelManager
+    /** User-supplied provider/key/endpoint/model for the remote LLM API. */
+    lateinit var llmProviderConfig: LlmProviderConfig
         private set
-    lateinit var inferenceEngine: GemmaInferenceEngine
+    lateinit var inferenceEngine: ApiInferenceEngine
         private set
-    lateinit var liteRtEngine: LiteRtEngine
+    lateinit var agentEngine: AgentEngine
         private set
     lateinit var planner: AgentPlanner
         private set
@@ -40,12 +40,6 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
     lateinit var orchestrator: TaskOrchestrator
         private set
     lateinit var cloudflareGateway: CloudflareGateway
-        private set
-    /**
-     * 8.7/BS4: the real cloud planner provider, exposed so SettingsScreen can persist
-     * an endpoint/key. Without this the opt-in cloud fallback was unreachable end to end.
-     */
-    lateinit var cloudPlannerProvider: HttpCloudPlannerProvider
         private set
     lateinit var settings: CapabilitySettings
         private set
@@ -72,31 +66,17 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
 
     /**
      * 8.2: the engine's live lifecycle state, exposed so SetupScreen can show the real
-     * load/failure reason and a Retry - not just download progress.
+     * connection/failure reason and a Retry.
      */
     val engineState: kotlinx.coroutines.flow.StateFlow<com.example.model.EngineState>
         get() = inferenceEngine.state
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /**
-     * 8.9: bumped whenever a memory trim releases the engine, so an in-flight init can
-     * notice the engine was dropped and let the next explicit call re-arm it — without
-     * the app re-loading on its own and spinning load/unload cycles. Advisory only, so
-     * a plain field is fine (and deliberately not @Volatile, which crashed lint's
-     * Kotlin PSI analysis here).
-     */
-    private var trimGeneration = 0
-
     companion object {
         lateinit var instance: OmniAgentApplication
             private set
 
-        // 8.10: GPU is OFF by default. The Adreno 810 + LiteRT GPU delegate is poorly
-        // supported for this VLM and a failed GPU attempt doubles the ~2.6 GB init work
-        // (and the memory churn) on an 8 GB device, which is what made the phone hang.
-        // CPU-first is the supported path; GPU stays strictly opt-in.
-        private const val USE_GPU_BACKEND = false
         private const val TAG = "OmniAgentApp"
     }
 
@@ -106,34 +86,26 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
 
         database = AgentDatabase.getInstance(this)
         settings = CapabilitySettings(this)
-        modelManager = LiteRtModelManager(this)
+        // The reasoning now runs through a remote LLM API: the user picks any provider
+        // and supplies their own key. No on-device model is downloaded or loaded.
+        llmProviderConfig = LlmProviderConfig(this)
 
-        // 7.1: verify the pinned artifact is reachable/consistent at startup (bounded,
-        // non-blocking) so a stale hash that would block planning is logged loudly.
-        appScope.launch { runCatching { modelManager.logRemoteArtifactCheck() } }
-
-        // Exactly one heavy model instance: the engine owns the single runtime.
-        // 8.9/8.10: a single CPU-first factory (no GPU-primary + CPU two-attempt
-        // scheme) so a failed backend cannot double the load work and thrash memory.
-        inferenceEngine = GemmaInferenceEngine(
-            runtimeFactory = { modelPath, cacheDir ->
-                LiteRtLmRuntime(modelPath = modelPath, cacheDir = cacheDir, useGpu = USE_GPU_BACKEND)
-            },
+        // Exactly one client instance: the engine owns the single runtime.
+        // 8.9/8.10: the single-flight and close-before-replace guarantees are kept, so a
+        // retry racing the startup path can never leave two clients alive.
+        inferenceEngine = ApiInferenceEngine(
+            runtimeFactory = { ApiLlmRuntime(llmProviderConfig) },
             scope = appScope
         )
         planner = AgentPlanner(
             inferenceEngine,
-            modelManager,
             // 9.9: only advertise read_notifications to the planner while triage is on.
             notificationTriageEnabled = { settings.notificationTriageEnabled }
         )
-        liteRtEngine = LiteRtEngine(this, modelManager, inferenceEngine, planner)
+        agentEngine = AgentEngine(this, inferenceEngine, planner)
 
         appDirectory = AppDirectory(this)
         cloudflareGateway = CloudflareGateway()
-        // 8.7/BS4: build the real provider once and reuse it, so the Settings surface and
-        // the orchestrator share the same prefs (the fallback is now configurable).
-        cloudPlannerProvider = HttpCloudPlannerProvider(this)
 
         // 7.2/7.3: real on-device OCR + OCR-backed vision grounding, wired into the
         // automation layer so a tree-miss surface (canvas/WebView) can still be read and
@@ -145,10 +117,10 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         planner.fallbackExplicit = settings.basicFallbackExplicit
 
         // The gateway is exposed to the loop as an explicit web tool (web_search /
-        // read_url); the on-device model remains the primary planner.
+        // read_url); the configured LLM API remains the primary planner.
         orchestrator = TaskOrchestrator(
             context = this,
-            liteRtEngine = liteRtEngine,
+            agentEngine = agentEngine,
             appDirectory = appDirectory,
             deviceAutomation = com.example.agent.AndroidDeviceAutomation(
                 appDirectory,
@@ -210,8 +182,7 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             completionNotifier = completionNotifier,
             // A clean, fully-verified run is saved as a re-runnable local skill.
             autoSaveSkills = true,
-            cloudPlannerProvider = cloudPlannerProvider,
-            nanoSummarizer = com.example.model.EngineNanoSummarizer(
+            nanoSummarizer = com.example.model.ApiNanoSummarizer(
                 generate = { prompt, system, max -> inferenceEngine.generate(prompt, system, max) },
                 ready = { inferenceEngine.isReady() }
             ),
@@ -261,25 +232,22 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
     }
 
     /**
-     * Loads and smoke-tests the engine off the UI thread once the model is verified.
-     * Returns immediately; observe [GemmaInferenceEngine.state] for the real outcome.
+     * Loads and smoke-tests the engine off the UI thread once an LLM API is configured.
+     * Returns immediately; observe [ApiInferenceEngine.state] for the real outcome.
      *
      * 8.9: single-flight. Concurrent callers (the MainActivity LaunchedEffect, the
-     * Setup/dashboard Retry buttons, or a model-ready re-transition) collapse onto one
-     * load, and the smoke probe runs only on the first successful load. A background
-     * trim can still drop a loaded engine; the [initGeneration] check re-loads it on
-     * the next explicit call but never spins by itself.
+     * Setup/dashboard Retry buttons, or a config-change re-transition) collapse onto one
+     * load, and the smoke probe runs only on the first successful load.
      */
-    fun initializeEngineIfModelReady() {
-        val modelFile = modelManager.getModelFile()
-        if (!modelFile.exists()) {
-            Log.i(TAG, "Skipping engine init: model not downloaded")
+    fun initializeEngineIfConfigured() {
+        if (!llmProviderConfig.isConfigured()) {
+            Log.i(TAG, "Skipping engine init: no LLM API configured")
+            inferenceEngine.reportUnavailable("No LLM API configured - add a provider and key in Setup")
             return
         }
-        val generation = trimGeneration
         appScope.launch {
             try {
-                if (inferenceEngine.ensureReady(modelFile)) {
+                if (inferenceEngine.ensureReady()) {
                     Log.i(TAG, "Engine initialized and smoke test passed successfully")
                 } else {
                     Log.w(TAG, "Engine unavailable: see EngineState for the reason")
@@ -288,10 +256,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 Log.e(TAG, "Error initializing engine: ${e.message}", e)
                 inferenceEngine.reportUnavailable("Engine initialization error: ${e.message ?: "unknown"}")
             }
-            if (generation != trimGeneration) {
-                Log.i(TAG, "Engine re-armed after a memory trim; it will reload on the next use")
-            }
         }
+    }
+
+    /** Applies a new provider/key/endpoint/model: reloads the engine so it takes effect. */
+    fun reloadEngineForConfigChange() {
+        inferenceEngine.shutdown()
+        initializeEngineIfConfigured()
     }
 
     fun shutdownEngine() = inferenceEngine.shutdown()
@@ -327,53 +298,33 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
     }
 
     /**
-     * 8.9: do NOT tear the ~2.6 GB engine down on an ordinary trim. Loading is a
-     * multi-second, multi-GB operation, so a trim → shutdown → reload cycle is a giant
-     * CPU+IO spike that stutters the whole device (the reported hang). Only release
-     * under genuine critical pressure, and let the next explicit use reload.
+     * The reasoning now runs through a remote API, so there is no multi-GB on-device
+     * engine to release under memory pressure. The engine state is left untouched on any
+     * trim; a configured API stays ready across trims and backgrounding.
      */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (com.example.model.MemoryTrimPolicy.shouldReleaseEngine(level)) {
-            Log.w(TAG, "onTrimMemory($level): critical pressure, releasing the engine")
-            releaseEngineForMemoryPressure()
-        } else if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            // Advisory only: keep the engine so we never thrash a multi-GB reload.
-            Log.i(TAG, "onTrimMemory($level): keeping the engine loaded to avoid a reload spike")
-        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
     }
 
-    /**
-     * 8.9: [onLowMemory] is advisory (it is also delivered for cached/background
-     * processes). Shutting the engine down unconditionally here was the load/unload
-     * thrash that hung the phone; release only when the engine is genuinely unusable.
-     */
     override fun onLowMemory() {
         super.onLowMemory()
-        Log.w(TAG, "onLowMemory(): advisory only, keeping the engine loaded")
-    }
-
-    /** Releases the engine under genuine pressure and arms the next explicit reload. */
-    private fun releaseEngineForMemoryPressure() {
-        trimGeneration++
-        inferenceEngine.shutdown()
     }
 
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val downloadChannel = NotificationChannel(
-                "model_download_channel",
-                "Model Downloads",
+            val agentChannel = NotificationChannel(
+                "agent_channel",
+                "Agent",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows progress of local Gemma 4 E2B LiteRT-LM model download"
+                description = "Agent status and task notifications"
             }
             val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(downloadChannel)
+            manager?.createNotificationChannel(agentChannel)
         }
     }
 }

@@ -16,7 +16,6 @@ import com.example.planning.TaskPlan
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 
 data class SystemResourceStats(
     val totalRamMb: Long,
@@ -29,28 +28,24 @@ data class SystemResourceStats(
 /**
  * Backing model layer used by the UI and orchestrator.
  *
- * This replaces the old heuristic-only "engine": when the local Gemma engine is
- * ready it drives real model planning, and otherwise it returns an explicitly
- * labelled [PlanSource.BASIC_FALLBACK] plan so native automation stays usable.
+ * The reasoning runs through a remote LLM API (any provider the user configures with
+ * their own key). When an API is configured and reachable it drives real planning;
+ * otherwise it returns an explicitly labelled [PlanSource.BASIC_FALLBACK] plan so native
+ * automation stays usable, or blocks honestly when no key is set and the user has not
+ * enabled the degraded mode.
  */
-class LiteRtEngine(
+class AgentEngine(
     private val context: Context,
-    val modelManager: LiteRtModelManager,
-    private val inferenceEngine: GemmaInferenceEngine,
+    private val inferenceEngine: ApiInferenceEngine,
     private val planner: AgentPlanner,
     private val heuristicPlanner: HeuristicPlanner = HeuristicPlanner()
 ) {
-    private val TAG = "LiteRtEngine"
+    private val TAG = "AgentEngine"
     val toolRegistry = ToolRegistry()
 
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
-        val modelFile: File = modelManager.getModelFile()
-        if (!modelFile.exists()) {
-            Log.w(TAG, "Local model file not present at ${modelFile.absolutePath}")
-            return@withContext false
-        }
         try {
-            inferenceEngine.initialize(modelFile)
+            inferenceEngine.ensureReady()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -62,8 +57,8 @@ class LiteRtEngine(
     fun isReady(): Boolean = inferenceEngine.isReady()
 
     /**
-     * Explicit, user-visible degraded mode (plan 6.1). When false (default) a task
-     * blocks while the local model is not loaded instead of silently running keywords.
+     * Explicit, user-visible degraded mode. When false (default) a task blocks while no
+     * LLM API is configured instead of silently running keywords.
      */
     fun setFallbackExplicit(enabled: Boolean) {
         planner.fallbackExplicit = enabled
@@ -77,8 +72,8 @@ class LiteRtEngine(
     /** Observable engine lifecycle state for the UI. */
     fun engineStateFlow(): kotlinx.coroutines.flow.StateFlow<EngineState> = inferenceEngine.state
 
-    /** True only when genuine local Gemma inference will drive planning. */
-    fun isGemmaActive(): Boolean = inferenceEngine.isReady()
+    /** True only when genuine remote-model inference will drive planning. */
+    fun isModelActive(): Boolean = inferenceEngine.isReady()
 
     fun getResourceStats(): SystemResourceStats {
         val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -96,8 +91,8 @@ class LiteRtEngine(
     }
 
     /**
-     * Primary planning entry point. Gemma produces the plan when ready; otherwise
-     * a clearly labelled basic fallback is returned (never reported as AI).
+     * Primary planning entry point. The API model produces the plan when configured and
+     * ready; otherwise a clearly labelled basic fallback is returned (never reported as AI).
      */
     suspend fun planTask(
         goal: String,
@@ -128,7 +123,7 @@ class LiteRtEngine(
         return planner.plan(request)
     }
 
-    /** Asks Gemma to select the single next action against a fresh observation. */
+    /** Asks the model to select the single next action against a fresh observation. */
     suspend fun decideNextAction(
         goal: String,
         activeSubGoal: String,
@@ -205,12 +200,7 @@ class LiteRtEngine(
 
     fun heuristicPlanner(): HeuristicPlanner = heuristicPlanner
 
-
     companion object {
-        // 8.1: reconciled with the runtime's actual KV/context bound (was a stale 2048,
-        // while LiteRtLmRuntime requested 3072). Reuse the single source of truth so the
-        // config can never drift again.
-        const val MAX_CONTEXT_TOKENS = LiteRtLmRuntime.MAX_CONTEXT_TOKENS
         const val SYSTEM_PROMPT = PlannerPromptBuilder.SYSTEM_INSTRUCTION
     }
 }

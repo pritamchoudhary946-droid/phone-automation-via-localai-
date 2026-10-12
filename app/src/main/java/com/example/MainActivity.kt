@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import com.example.model.ModelDownloadState
 import com.example.ui.AgentDashboardScreen
 import com.example.ui.AgentLiveMonitorScreen
 import com.example.ui.SetupScreen
@@ -24,7 +23,7 @@ import com.example.ui.theme.MyApplicationTheme
 enum class AgentTab(val title: String, val icon: ImageVector) {
     AGENT("Agent", Icons.Default.SmartToy),
     MONITOR("Live Monitor", Icons.Default.Visibility),
-    SETUP("Setup & Model", Icons.Default.Download),
+    SETUP("Setup & API", Icons.Default.Key),
     SETTINGS("Capabilities", Icons.Default.Tune),
     LIBRARY("Library", Icons.Default.Bookmarks),
     HISTORY("History", Icons.Default.History)
@@ -39,17 +38,16 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
-                val modelState by app.modelManager.downloadState.collectAsState()
-                val isModelReady = modelState is ModelDownloadState.Ready
+                val isConfigured = app.llmProviderConfig.isConfigured()
 
-                // Initialize (and smoke-test) the real engine once the model is verified,
-                // and whenever the app starts with a verified model on disk.
-                LaunchedEffect(isModelReady) {
-                    if (isModelReady) app.initializeEngineIfModelReady()
+                // Initialize (and smoke-test) the engine once an LLM API is configured,
+                // and whenever the app starts with a saved configuration.
+                LaunchedEffect(isConfigured) {
+                    if (isConfigured) app.initializeEngineIfConfigured()
                 }
 
                 var selectedTab by remember {
-                    mutableStateOf(if (isModelReady) AgentTab.AGENT else AgentTab.SETUP)
+                    mutableStateOf(if (isConfigured) AgentTab.AGENT else AgentTab.SETUP)
                 }
 
                 Scaffold(
@@ -83,7 +81,7 @@ class MainActivity : ComponentActivity() {
                             AgentTab.AGENT -> {
                                 AgentDashboardScreen(
                                     orchestrator = app.orchestrator,
-                                    liteRtEngine = app.liteRtEngine,
+                                    agentEngine = app.agentEngine,
                                     onNavigateToSetup = { selectedTab = AgentTab.SETUP }
                                 )
                             }
@@ -95,7 +93,7 @@ class MainActivity : ComponentActivity() {
                             }
                             AgentTab.SETUP -> {
                                 SetupScreen(
-                                    modelManager = app.modelManager,
+                                    config = app.llmProviderConfig,
                                     onSetupComplete = { selectedTab = AgentTab.AGENT }
                                 )
                             }

@@ -6,10 +6,9 @@ import com.example.agent.DeviceAutomation
 import com.example.agent.UiObservation
 import com.example.accessibility.UiNode
 import com.example.accessibility.UiTreeSnapshot
-import com.example.model.GemmaInferenceEngine
+import com.example.model.AgentEngine
+import com.example.model.ApiInferenceEngine
 import com.example.model.HeuristicPlanner
-import com.example.model.LiteRtEngine
-import com.example.model.LiteRtModelManager
 import com.example.model.LlmInferenceException
 import com.example.model.LlmRuntime
 import com.example.planning.AgentPlanner
@@ -22,7 +21,6 @@ import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.ResolveInfo
-import java.io.File
 
 /** Installs a fake launcher package in Robolectric so AppDirectory can resolve it. */
 fun installLauncherPackage(context: Context, packageName: String, label: String) {
@@ -90,42 +88,23 @@ class FakeLlmRuntime(
     }
 }
 
-/** Builds a real LiteRtEngine wired to an injectable fake runtime. */
+/** Builds a real AgentEngine wired to an injectable fake runtime (no network). */
 fun buildTestEngine(
     context: android.content.Context,
-    runtimeFactory: (String, String?) -> LlmRuntime = { _, _ -> FakeLlmRuntime() },
-    modelManager: LiteRtModelManager = LiteRtModelManager(context),
+    runtimeFactory: () -> LlmRuntime = { FakeLlmRuntime() },
     maxOutputTokens: Int = 768
-): LiteRtEngine {
-    // Ensure a model file exists so initialize() is exercised the same way it is on
-    // a device that already downloaded the model.
-    if (!modelManager.getModelFile().exists()) fakeModelFileAt(modelManager.getModelFile())
-    val inference = GemmaInferenceEngine(runtimeFactory = runtimeFactory)
+): AgentEngine {
+    val inference = ApiInferenceEngine(runtimeFactory = runtimeFactory)
     val planner = AgentPlanner(
         inferenceEngine = inference,
-        modelManager = modelManager,
         parser = TaskPlanParser(),
         heuristicPlanner = HeuristicPlanner(),
         maxOutputTokens = maxOutputTokens
     )
-    return LiteRtEngine(context, modelManager, inference, planner)
+    return AgentEngine(context, inference, planner)
 }
 
-/** Writes a dummy on-disk "model" file so initialization can be attempted in tests. */
-fun fakeModelFile(dir: File, bytes: Int = 1024): File {
-    val file = File(dir, "gemma-4-E2B-it.litertlm")
-    file.writeBytes(ByteArray(bytes) { 1 })
-    return file
-}
-
-/** Writes a dummy model at an explicit path (already the manager's target file). */
-fun fakeModelFileAt(file: File, bytes: Int = 1024): File {
-    file.parentFile?.mkdirs()
-    file.writeBytes(ByteArray(bytes) { 1 })
-    return file
-}
-
-fun assertReady(engine: LiteRtEngine) = assertTrue("engine should be ready", engine.isReady())
+fun assertReady(engine: AgentEngine) = assertTrue("engine should be ready", engine.isReady())
 
 /** Deterministic device automation double for the orchestrator loop tests. */
 class FakeDeviceAutomation(

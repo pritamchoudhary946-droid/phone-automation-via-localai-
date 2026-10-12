@@ -13,7 +13,7 @@ import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
 import com.example.agent.ToolRegistry
 import com.example.agent.UiObservation
-import com.example.model.LiteRtEngine
+import com.example.model.AgentEngine
 import com.example.perception.OcrReader
 import com.example.perception.OcrTextBox
 import com.example.perception.OcrVisionGrounder
@@ -449,11 +449,11 @@ class Phase10AdversarialTest {
         )
     }
 
-    private fun newOrchestrator(engine: LiteRtEngine, automation: FakeDeviceAutomation): TaskOrchestrator {
+    private fun newOrchestrator(engine: AgentEngine, automation: FakeDeviceAutomation): TaskOrchestrator {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         return TaskOrchestrator(
             context = context,
-            liteRtEngine = engine,
+            agentEngine = engine,
             appDirectory = AppDirectory(context),
             deviceAutomation = automation,
             scope = scope,
@@ -461,10 +461,10 @@ class Phase10AdversarialTest {
         )
     }
 
-    private fun modelEngine(json: String): LiteRtEngine =
-        buildTestEngine(context, runtimeFactory = { _, _ -> FakeLlmRuntime(output = json) }).also { it.initializeBlocking() }
+    private fun modelEngine(json: String): AgentEngine =
+        buildTestEngine(context, runtimeFactory = { FakeLlmRuntime(output = json) }).also { it.initializeBlocking() }
 
-    private fun LiteRtEngine.initializeBlocking(): Boolean = runBlocking { initialize() }
+    private fun AgentEngine.initializeBlocking(): Boolean = runBlocking { initialize() }
 
     private suspend fun awaitTerminal(orchestrator: TaskOrchestrator, timeoutMs: Long = 8_000): OrchestratorState {
         val deadline = System.currentTimeMillis() + timeoutMs

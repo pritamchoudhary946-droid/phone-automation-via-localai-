@@ -3,21 +3,19 @@ package com.example.planning
 import android.util.Log
 import com.example.agent.AgentAction
 import com.example.agent.ToolRegistry
-import com.example.model.GemmaInferenceEngine
+import com.example.model.ApiInferenceEngine
 import com.example.model.HeuristicPlanner
-import com.example.model.LiteRtModelManager
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * The reasoning brain. When the local Gemma engine is ready it asks the real
+ * The reasoning brain. When the remote LLM API engine is ready it asks the real
  * model to interpret the command and produce a validated plan; otherwise it
  * returns an explicitly labelled basic fallback. It never fabricates a model
- * response and never reports Gemma planning when the engine is not ready.
+ * response and never reports model planning when the engine is not ready.
  */
 class AgentPlanner(
-    private val inferenceEngine: GemmaInferenceEngine,
-    private val modelManager: LiteRtModelManager,
+    private val inferenceEngine: ApiInferenceEngine,
     private val parser: TaskPlanParser = TaskPlanParser(),
     private val heuristicPlanner: HeuristicPlanner = HeuristicPlanner(),
     private val toolRegistry: ToolRegistry = ToolRegistry(),
@@ -49,7 +47,7 @@ class AgentPlanner(
 
     /**
      * When false (the default), a task is [PlanOutcome.Unavailable] instead of being
-     * silently planned by the keyword fallback while the local model is not loaded
+     * silently planned by the keyword fallback while the LLM API is not loaded
      * (plan 6.1: never quietly run keywords). A user-visible, explicitly enabled
      * degraded mode sets this true, and only then does the labelled BASIC fallback run.
      */
@@ -68,9 +66,9 @@ class AgentPlanner(
                     source = PlanSource.BASIC_FALLBACK
                 )
             } else {
-                // 6.1: BLOCK. The local model must be healthy before a task runs; do not
+                // 6.1: BLOCK. An LLM API must be configured and healthy before a task runs; do not
                 // silently substitute the keyword planner for the AI.
-                PlanOutcome.Unavailable("Local AI not loaded - set up the model in Setup")
+                PlanOutcome.Unavailable("No LLM API configured - add a provider and key in Setup")
             }
         }
 
@@ -98,7 +96,7 @@ class AgentPlanner(
             }
             lastRaw = raw
             when (val parsed = parser.parse(raw, request.userCommand)) {
-                is PlanParseResult.Success -> return PlanOutcome.Planned(parsed.plan, PlanSource.GEMMA_MODEL)
+                is PlanParseResult.Success -> return PlanOutcome.Planned(parsed.plan, PlanSource.MODEL)
                 is PlanParseResult.Invalid -> {
                     lastReason = parsed.reason
                     Log.w(TAG, "Invalid plan (attempt ${attempt + 1}): ${parsed.reason}")
@@ -124,7 +122,7 @@ class AgentPlanner(
      */
     suspend fun decideNextAction(request: StepDecisionRequest, screenshotBytes: ByteArray? = null): StepDecision {
         if (!inferenceEngine.isReady()) {
-            return StepDecision.None("Gemma engine not ready")
+            return StepDecision.None("LLM API engine not ready")
         }
         val prompt = PlannerPromptBuilder.buildStepDecisionPrompt(request)
         val raw = try {

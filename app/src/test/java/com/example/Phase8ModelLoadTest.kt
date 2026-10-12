@@ -1,62 +1,52 @@
 package com.example
 
-import android.content.Context
-import androidx.test.core.app.ApplicationProvider
+import com.example.model.ApiInferenceEngine
 import com.example.model.EngineState
-import com.example.model.GemmaInferenceEngine
 import com.example.model.LlmInferenceException
 import com.example.model.runTolerantSmokeProbe
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Phase 8 tests for the headline "model downloads but won't load" bug (8.1) and the
- * honest surface of the real failure (8.2). Uses [FakeLlmRuntime] so no 2.59 GB
- * model is needed.
+ * Tests for the API-backed engine lifecycle: a single load becomes ready, failures
+ * surface their real reason, and an unavailable engine is reported honestly. Uses
+ * [FakeLlmRuntime] so no network or on-device model is needed.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class Phase8ModelLoadTest {
 
-    private lateinit var context: Context
-
-    @Before
-    fun setUp() {
-        context = ApplicationProvider.getApplicationContext()
-    }
-
     @Test
-    fun singleCpuFirstLoadBecomesReady() = runBlocking {
-        val cpu = FakeLlmRuntime(backend = "CPU")
+    fun singleLoadBecomesReady() = runBlocking {
+        val fake = FakeLlmRuntime(backend = "CPU")
         var factoryCalls = 0
-        val engine = GemmaInferenceEngine(
-            runtimeFactory = { _, _ -> factoryCalls++; cpu }
+        val engine = ApiInferenceEngine(
+            runtimeFactory = { factoryCalls++; fake }
         )
 
-        assertTrue(engine.initialize(fakeModelFile(context.cacheDir)))
-        assertEquals("one CPU-first load, no two-attempt scheme", 1, factoryCalls)
+        assertTrue(engine.initialize())
+        assertEquals("one client load, no two-attempt scheme", 1, factoryCalls)
         assertTrue(engine.isReady())
         assertEquals(EngineState.Ready("CPU"), engine.state.value)
     }
 
     @Test
     fun initFailureReportsTheRealReason() = runBlocking {
-        val engine = GemmaInferenceEngine(
-            runtimeFactory = { _, _ -> throw LlmInferenceException("native boom: out of memory") }
+        val engine = ApiInferenceEngine(
+            runtimeFactory = { throw LlmInferenceException("no API key configured") }
         )
 
-        assertFalse(engine.initialize(fakeModelFile(context.cacheDir)))
+        assertFalse(engine.initialize())
         val state = engine.state.value
         assertTrue(state is EngineState.Failed)
         // The real init error is surfaced, not a generic placeholder.
-        assertTrue((state as EngineState.Failed).message.contains("native boom"))
+        assertTrue((state as EngineState.Failed).message.contains("no API key configured"))
         assertFalse(engine.isReady())
     }
 
@@ -70,9 +60,9 @@ class Phase8ModelLoadTest {
             override fun backendLabel(): String = "CPU"
             override fun close() = Unit
         }
-        val engine = GemmaInferenceEngine(runtimeFactory = { _, _ -> neverReady })
+        val engine = ApiInferenceEngine(runtimeFactory = { neverReady })
 
-        assertFalse(engine.initialize(fakeModelFile(context.cacheDir)))
+        assertFalse(engine.initialize())
         val state = engine.state.value
         assertTrue(state is EngineState.Failed)
         assertTrue((state as EngineState.Failed).message.contains("did not report ready"))
@@ -80,19 +70,19 @@ class Phase8ModelLoadTest {
 
     @Test
     fun throwingRuntimeSurfacesItsMessage() = runBlocking {
-        val engine = GemmaInferenceEngine(
-            runtimeFactory = { _, _ -> throw LlmInferenceException("native init exploded") }
+        val engine = ApiInferenceEngine(
+            runtimeFactory = { throw LlmInferenceException("native init exploded") }
         )
 
-        assertFalse(engine.initialize(fakeModelFile(context.cacheDir)))
+        assertFalse(engine.initialize())
         assertTrue((engine.state.value as EngineState.Failed).message.contains("native init exploded"))
     }
 
     @Test
     fun reportUnavailableClosesRuntimeAndExposesReason() = runBlocking {
         val fake = FakeLlmRuntime()
-        val engine = GemmaInferenceEngine(runtimeFactory = { _, _ -> fake })
-        assertTrue(engine.initialize(fakeModelFile(context.cacheDir)))
+        val engine = ApiInferenceEngine(runtimeFactory = { fake })
+        assertTrue(engine.initialize())
         assertTrue(engine.isReady())
 
         engine.reportUnavailable("smoke test answered nothing")
