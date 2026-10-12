@@ -311,6 +311,7 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_OPEN_APP_INFO -> AgentAction.OpenAppInfo(
                 packageName = str(params, "packageName", "package", "app", "appQuery", "target", "query")
             )
+            ToolRegistry.TOOL_SET_TORCH -> AgentAction.SetTorch(on = parseTorchOn(params))
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
@@ -465,6 +466,28 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             meridiem.startsWith("a") && raw == 12 -> 0
             else -> raw
         }
+    }
+
+    /**
+     * Resolves a set_torch on/off value. The model may emit a JSON boolean (`on:true`),
+     * or a string alias ("on"/"off"/"enable"/"disable"/"yes"/"no"/"1"/"0"). Anything
+     * unrecognised defaults to ON (the common "turn on the flashlight" intent), which is
+     * always a valid request - the executor reports honestly when no flash is available.
+     */
+    private fun parseTorchOn(params: JSONObject): Boolean {
+        for (key in listOf("on", "state", "enabled", "enable", "value", "bool")) {
+            if (!params.has(key)) continue
+            when (val value = params.opt(key)) {
+                is Boolean -> return value
+                is Number -> return value.toInt() != 0
+                is String -> when (value.trim().lowercase()) {
+                    "on", "true", "enable", "enabled", "yes", "1" -> return true
+                    "off", "false", "disable", "disabled", "no", "0" -> return false
+                }
+                else -> continue
+            }
+        }
+        return true
     }
 
     private fun parseEventStartMinute(params: JSONObject): Int {

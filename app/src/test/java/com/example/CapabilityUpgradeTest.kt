@@ -37,6 +37,8 @@ import com.example.agent.NavigationResult
 import com.example.agent.AndroidAppInfoController
 import com.example.agent.AppInfoController
 import com.example.agent.AppInfoResult
+import com.example.agent.TorchController
+import com.example.agent.TorchResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -1921,6 +1923,194 @@ class CapabilityUpgradeTest {
         assertTrue("a failed app-info dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- set_torch: the "turn on the flashlight" primitive ---
+
+    @Test
+    fun setTorchExecutesWithoutAnAccessibilityService() {
+        // The torch is a camera-hardware setting driven through the CameraManager, so like
+        // the audio/ringer primitives it is service-free and must resolve before the a11y gate.
+        val recorder = RecordingTorchController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            torchController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetTorch(true))
+        }
+
+        assertTrue("torch must toggle without a bound a11y service: $result", result.success)
+        assertEquals("TORCH_ON", result.method)
+        assertEquals(listOf(true), recorder.calls)
+    }
+
+    @Test
+    fun setTorchOffReachesTheController() {
+        val recorder = RecordingTorchController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            torchController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetTorch(false))
+        }
+        assertTrue(result.success)
+        assertEquals("TORCH_OFF", result.method)
+        assertEquals(listOf(false), recorder.calls)
+    }
+
+    @Test
+    fun setTorchRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            torchController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetTorch(true))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("TORCH_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setTorchUnchangedIsReportedAsFailure() {
+        // The controller reads the state back; a request the hardware ignored must not be
+        // dressed up as success.
+        val recorder = RecordingTorchController(
+            TorchResult(false, "TORCH_UNCHANGED", "The flashlight did not turn on")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            torchController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetTorch(true))
+        }
+        assertFalse(result.success)
+        assertEquals("TORCH_UNCHANGED", result.method)
+    }
+
+    @Test
+    fun setTorchParserCarriesTheOnValue() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Turn on torch","action":"set_torch","params":{"on":true},"expect":"light on","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Turn off torch","action":"set_torch","params":{"on":"off"},"expect":"light off","verify":"NONE"},
+          {"id":3,"seq":3,"desc":"Enable torch","action":"set_torch","params":{"state":"enable"},"expect":"light on","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "flashlight on")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.SetTorch(true), steps[0].action)
+        assertEquals(AgentAction.SetTorch(false), steps[1].action)
+        assertEquals(AgentAction.SetTorch(true), steps[2].action)
+    }
+
+    @Test
+    fun validationAcceptsSetTorch() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetTorch(true)) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetTorch(false)) is ToolValidationResult.Valid)
+    }
+
+    @Test
+    fun setTorchSkillKeepsItsStateOnReplay() {
+        // A learned "flashlight off" skill must not replay turning the torch ON.
+        val plan = com.example.planning.TaskPlan(
+            goal = "turn off the flashlight",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "torch off",
+                    action = AgentAction.SetTorch(false),
+                    rawActionName = "set_torch", expectedPostcondition = "light off",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved torch skill must be replayable", restored != null)
+        assertEquals(AgentAction.SetTorch(false), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesSetTorch() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_SET_TORCH}",
+            actions.contains(ToolRegistry.TOOL_SET_TORCH)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "turn on the flashlight",
+                desiredOutcome = "torch on",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing set_torch", prompt.contains("set_torch"))
+    }
+
+    @Test
+    fun setTorchStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The torch is a hardware setting no accessibility screen reflects, so the step's
+        // default NONE verification can never be satisfied from a fresh screen. The
+        // executor's honest, read-back-confirmed result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetTorch -> ActionResult(true, "TORCH_ON", "Flashlight is on")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Torch on","action":"set_torch","params":{"on":true},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("turn on the flashlight", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("set_torch must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.SetTorch })
+    }
+
+    @Test
+    fun setTorchFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a toggle the
+        // hardware ignored (TORCH_UNCHANGED) must fail the step, not be reported as success.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetTorch -> ActionResult(false, "TORCH_UNCHANGED", "The flashlight did not turn on")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Torch on","action":"set_torch","params":{"on":true},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("turn on the flashlight", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed torch toggle must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- send_sms: the "text Priya that I'll be late" primitive ---
     @Test
     fun sendSmsExecutesWithoutAnAccessibilityService() {
@@ -3229,6 +3419,16 @@ class CapabilityUpgradeTest {
         override fun openAppInfo(packageName: String): AppInfoResult {
             calls += packageName
             return AppInfoResult(true, "APP_INFO_OPENED", "Opening settings for $packageName")
+        }
+    }
+
+    private class RecordingTorchController(
+        private val result: TorchResult? = null
+    ) : TorchController {
+        val calls = mutableListOf<Boolean>()
+        override fun setTorch(on: Boolean): TorchResult {
+            calls += on
+            return result ?: TorchResult(true, if (on) "TORCH_ON" else "TORCH_OFF", "Flashlight is ${if (on) "on" else "off"}")
         }
     }
 

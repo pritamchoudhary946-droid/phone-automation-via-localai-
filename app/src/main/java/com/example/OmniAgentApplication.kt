@@ -182,7 +182,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // intent addressed to the resolved package, service-free like the other
                 // intent-backed primitives. It opens the app's Settings page; the user
                 // decides what to change there, so nothing consequential is performed.
-                appInfoController = com.example.agent.AndroidAppInfoController(this)
+                appInfoController = com.example.agent.AndroidAppInfoController(this),
+                // Torch primitive: drives the camera flashlight through the CameraManager,
+                // service-free like the audio/ringer primitives (no UI tap toggles the
+                // torch reliably on an arbitrary screen). It reads the torch state back,
+                // so an ignored request is reported as failure, not a fake success.
+                torchController = com.example.agent.AndroidTorchController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
