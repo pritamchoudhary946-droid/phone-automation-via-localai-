@@ -96,6 +96,10 @@ class PlanVariableStore {
             email = action.email?.let(::substitute)
         )
         is AgentAction.DialNumber -> action.copy(number = substitute(action.number))
+        is AgentAction.SendSms -> action.copy(
+            number = substitute(action.number),
+            message = substitute(action.message)
+        )
         is AgentAction.FinishTask -> action.copy(summary = substitute(action.summary))
         else -> action
     }

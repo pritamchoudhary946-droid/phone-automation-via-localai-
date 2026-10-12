@@ -201,6 +201,16 @@ sealed class AgentAction {
      * places the call, so a consequential call stays under the user's control.
      */
     data class DialNumber(val number: String) : AgentAction()
+    /**
+     * Opens the messaging compose screen pre-filled with [number] and [message] ("text
+     * Priya that I'll be late"). Like [DialNumber] no accessibility-tree read or UI tap
+     * opens a compose screen with a number and body reliably on an arbitrary screen, so
+     * it is dispatched through the platform [android.content.Intent.ACTION_SENDTO]
+     * intent (`smsto:` URI + `"sms_body"`) and resolved before the accessibility-service
+     * gate. It opens the compose screen for the user to review and press send; it never
+     * sends the message, so a consequential send stays under the user's control.
+     */
+    data class SendSms(val number: String, val message: String) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -272,6 +282,7 @@ sealed class AgentAction {
                 if (!email.isNullOrBlank()) append(" email $email")
             }
             is DialNumber -> "Open the dialer with $number"
+            is SendSms -> "Open messages to text $number"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

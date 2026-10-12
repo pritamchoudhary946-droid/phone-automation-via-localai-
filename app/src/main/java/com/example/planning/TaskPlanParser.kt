@@ -291,6 +291,10 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_DIAL_NUMBER -> AgentAction.DialNumber(
                 number = str(params, "number", "phone", "tel", "phoneNumber", "target")
             )
+            ToolRegistry.TOOL_SEND_SMS -> AgentAction.SendSms(
+                number = str(params, "number", "phone", "tel", "phoneNumber", "to", "recipient"),
+                message = str(params, "message", "body", "text", "smsBody", "content")
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
