@@ -120,6 +120,7 @@ object TaskPlanSerializer {
             if (!body.isNullOrBlank()) put("body", body)
         }
         is AgentAction.NavigateTo -> JSONObject().put("target", target)
+        is AgentAction.OpenAppInfo -> JSONObject().put("packageName", packageName)
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
         else -> null
     }
@@ -224,6 +225,7 @@ object TaskPlanSerializer {
         is AgentAction.ShareText -> com.example.agent.ToolRegistry.TOOL_SHARE_TEXT
         is AgentAction.SendEmail -> com.example.agent.ToolRegistry.TOOL_SEND_EMAIL
         is AgentAction.NavigateTo -> com.example.agent.ToolRegistry.TOOL_NAVIGATE_TO
+        is AgentAction.OpenAppInfo -> com.example.agent.ToolRegistry.TOOL_OPEN_APP_INFO
         is AgentAction.PlayMedia -> com.example.agent.ToolRegistry.TOOL_PLAY_MEDIA
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS
         is AgentAction.ReadDeviceStatus -> com.example.agent.ToolRegistry.TOOL_READ_DEVICE_STATUS

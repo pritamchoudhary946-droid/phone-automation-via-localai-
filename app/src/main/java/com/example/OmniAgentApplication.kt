@@ -177,7 +177,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // geo:0,0?q= URI, service-free like the SMS/dialer/share/email primitives
                 // (no UI tap opens a map at a chosen place reliably). It opens the map at
                 // the place for the user to start directions; it never navigates by itself.
-                navigationController = com.example.agent.AndroidNavigationController(this)
+                navigationController = com.example.agent.AndroidNavigationController(this),
+                // App-info primitive: dispatches the platform ACTION_APPLICATION_DETAILS_SETTINGS
+                // intent addressed to the resolved package, service-free like the other
+                // intent-backed primitives. It opens the app's Settings page; the user
+                // decides what to change there, so nothing consequential is performed.
+                appInfoController = com.example.agent.AndroidAppInfoController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

@@ -217,7 +217,13 @@ class AndroidDeviceAutomation(
     // controller gets an honest "unavailable" result, never a silent no-op. It opens
     // the map at the place for the user to start directions; it never begins
     // navigating by itself.
-    private val navigationController: NavigationController? = null
+    private val navigationController: NavigationController? = null,
+    // Opening an app's Settings/App-info page is dispatched through the platform
+    // ACTION_APPLICATION_DETAILS_SETTINGS intent, not an accessibility-tree control, so
+    // like the SMS/dialer/share/email/navigation primitives it is resolved before the
+    // a11y-service gate. An unwired controller gets an honest "unavailable" result,
+    // never a silent no-op. It only opens the page; it never changes anything there.
+    private val appInfoController: AppInfoController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -486,6 +492,30 @@ class AndroidDeviceAutomation(
             val controller = navigationController
                 ?: return@withContext ActionResult(false, "NAV_UNAVAILABLE", "Navigation dispatch is not available")
             val result = controller.navigate(action.target)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Opening an app's Settings/App-info page is likewise service-free: it is
+        // dispatched through the platform ACTION_APPLICATION_DETAILS_SETTINGS intent, so
+        // it is resolved before the a11y-service gate. This is the "open Chrome's
+        // settings" / "show WhatsApp app info" primitive. The plan may carry an app
+        // alias (e.g. "chrome"); it is resolved to a real installed package through the
+        // same AppDirectory used by launch_app, so the model can name the app naturally.
+        // It opens the page for the user to act on and changes nothing itself, so it
+        // reports only that the intent was delivered.
+        if (action is AgentAction.OpenAppInfo) {
+            if (action.packageName.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_APP_INFO_PACKAGE", "App package must not be blank")
+            }
+            val controller = appInfoController
+                ?: return@withContext ActionResult(false, "APP_INFO_UNAVAILABLE", "App-info dispatch is not available")
+            // If the plan carried a package name, use it as-is; otherwise resolve the
+            // value as an installed app (label/alias/package substring) via AppDirectory.
+            val resolved = if (action.packageName.contains('.')) {
+                action.packageName
+            } else {
+                appDirectory.resolvePackage(action.packageName) ?: action.packageName
+            }
+            val result = controller.openAppInfo(resolved)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         val service = serviceProvider()

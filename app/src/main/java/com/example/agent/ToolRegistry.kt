@@ -55,6 +55,7 @@ open class ToolRegistry {
         const val TOOL_SHARE_TEXT = "share_text"
         const val TOOL_SEND_EMAIL = "send_email"
         const val TOOL_NAVIGATE_TO = "navigate_to"
+        const val TOOL_OPEN_APP_INFO = "open_app_info"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -270,6 +271,12 @@ open class ToolRegistry {
             description = "Opens the maps app showing a place name or street address; the user starts directions from there. Use for 'navigate to Connaught Place', 'take me to the nearest petrol pump', 'show me the way to <address>'. It never begins navigating by itself",
             requiredParameters = listOf("target"),
             optionalParameters = listOf("place", "destination", "address", "query")
+        ),
+        TOOL_OPEN_APP_INFO to ToolDefinition(
+            name = TOOL_OPEN_APP_INFO,
+            description = "Opens the system Settings App-info page for an app. Use for 'open Chrome's settings' / 'show WhatsApp app info' / 'app settings for Instagram'. Provide an installed package name or an app alias (e.g. com.android.chrome or chrome). It only opens the page; it never changes anything there",
+            requiredParameters = listOf("packageName"),
+            optionalParameters = listOf("package", "app", "appQuery", "target")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -578,6 +585,13 @@ open class ToolRegistry {
                     ToolValidationResult.Invalid(
                         "navigate_to target must be at most ${AndroidNavigationController.MAX_NAV_TARGET_CHARS} characters"
                     )
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.OpenAppInfo -> {
+                if (AndroidAppInfoController.normalizePackageName(action.packageName) == null) {
+                    ToolValidationResult.Invalid("open_app_info requires a usable app package name")
                 } else {
                     ToolValidationResult.Valid
                 }

@@ -34,6 +34,9 @@ import com.example.agent.EmailResult
 import com.example.agent.AndroidNavigationController
 import com.example.agent.NavigationController
 import com.example.agent.NavigationResult
+import com.example.agent.AndroidAppInfoController
+import com.example.agent.AppInfoController
+import com.example.agent.AppInfoResult
 import com.example.agent.FastPathDecision
 import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
@@ -1730,6 +1733,194 @@ class CapabilityUpgradeTest {
         assertTrue("a failed navigation dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- open_app_info: the "open <app>'s settings / show app info" primitive ---
+
+    @Test
+    fun openAppInfoExecutesWithoutAnAccessibilityService() {
+        // Opening an app's Settings/App-info page is dispatched through the platform
+        // ACTION_APPLICATION_DETAILS_SETTINGS intent, so like the dialer/sms/email/nav
+        // primitives it is service-free and must resolve before the a11y gate.
+        val recorder = RecordingAppInfoController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            appInfoController = recorder
+        )
+
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenAppInfo("com.android.chrome"))
+        }
+
+        assertTrue("app info must open without a bound a11y service: $result", result.success)
+        assertEquals("APP_INFO_OPENED", result.method)
+        assertEquals(listOf("com.android.chrome"), recorder.calls)
+    }
+
+    @Test
+    fun openAppInfoRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            appInfoController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenAppInfo("com.android.chrome"))
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("APP_INFO_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun openAppInfoRejectsABlankPackage() {
+        val recorder = RecordingAppInfoController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            appInfoController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenAppInfo("   "))
+        }
+        assertFalse(result.success)
+        assertEquals("INVALID_APP_INFO_PACKAGE", result.method)
+        assertTrue("a blank package must not touch the controller", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun openAppInfoNormalizesAndRejectsUnsafePackages() {
+        // The pure normalizer keeps a bad plan value from building a nonsense package:
+        // URI: it trims a usable package, and rejects blank, control characters and an
+        // over-long value.
+        assertEquals("com.android.chrome", AndroidAppInfoController.normalizePackageName("  com.android.chrome  "))
+        assertEquals("chrome", AndroidAppInfoController.normalizePackageName("chrome"))
+        assertNull(AndroidAppInfoController.normalizePackageName(""))
+        assertNull(AndroidAppInfoController.normalizePackageName("   "))
+        assertNull(AndroidAppInfoController.normalizePackageName("com.android\nchrome"))
+        assertNull(
+            AndroidAppInfoController.normalizePackageName(
+                "x".repeat(AndroidAppInfoController.MAX_PACKAGE_CHARS + 1)
+            )
+        )
+    }
+
+    @Test
+    fun openAppInfoParserCarriesThePackage() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Open Chrome settings","action":"open_app_info","params":{"packageName":"com.android.chrome"},"expect":"settings open","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Show WhatsApp app info","action":"open_app_info","params":{"app":"whatsapp"},"expect":"settings open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "open chrome settings")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.OpenAppInfo("com.android.chrome"), steps[0].action)
+        assertEquals(AgentAction.OpenAppInfo("whatsapp"), steps[1].action)
+    }
+
+    @Test
+    fun validationAcceptsOpenAppInfoAndRejectsABlankPackage() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.OpenAppInfo("com.android.chrome")) is ToolValidationResult.Valid)
+        assertTrue(
+            "a blank package must be rejected at the tool boundary",
+            registry.validateAction(AgentAction.OpenAppInfo("  ")) !is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun openAppInfoSkillKeepsItsPackageOnReplay() {
+        // A learned "open app settings" skill must not replay with a dropped package.
+        val plan = com.example.planning.TaskPlan(
+            goal = "open chrome settings",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "open app info",
+                    action = AgentAction.OpenAppInfo("com.android.chrome"),
+                    rawActionName = "open_app_info", expectedPostcondition = "settings open",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved app-info skill must be replayable", restored != null)
+        assertEquals(AgentAction.OpenAppInfo("com.android.chrome"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesOpenAppInfo() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_OPEN_APP_INFO}",
+            actions.contains(ToolRegistry.TOOL_OPEN_APP_INFO)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "open chrome's settings",
+                desiredOutcome = "app settings open",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing open_app_info", prompt.contains("open_app_info"))
+    }
+
+    @Test
+    fun openAppInfoStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // The Settings app is a separate process no accessibility screen reflects, so the
+        // step's default NONE verification can never be satisfied from a fresh screen. The
+        // executor's honest dispatch result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenAppInfo -> ActionResult(true, "APP_INFO_OPENED", "Opening settings for ${action.packageName}")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open app info","action":"open_app_info","params":{"packageName":"com.android.chrome"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open chrome's settings", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("open_app_info must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.OpenAppInfo })
+    }
+
+    @Test
+    fun openAppInfoFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule only accepts a genuinely successful result: a dispatch
+        // that reached no settings app (APP_INFO_UNAVAILABLE) must fail the step.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenAppInfo -> ActionResult(false, "APP_INFO_UNAVAILABLE", "No settings app is available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open app info","action":"open_app_info","params":{"packageName":"com.android.chrome"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open chrome's settings", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed app-info dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- send_sms: the "text Priya that I'll be late" primitive ---
     @Test
     fun sendSmsExecutesWithoutAnAccessibilityService() {
@@ -3030,6 +3221,14 @@ class CapabilityUpgradeTest {
         override fun navigate(target: String): NavigationResult {
             calls += target
             return NavigationResult(true, "NAV_DISPATCHED", "Opening the map at $target")
+        }
+    }
+
+    private class RecordingAppInfoController : AppInfoController {
+        val calls = mutableListOf<String>()
+        override fun openAppInfo(packageName: String): AppInfoResult {
+            calls += packageName
+            return AppInfoResult(true, "APP_INFO_OPENED", "Opening settings for $packageName")
         }
     }
 
