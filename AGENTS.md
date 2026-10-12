@@ -234,6 +234,24 @@ never claims a route was started (`NAV_UNAVAILABLE` / `NAV_PERMISSION` / `NAV_ER
 `INVALID_NAV_TARGET` otherwise). The prompt must never let the model claim navigation
 began.
 
+`open_app_info` (`AgentAction.OpenAppInfo` + `AppInfoController` -> the documented
+`Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, package:<pkg> URI)`) follows the
+same rule: no accessibility-tree read or UI tap opens an app's own Settings/App-info page
+reliably on an arbitrary screen (and driving that page would be app/device-specific), so
+it is resolved before the a11y gate and lets the system Settings app show the page. It
+carries a single `packageName` (a package, or an app alias like "chrome" that
+`AndroidDeviceAutomation` resolves through `AppDirectory.resolvePackage` when the value
+has no dot); `AndroidAppInfoController.normalizePackageName(...)` is a pure, unit-tested
+gate that trims a usable package and rejects a blank, over-`MAX_PACKAGE_CHARS`-long, or
+control-character-bearing value before any URI is built. It only *opens* the page (the
+user decides what to do there - force-stop, clear data, change permissions); it never
+changes a setting itself, so a consequential change stays under the user's control
+(section 3.5). Because the Settings app is a separate process the app cannot read back
+that the page was shown, so it reports only that the intent was *delivered*
+(`APP_INFO_OPENED`) and never claims a setting was changed (`APP_INFO_UNAVAILABLE` /
+`APP_INFO_PERMISSION` / `APP_INFO_ERROR` / `INVALID_APP_INFO_PACKAGE` otherwise). The
+prompt must never let the model claim a setting was changed.
+
 ## Conventions
 - Postcondition verification lives in `PostconditionVerifier.verify(...)`; a
   `NONE` verification never proves completion; every terminal goal needs concrete evidence.
@@ -471,13 +489,15 @@ began.
   self-satisfaction or the secret guard.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
-  `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to` and
+  `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
+  `open_app_info` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
   dialer via `Intent.ACTION_DIAL`, the messaging app via `Intent.ACTION_SENDTO`, the
   platform share sheet via `Intent.ACTION_SEND`, the mail app via `Intent.ACTION_SENDTO`
-  `mailto:`, the maps app via `Intent.ACTION_VIEW` `geo:`) that no
+  `mailto:`, the maps app via `Intent.ACTION_VIEW` `geo:`, the Settings app via
+  `Settings.ACTION_APPLICATION_DETAILS_SETTINGS`) that no
   accessibility screen reflects, so their default NONE verification can never be
   satisfied from a fresh observation. `verifyAction` therefore accepts a *successful*
   result for these as the step's evidence, and `selfEvidencingToolSatisfied(...)`
@@ -499,7 +519,9 @@ began.
   otherwise), and `send_email` reports `EMAIL_DISPATCHED` only after the `ACTION_SENDTO`
   `mailto:` intent was delivered to a mail app (`EMAIL_UNAVAILABLE` otherwise), and
   `navigate_to` reports `NAV_DISPATCHED` only after the `ACTION_VIEW` `geo:` intent was
-  delivered to a maps app (`NAV_UNAVAILABLE` otherwise). Never widen
+  delivered to a maps app (`NAV_UNAVAILABLE` otherwise), and `open_app_info` reports
+  `APP_INFO_OPENED` only after the `ACTION_APPLICATION_DETAILS_SETTINGS` `package:`
+  intent was delivered to a settings app (`APP_INFO_UNAVAILABLE` otherwise). Never widen
   this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is

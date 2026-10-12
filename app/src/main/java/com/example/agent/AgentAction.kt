@@ -248,6 +248,16 @@ sealed class AgentAction {
      * itself, so the consequential route stays under the user's control.
      */
     data class NavigateTo(val target: String) : AgentAction()
+    /**
+     * Opens the system Settings App-info page for a named app package (or app alias),
+     * e.g. "open Chrome's settings" / "show WhatsApp app info". The platform's
+     * documented `ACTION_APPLICATION_DETAILS_SETTINGS` intent is dispatched addressed
+     * to the resolved package and resolved before the accessibility-service gate, so a
+     * tap path over an arbitrary screen is never needed. It only *opens* the page; the
+     * user decides what to change there (force-stop, clear data, permissions), so no
+     * consequential action is performed by the primitive itself.
+     */
+    data class OpenAppInfo(val packageName: String) : AgentAction()
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -323,6 +333,7 @@ sealed class AgentAction {
             is ShareText -> targetPackage?.takeIf { it.isNotBlank() }?.let { "Share text with $it" } ?: "Share text"
             is SendEmail -> "Open mail to email $to"
             is NavigateTo -> "Open the map at '$target'"
+            is OpenAppInfo -> "Open app info for '$packageName'"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

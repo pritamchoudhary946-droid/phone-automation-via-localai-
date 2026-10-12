@@ -308,6 +308,9 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_NAVIGATE_TO -> AgentAction.NavigateTo(
                 target = str(params, "target", "place", "destination", "address", "query", "to", "location")
             )
+            ToolRegistry.TOOL_OPEN_APP_INFO -> AgentAction.OpenAppInfo(
+                packageName = str(params, "packageName", "package", "app", "appQuery", "target", "query")
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
