@@ -14,6 +14,8 @@ import com.example.agent.DeviceStatusReader
 import com.example.agent.DeviceStatusResult
 import com.example.agent.ClipboardReader
 import com.example.agent.ClipboardReadResult
+import com.example.agent.ClipboardWriter
+import com.example.agent.ClipboardWriteResult
 import com.example.agent.AudioAdjustResult
 import com.example.agent.AudioController
 import com.example.agent.AudioStream
@@ -5541,6 +5543,162 @@ class CapabilityUpgradeTest {
         )
     }
 
+    // --- set_clipboard: the write half of the clipboard trio, opt-in and service-free ---
+
+    @Test
+    fun setClipboardExecutesWithoutAnAccessibilityService() {
+        // The clipboard lives on the system ClipboardManager, not the a11y tree, so the
+        // write must resolve before the a11y-service gate (like read_clipboard). Before
+        // this it would fall through to NO_SERVICE.
+        val writer = RecordingClipboardWriter()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            clipboardWriter = writer,
+            clipboardWriteEnabled = { true }
+        )
+
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.SetClipboard("hello")) }
+
+        assertTrue("clipboard write must succeed without a bound a11y service: $result", result.success)
+        assertEquals("SET_CLIPBOARD", result.method)
+        assertEquals("the writer must receive the exact text", listOf("hello"), writer.writes)
+    }
+
+    @Test
+    fun setClipboardRefusesHonestlyWhenOptOut() {
+        // Writing the clipboard is opt-in (it clobbers whatever the user had copied): with
+        // the toggle off the executor must refuse clearly and never touch the clipboard.
+        val writer = RecordingClipboardWriter()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            clipboardWriter = writer,
+            clipboardWriteEnabled = { false }
+        )
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.SetClipboard("hello")) }
+        assertFalse("an opted-out clipboard write must not succeed", result.success)
+        assertEquals("CLIPBOARD_WRITE_DISABLED", result.method)
+        assertEquals("an opted-out write must never touch the clipboard", 0, writer.writes.size)
+    }
+
+    @Test
+    fun setClipboardRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            clipboardWriter = null,
+            clipboardWriteEnabled = { true }
+        )
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.SetClipboard("hello")) }
+        assertFalse("an unwired writer must not be a fake success", result.success)
+        assertEquals("CLIPBOARD_WRITE_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setClipboardStepCompletesFromItsOwnWriteWithoutAScreenChange() = kotlinx.coroutines.runBlocking {
+        // Same self-evidencing class as read_clipboard: a confirmed write is its own goal
+        // evidence, so a NONE-verified step must complete rather than retry to exhaustion.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetClipboard ->
+                        ActionResult(true, "SET_CLIPBOARD", "Copied ${action.text.length} chars to the clipboard")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Copy the text","action":"set_clipboard","params":{"text":"1234"}}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("copy 1234 to the clipboard", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("set_clipboard with NONE verification must complete, got $terminal", terminal is OrchestratorState.Completed)
+    }
+
+    @Test
+    fun parserMapsSetClipboardToTheAction() {
+        val parsed = TaskPlanParser().parse(
+            """{"steps":[{"id":1,"seq":1,"desc":"Copy the text","action":"set_clipboard","params":{"text":"hello"}}]}""",
+            "copy hello to the clipboard"
+        )
+        assertTrue("plan must parse: $parsed", parsed is PlanParseResult.Success)
+        val step = (parsed as PlanParseResult.Success).plan.steps.first()
+        assertTrue("set_clipboard must map to AgentAction.SetClipboard", step.action is AgentAction.SetClipboard)
+        assertEquals("the text param must be carried", "hello", (step.action as AgentAction.SetClipboard).text)
+    }
+
+    @Test
+    fun validationRejectsBlankAndOversizedSetClipboard() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetClipboard("hello")) is ToolValidationResult.Valid)
+        assertTrue(
+            "blank text must be rejected",
+            registry.validateAction(AgentAction.SetClipboard("   ")) is ToolValidationResult.Invalid
+        )
+        val oversized = "x".repeat(ToolRegistry.MAX_CLIPBOARD_CHARS + 1)
+        assertTrue(
+            "oversized text must be rejected",
+            registry.validateAction(AgentAction.SetClipboard(oversized)) is ToolValidationResult.Invalid
+        )
+    }
+
+    @Test
+    fun setClipboardIsWithheldFromThePromptAndToolListUntilOptedIn() {
+        // The capability is opt-in, so the planner must not be told about it (and could
+        // not plan a step the executor would refuse) while the toggle is off. This is the
+        // same live-gate rule as read_clipboard; both the tool list and the schema line
+        // must be withheld, and both must reappear once it is on.
+        val off = PlannerPromptBuilder.availableActions(ToolRegistry(), clipboardWriteEnabled = false)
+        assertFalse("set_clipboard must not be advertised while off", off.contains(ToolRegistry.TOOL_SET_CLIPBOARD))
+
+        val on = PlannerPromptBuilder.availableActions(ToolRegistry(), clipboardWriteEnabled = true)
+        assertTrue("set_clipboard must be advertised once opted in", on.contains(ToolRegistry.TOOL_SET_CLIPBOARD))
+
+        val request = PlanningRequest(
+            userCommand = "copy this to the clipboard",
+            desiredOutcome = "text copied",
+            foregroundPackage = "com.android.launcher",
+            screenSummary = "Home",
+            completedStepsSummary = "",
+            lastActionResult = null,
+            remainingStepBudget = 5,
+            availableActions = off
+        )
+        val promptOff = PlannerPromptBuilder.buildPlanningPrompt(request, clipboardWriteEnabled = false)
+        assertFalse("the schema line must be withheld while off", promptOff.contains("- set_clipboard:"))
+        val promptOn = PlannerPromptBuilder.buildPlanningPrompt(request, clipboardWriteEnabled = true)
+        assertTrue("the schema line must appear once opted in", promptOn.contains("- set_clipboard:"))
+    }
+
+    @Test
+    fun setClipboardSkillKeepsItsToolNameAndTextOnReplay() {
+        val plan = TaskPlan(
+            goal = "clipboard write",
+            fromModel = true,
+            steps = listOf(planStep(1, AgentAction.SetClipboard("the address"), "set_clipboard"))
+        )
+        val restored = TaskPlanSerializer.fromJson(TaskPlanSerializer.toJson(plan), goalOverride = plan.goal)
+        assertTrue("a saved skill must replay set_clipboard", restored != null)
+        val action = restored!!.steps.first().action
+        assertTrue("replayed step must be SetClipboard", action is AgentAction.SetClipboard)
+        assertEquals("the text must survive replay", "the address", (action as AgentAction.SetClipboard).text)
+    }
+
+    @Test
+    fun setClipboardResolvesACapturedVariableBeforeExecution() {
+        // Cross-app data passing: a value captured by an earlier read step can be the text
+        // copied to the clipboard ("read the message, then copy it to the clipboard").
+        val store = com.example.planning.PlanVariableStore()
+        store.set("address", "12 Baker Street")
+        val resolved = store.substitute(AgentAction.SetClipboard("{{address}}"))
+        assertTrue(resolved is AgentAction.SetClipboard)
+        assertEquals("the placeholder must resolve to the captured value", "12 Baker Street", (resolved as AgentAction.SetClipboard).text)
+    }
+
 
 
     // --- Current date/time (relative-time resolution for set_alarm) ---
@@ -5619,6 +5777,14 @@ class CapabilityUpgradeTest {
         override fun read(): ClipboardReadResult {
             calls++
             return ClipboardReadResult(true, "READ_CLIPBOARD", text)
+        }
+    }
+
+    private class RecordingClipboardWriter : ClipboardWriter {
+        val writes = mutableListOf<String>()
+        override fun write(text: String): ClipboardWriteResult {
+            writes += text
+            return ClipboardWriteResult(true, "SET_CLIPBOARD", "Copied ${text.length} chars to the clipboard")
         }
     }
 

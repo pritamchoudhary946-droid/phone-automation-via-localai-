@@ -41,6 +41,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var briefing by remember { mutableStateOf(settings?.briefingEnabled == true) }
     var triage by remember { mutableStateOf(settings?.notificationTriageEnabled == true) }
     var clipboardRead by remember { mutableStateOf(settings?.clipboardReadEnabled == true) }
+    var clipboardWrite by remember { mutableStateOf(settings?.clipboardWriteEnabled == true) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -171,6 +172,16 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         ) {
             clipboardRead = it
             settings?.clipboardReadEnabled = it
+        }
+
+        ToggleRow(
+            title = "Write clipboard",
+            subtitle = "Let Jarvis copy text to your clipboard (e.g. \"copy this address so I can paste it\"). This replaces whatever you last copied, so it is off by default.",
+            checked = clipboardWrite,
+            testTag = "toggle_clipboard_write"
+        ) {
+            clipboardWrite = it
+            settings?.clipboardWriteEnabled = it
         }
 
         Spacer(Modifier.height(4.dp))

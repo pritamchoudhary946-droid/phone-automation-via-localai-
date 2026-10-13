@@ -76,6 +76,15 @@ class CapabilitySettings(context: Context) {
         get() = prefs.getBoolean(KEY_CLIPBOARD_READ, false)
         set(v) = prefs.edit().putBoolean(KEY_CLIPBOARD_READ, v).apply()
 
+    /**
+     * Clipboard writing (`set_clipboard`). Off by default: overwriting the clipboard can
+     * clobber whatever the user had copied, so it is opt-in like clipboard reading. While
+     * off the executor refuses the action and the planner does not advertise it.
+     */
+    var clipboardWriteEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CLIPBOARD_WRITE, false)
+        set(v) = prefs.edit().putBoolean(KEY_CLIPBOARD_WRITE, v).apply()
+
     companion object {
         const val PREFS = "capability_prefs"
         const val KEY_VOICE_OUTPUT = "voice_output_enabled"
@@ -89,5 +98,6 @@ class CapabilitySettings(context: Context) {
         const val KEY_BRIEFING_MINUTE = "briefing_minute_of_day"
         const val KEY_NOTIFICATION_TRIAGE = "notification_triage_enabled"
         const val KEY_CLIPBOARD_READ = "clipboard_read_enabled"
+        const val KEY_CLIPBOARD_WRITE = "clipboard_write_enabled"
     }
 }

@@ -68,6 +68,7 @@ open class ToolRegistry {
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_READ_CLIPBOARD = "read_clipboard"
+        const val TOOL_SET_CLIPBOARD = "set_clipboard"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
         const val TOOL_OPEN_QUICK_SETTINGS = "open_quick_settings"
         const val TOOL_OPEN_RECENTS = "open_recents"
@@ -98,6 +99,8 @@ open class ToolRegistry {
 
         /** Longest calendar event duration the tool accepts: 24 hours, in minutes. */
         const val MAX_EVENT_DURATION_MINUTES = 24 * 60
+        /** Longest text a single set_clipboard step may put on the clipboard. */
+        const val MAX_CLIPBOARD_CHARS = 2000
     }
 
     private val tools = mapOf(
@@ -367,6 +370,12 @@ open class ToolRegistry {
             name = TOOL_READ_CLIPBOARD,
             description = "Reads the device clipboard's current text. Use this to see what the user last copied (e.g. 'read the code I copied', 'what did I just copy') and to use that value in a later step (declare it with captures and reference {{name}}). Returns an honest empty result when the clipboard holds no text",
             requiredParameters = emptyList()
+        ),
+        TOOL_SET_CLIPBOARD to ToolDefinition(
+            name = TOOL_SET_CLIPBOARD,
+            description = "Copies a given piece of text to the device clipboard. Use for 'copy this to the clipboard', 'put this on my clipboard', 'copy this address so I can paste it' - provide the text to copy (it may reference a value captured earlier with {{name}}). The write is read back, so it never reports success unless the clipboard actually holds the text",
+            requiredParameters = listOf("text"),
+            optionalParameters = listOf("content", "value", "message", "body")
         ),
         TOOL_OPEN_NOTIFICATIONS to ToolDefinition(
             name = TOOL_OPEN_NOTIFICATIONS,
@@ -771,6 +780,15 @@ open class ToolRegistry {
                         ToolValidationResult.Invalid(
                             "summarize_text maxChars must be between $MIN_SUMMARY_CHARS and $MAX_SUMMARY_CHARS"
                         )
+                    else -> ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.SetClipboard -> {
+                when {
+                    action.text.isBlank() ->
+                        ToolValidationResult.Invalid("set_clipboard requires non-blank text")
+                    action.text.length > MAX_CLIPBOARD_CHARS ->
+                        ToolValidationResult.Invalid("set_clipboard text is too long (max $MAX_CLIPBOARD_CHARS chars)")
                     else -> ToolValidationResult.Valid
                 }
             }

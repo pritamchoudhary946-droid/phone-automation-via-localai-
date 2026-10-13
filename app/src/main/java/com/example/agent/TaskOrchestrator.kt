@@ -107,6 +107,8 @@ class TaskOrchestrator(
     private val voiceOutputEnabled: () -> Boolean = { false },
     /** Live opt-in gate for clipboard reading (the `read_clipboard` capability). */
     private val clipboardReadEnabled: () -> Boolean = { false },
+    /** Live opt-in gate for clipboard writing (the `set_clipboard` capability). */
+    private val clipboardWriteEnabled: () -> Boolean = { false },
     /** Injectable live-condition sampler for event triggers (plan 9.2); test seam. */
     private val conditionsProvider: (() -> com.example.automation.TriggerMatcher.Conditions)? = null,
     /** Injectable battery-guard decision for event triggers (plan 9.14); test seam. */
@@ -1135,6 +1137,9 @@ class TaskOrchestrator(
             is AgentAction.ReadText, is AgentAction.ReadPageContent,
             is AgentAction.ReadNotifications, is AgentAction.ReadDeviceStatus,
             is AgentAction.ReadClipboard,
+            // set_clipboard writes the system clipboard (a service no screen reflects);
+            // the writer reads the value back, so a successful write is its own evidence.
+            is AgentAction.SetClipboard,
             // Device-control actions act on a system service no screen reflects; a
             // completed, honestly-read-back volume/media/ringer command is its own
             // evidence, exactly like the read actions above.
@@ -1381,6 +1386,7 @@ class TaskOrchestrator(
                 action is AgentAction.PickFile ||
                 action is AgentAction.SetTorch ||
                 action is AgentAction.SetDeviceControl ||
+                action is AgentAction.SetClipboard ||
                 action is AgentAction.Speak ||
                 action is AgentAction.ReadNotifications)
         ) {
@@ -2005,7 +2011,8 @@ class TaskOrchestrator(
                             toolRegistry,
                             notificationTriageEnabled(),
                             voiceOutputEnabled(),
-                            clipboardReadEnabled()
+                            clipboardReadEnabled(),
+                            clipboardWriteEnabled()
                         )
                     )
                 )

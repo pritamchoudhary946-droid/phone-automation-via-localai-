@@ -144,6 +144,7 @@ object TaskPlanSerializer {
         is AgentAction.SetDeviceControl -> JSONObject()
             .put("control", control)
             .put("value", value)
+        is AgentAction.SetClipboard -> JSONObject().put("text", text)
         is AgentAction.Speak -> JSONObject().put("text", text)
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
         else -> null
@@ -263,6 +264,7 @@ object TaskPlanSerializer {
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS
         is AgentAction.ReadDeviceStatus -> com.example.agent.ToolRegistry.TOOL_READ_DEVICE_STATUS
         is AgentAction.ReadClipboard -> com.example.agent.ToolRegistry.TOOL_READ_CLIPBOARD
+        is AgentAction.SetClipboard -> com.example.agent.ToolRegistry.TOOL_SET_CLIPBOARD
         is AgentAction.OpenNotifications -> com.example.agent.ToolRegistry.TOOL_OPEN_NOTIFICATIONS
         is AgentAction.OpenQuickSettings -> com.example.agent.ToolRegistry.TOOL_OPEN_QUICK_SETTINGS
         is AgentAction.PressRecents -> com.example.agent.ToolRegistry.TOOL_OPEN_RECENTS

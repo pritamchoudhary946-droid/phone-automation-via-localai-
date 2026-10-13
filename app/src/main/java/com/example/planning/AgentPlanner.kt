@@ -25,7 +25,9 @@ class AgentPlanner(
     /** Live opt-in gate for on-device speech output (the `speak` capability). */
     private val voiceOutputEnabled: () -> Boolean = { false },
     /** Live opt-in gate for clipboard reading (the `read_clipboard` capability). */
-    private val clipboardReadEnabled: () -> Boolean = { false }
+    private val clipboardReadEnabled: () -> Boolean = { false },
+    /** Live opt-in gate for clipboard writing (the `set_clipboard` capability). */
+    private val clipboardWriteEnabled: () -> Boolean = { false }
 ) {
 
     /**
@@ -40,7 +42,8 @@ class AgentPlanner(
             toolRegistry,
             notificationTriageEnabled(),
             voiceOutputEnabled(),
-            clipboardReadEnabled()
+            clipboardReadEnabled(),
+            clipboardWriteEnabled()
         )
 
     /** Hierarchical reflection-on-demand (plan 5.4), shared by the orchestrator. */
@@ -87,7 +90,8 @@ class AgentPlanner(
             request.withCurrentDateTime(),
             notificationTriageEnabled(),
             voiceOutputEnabled(),
-            clipboardReadEnabled()
+            clipboardReadEnabled(),
+            clipboardWriteEnabled()
         )
         var lastRaw = ""
         var lastReason = "unknown"

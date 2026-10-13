@@ -119,6 +119,11 @@ class PlanVariableStore {
         is AgentAction.PickFile -> action.copy(mimeType = action.mimeType?.let(::substitute))
         is AgentAction.DictateNote -> action.copy(title = action.title?.let(::substitute))
         is AgentAction.Speak -> action.copy(text = substitute(action.text))
+        // The text to copy can be a value captured earlier in the run, so the same
+        // cross-app passing that feeds enter_text/share/email must feed set_clipboard
+        // too - otherwise "copy this address so I can paste it" would copy the literal
+        // placeholder instead of the captured value.
+        is AgentAction.SetClipboard -> action.copy(text = substitute(action.text))
         // The text summarised can be a value captured earlier in the run, so the same
         // cross-app passing that feeds enter_text/share/email must feed summarize_text
         // too - otherwise "read the message, then summarise it" would condense the

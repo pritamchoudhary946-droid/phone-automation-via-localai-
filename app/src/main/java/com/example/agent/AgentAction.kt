@@ -395,6 +395,20 @@ sealed class AgentAction {
      * `captures` step can pass the value to a later step.
      */
     object ReadClipboard : AgentAction()
+    /**
+     * Writes [text] to the device clipboard - the write half of the clipboard trio
+     * ([CopyText]/[ReadClipboard]/[SetClipboard]).
+     *
+     * The clipboard is a system service (`ClipboardManager`), not an accessibility-tree
+     * control: no screen read or UI tap can put a chosen value on the clipboard, so
+     * "copy this to the clipboard" / "put this on my clipboard" cannot be done by a UI
+     * action. Unlike [CopyText] (which copies the focused field's content) it carries an
+     * explicit [text] the model supplies, so a value captured earlier can be handed to
+     * another app. Like [ReadClipboard] it is a service-backed action resolved before
+     * the accessibility-service gate and is opt-in (a live `clipboardWriteEnabled` gate),
+     * so Jarvis never writes the clipboard unless the user allows it.
+     */
+    data class SetClipboard(val text: String) : AgentAction()
     object OpenNotifications : AgentAction()
     object OpenQuickSettings : AgentAction()
     object PressRecents : AgentAction()
@@ -495,6 +509,7 @@ sealed class AgentAction {
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is ReadClipboard -> "Read clipboard"
+            is SetClipboard -> "Copy ${text.length} chars to clipboard"
             is OpenNotifications -> "Open notification shade"
             is OpenQuickSettings -> "Open quick settings"
             is PressRecents -> "Open recents"

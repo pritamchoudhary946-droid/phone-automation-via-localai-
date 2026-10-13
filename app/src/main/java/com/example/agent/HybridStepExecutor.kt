@@ -263,6 +263,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic device control"
             )
 
+            is AgentAction.SetClipboard -> FastPathDecision.Execute(
+                action,
+                "deterministic clipboard write"
+            )
+
             is AgentAction.Speak -> FastPathDecision.Execute(
                 action,
                 "deterministic on-device speech output"
