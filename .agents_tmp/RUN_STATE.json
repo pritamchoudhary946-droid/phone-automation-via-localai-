@@ -244,11 +244,11 @@
     "Optional: an :app:lintDebug gate in verify.sh."
   ],
   "branch": "auto/jarvis-autonomy-20261013-1531",
-  "open_pr": null,
+  "open_pr": 88,
   "risky_actions_done": [],
   "blockers": "Session cap reached (sessions_done 49 >= session_cap 48) without project_done; human review requested to raise session_cap before further capability work. No technical blockers in this run.",
   "last_run_id": "jarvis-20261013-1531",
-  "last_updated": "2026-10-13T15:45:00Z",
+  "last_updated": "2026-10-13T16:02:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,
