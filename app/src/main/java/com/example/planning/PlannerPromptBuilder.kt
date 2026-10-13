@@ -36,8 +36,9 @@ object PlannerPromptBuilder {
         - Use open_item with the visible result label to open one observed result.
         - end a plan with report_status only when the goal is fully achieved.
         - To carry a value between steps/apps, add "captures":["<name>"] to a
-          read_text/read_page_content step and reference it later as {{name}} in a
-          text/url/target field. Only a read_text/read_page_content step can capture.
+          text-producing read step (read_text, read_page_content, summarize_text or
+          any other read step that returns text) and reference it later as {{name}}
+          in a text/url/target field. Only a text-producing step can capture.
     """.trimIndent()
 
     /**
@@ -64,7 +65,7 @@ object PlannerPromptBuilder {
         """- find_element: {"targetText":"<label>","direction":"up|down","maxSwipes":<int>}   (scroll to a label if needed, then tap it)""",
         """- read_text:   {}   (reads the visible on-screen text back to you)""",
         """- read_page_content: {}   (extracts the visible page/article text)""",
-        """- captures:   add "captures":["<name>"] to a read_text/read_page_content step to store its text as {{name}} for a later step (cross-app data passing)""",
+        """- captures:   add "captures":["<name>"] to a text-producing read step (read_text, read_page_content, summarize_text or any other read step that returns text) to store its text as {{name}} for a later step (cross-app data passing)""",
         """- wait_for_text: {"targetText":"<label>","timeoutMs":<int>}""",
         """- adjust_volume: {"stream":"media|ring|alarm|notification|call","steps":<int>,"mute":<optional bool>}   (steps: +raises, -lowers; mute=true silences the stream; one step is one hardware volume press)""",
         """- set_ringer_mode: {"mode":"silent|vibrate|normal"}   (switch the whole device's ringer mode; use for "put my phone on silent" / "set it to vibrate" / "unmute my phone" - this is not a volume change)""",
@@ -84,7 +85,7 @@ object PlannerPromptBuilder {
         """- open_settings: {"panel":"<wifi|bluetooth|display|sound|battery|location|apps|accessibility|network|data_usage|airplane_mode|nfc|date|language|storage|security|privacy|cast|night_display|keyboard|dnd|home|settings>"}   (opens a named system Settings panel; use for "open wifi settings" / "show bluetooth settings" / "take me to display settings" - it only opens the panel and never changes anything there, so never claim a setting was changed)""",
         """- open_calendar: {"dayOffset":<0=today,1=tomorrow,..,negative=past>}   (opens the device's calendar app at a chosen day; use for "open my calendar" / "show the calendar" / "what's on today" / "show my calendar for tomorrow" - default dayOffset 0 is today and resolve a named day like "tomorrow" to dayOffset=1 from the current date; it only opens the calendar and never adds or changes an event, so never claim an event was created)""",
         """- create_note: {"title":"<optional>","content":"<optional>"}   (opens the notes app to create a note pre-filled with a title and/or text; use for "make a note that the wifi password is 1234" / "note down to call Sam tomorrow" / "create a note titled Shopping" - provide at least one of title/content; it opens the notes editor for the user and never claims the note was saved)""",
-        """- summarize_text: {"text":"<the text to condense>","maxChars":<optional int>}   (condenses a block of text to a short digest; use for "summarise this page" / "give me the gist of that message" / "summarise the thread" - often pass the value an earlier read_text/read_page_content step captured; the digest is returned to the loop, and it never fabricates a summary when the summarizer is unavailable)""",
+        """- summarize_text: {"text":"<the text to condense>","maxChars":<optional int>}   (condenses a block of text to a short digest; use for "summarise this page" / "give me the gist of that message" / "summarise the thread" - often pass the value an earlier read step captured as {{name}}; the digest is returned to the loop and can itself be captured, and it never fabricates a summary when the summarizer is unavailable)""",
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",

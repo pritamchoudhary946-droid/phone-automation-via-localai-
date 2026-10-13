@@ -586,12 +586,18 @@ output is off, read live per call by `AgentPlanner`.
   capability implicitly. `CapabilitySettings` is the single home for the flags.
 - 9.4 cross-app data passing (task variables): `PlanVariableStore` is a per-run,
   never-persisted, tenant-scoped store; a step declares `"captures":["name"]` on a
-  `read_text`/`read_page_content` step and a later step uses `{{name}}`
-  (`substitute` runs just before execution). A capture step's success is the
+  text-producing read step (the `producesReadableText` family: `read_text`,
+  `read_page_content`, `read_notifications`, `read_device_status`, `summarize_text`)
+  and a later step uses `{{name}}` (`substitute` runs just before execution — it
+  covers every text field, including `summarize_text.text`, so a captured value can
+  be summarised, and a `summarize_text` digest can itself be captured and reused).
+  A capture step's success is the
   non-empty text it captured — `verifyAction` treats a NONE-verified read as
   satisfied by its own `readText` (empty -> failure, never a fake success), and the
   goal gate's `selfEvidencingToolSatisfied(...)` counts a completed
-  ReadText/ReadPageContent/ReadNotifications as goal evidence. A capture step
+  ReadText/ReadPageContent/ReadNotifications/ReadDeviceStatus/SummarizeText as goal
+  evidence. A capture on any non-text action is rejected by the parser (it could only
+  ever be empty). A capture step
   removes its variable names before storing (no stale reuse on re-run) and a failed
   capture removes them too. `PlanVariableStore.looksSensitive(...)` refuses a value
   that looks like a secret (13-19 digit card, labelled otp/pin/password/cvv/secret)
