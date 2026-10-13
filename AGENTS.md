@@ -408,7 +408,7 @@ new tool. It is resolved *before* the a11y gate (device-backed, like `set_torch`
 The pure, unit-tested `com.example.agent.DeviceControl.resolve(control, value)` is the
 single truth for the accepted vocabulary: it trims and lower-cases both fields and
 returns a typed `DeviceControlOp` or **null** for an unknown control or a value invalid
-for that control. Two controls are backed, each reusing an existing honest read-back
+for that control. Three controls are backed, each reusing an existing honest read-back
 primitive so no new action class is needed:
 - `torch` — value `on`/`off` (on/off aliases `on`/`off`/`enable`/`disable`/`yes`/`no`/
   `true`/`false`/`1`/`0`, case-insensitively) dispatched to the existing `TorchController`
@@ -417,6 +417,17 @@ primitive so no new action class is needed:
   `RingerModeController` (read-back `RINGER_MODE`, `RINGER_UNCHANGED` on an ignored
   request). This makes "go silent at night" a scheduled-automation action, distinct from
   muting one audio stream.
+- `dnd` — value `off`/`priority`/`alarms`/`none` (aliases include `off`/`all`/`disable`,
+  `priority`/`priority_only`, `alarms`/`alarms_only`, `none`/`silent`/`total_silence`/`on`,
+  case-insensitively) dispatched to `DndController` (`AndroidDndController` over the
+  `NotificationManager` interruption filter; `DndMode` is a *closed* enum mapping each name
+  to its real `INTERRUPTION_FILTER_*` constant, so an invalid mode can never index the
+  platform incorrectly). Read-back `DND_MODE`, `DND_UNCHANGED` on an ignored request,
+  `DND_PERMISSION` when notification-policy access is not granted, `DND_UNAVAILABLE` when
+  the notification service is absent. This is the "turn on do not disturb" / "put my phone
+  on total silence" / "only let priority contacts through" primitive, distinct from
+  `ringer_mode` (which controls whether the phone *rings*, while DND controls which
+  *notifications* may interrupt at all).
 Because the resolver rejects anything it cannot run, an unknown control is refused
 honestly (`UNSUPPORTED_DEVICE_CONTROL` at execute, `Invalid` at validation) and never
 dispatched — so the prompt can never advertise a control the executor cannot execute. Carried through
@@ -426,7 +437,7 @@ dispatched — so the prompt can never advertise a control the executor cannot e
 fields so a scheduled/learned control replays correctly). A control acts on a system
 service no accessibility screen reflects, so `verifyAction` accepts a successful result
 as the step's evidence via the same self-evidencing rule as `set_torch`, and a
-`TORCH_UNCHANGED` result still fails the step (never masked).
+`TORCH_UNCHANGED`/`RINGER_UNCHANGED`/`DND_UNCHANGED` result still fails the step (never masked).
 
 `speak` (`AgentAction.Speak(text)` + `SpeakController` -> the platform `TextToSpeech`
 engine) follows the same rule: speech output is a platform TTS service, not an

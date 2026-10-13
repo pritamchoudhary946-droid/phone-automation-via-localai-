@@ -27,6 +27,9 @@ sealed interface DeviceControlOp {
 
     /** Switch the ringer to [mode] (silent / vibrate / normal). */
     data class RingerMode(val mode: com.example.agent.RingerMode) : DeviceControlOp
+
+    /** Switch Do Not Disturb to [mode] (off / priority / alarms / none). */
+    data class Dnd(val mode: com.example.agent.DndMode) : DeviceControlOp
 }
 
 /**
@@ -36,17 +39,19 @@ sealed interface DeviceControlOp {
  * unit-testable without a device and the executor/prompt/serializer all agree on the
  * accepted vocabulary.
  *
- * Two controls are backed today, both reusing an existing honest read-back primitive:
- * `torch` (on/off -> the [TorchController] camera-hardware toggle) and `ringer_mode`
- * (silent/vibrate/normal -> the [RingerModeController] system-audio setting). A new
- * control is a mapping here plus a dispatch arm, never a new tool.
+ * Three controls are backed today, each reusing an existing honest read-back primitive:
+ * `torch` (on/off -> the [TorchController] camera-hardware toggle), `ringer_mode`
+ * (silent/vibrate/normal -> the [RingerModeController] system-audio setting) and `dnd`
+ * (off/priority/alarms/none -> the [DndController] system notification-policy setting).
+ * A new control is a mapping here plus a dispatch arm, never a new tool.
  */
 object DeviceControl {
     const val TORCH = "torch"
     const val RINGER_MODE = "ringer_mode"
+    const val DND = "dnd"
 
     /** The controls `set_device_control` understands. */
-    fun keys(): List<String> = listOf(TORCH, RINGER_MODE)
+    fun keys(): List<String> = listOf(TORCH, RINGER_MODE, DND)
 
     /**
      * Resolves a ([control], [value]) pair into the typed op the executor dispatches, or
@@ -59,6 +64,7 @@ object DeviceControl {
         return when (normalisedControl) {
             TORCH -> onOff(normalisedValue)?.let { DeviceControlOp.Torch(it) }
             RINGER_MODE -> com.example.agent.RingerMode.fromKey(normalisedValue)?.let { DeviceControlOp.RingerMode(it) }
+            DND -> com.example.agent.DndMode.fromKey(normalisedValue)?.let { DeviceControlOp.Dnd(it) }
             else -> null
         }
     }
@@ -77,6 +83,7 @@ object DeviceControl {
         when (val op = resolve(control, value)) {
             is DeviceControlOp.Torch -> if (op.on) "on" else "off"
             is DeviceControlOp.RingerMode -> op.mode.key
+            is DeviceControlOp.Dnd -> op.mode.key
             null -> value.trim()
         }
 }

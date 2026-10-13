@@ -62,6 +62,9 @@ import com.example.model.NanoSummarizer
 import com.example.agent.RingerMode
 import com.example.agent.RingerModeController
 import com.example.agent.RingerModeResult
+import com.example.agent.DndController
+import com.example.agent.DndMode
+import com.example.agent.DndResult
 import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
 import com.example.agent.TimerController
@@ -3502,6 +3505,130 @@ class CapabilityUpgradeTest {
     }
 
     @Test
+    fun deviceControlResolvesDndAliases() {
+        // dnd is the third backed control, mapped to the closed DndMode enum so an invalid
+        // mode can never index NotificationManager's interruption filter incorrectly.
+        assertEquals(DeviceControlOp.Dnd(DndMode.NONE), DeviceControl.resolve("dnd", "none"))
+        assertEquals(DeviceControlOp.Dnd(DndMode.NONE), DeviceControl.resolve("DND", "ON"))
+        assertEquals(DeviceControlOp.Dnd(DndMode.NONE), DeviceControl.resolve(" dnd ", "silent"))
+        assertEquals(DeviceControlOp.Dnd(DndMode.OFF), DeviceControl.resolve("dnd", "off"))
+        assertEquals(DeviceControlOp.Dnd(DndMode.OFF), DeviceControl.resolve("dnd", "disable"))
+        assertEquals(DeviceControlOp.Dnd(DndMode.PRIORITY), DeviceControl.resolve("dnd", "priority"))
+        assertEquals(DeviceControlOp.Dnd(DndMode.PRIORITY), DeviceControl.resolve("dnd", "priority_only"))
+        assertEquals(DeviceControlOp.Dnd(DndMode.ALARMS), DeviceControl.resolve("dnd", "alarms"))
+        // A value that belongs to another control must not be accepted for dnd, and vice versa.
+        assertNull(DeviceControl.resolve("dnd", "maybe"))
+        assertNull(DeviceControl.resolve("torch", "priority"))
+        assertNull(DeviceControl.resolve("ringer_mode", "priority"))
+        assertEquals("none", DeviceControl.describeValue("dnd", "silent"))
+        assertEquals("off", DeviceControl.describeValue("dnd", "disable"))
+        assertTrue(DeviceControl.isKnown("dnd"))
+    }
+
+    @Test
+    fun setDeviceControlDndReachesTheDndController() {
+        // The dnd control drives the NotificationManager, so it must resolve before the
+        // a11y gate (service-free, like torch/ringer_mode).
+        val recorder = RecordingDndController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            dndController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("dnd", "none"))
+        }
+        assertTrue("dnd control must apply without a bound a11y service: $result", result.success)
+        assertEquals("DND_MODE", result.method)
+        assertEquals(listOf(DndMode.NONE), recorder.calls)
+    }
+
+    @Test
+    fun setDeviceControlDndRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            dndController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("dnd", "none"))
+        }
+        assertFalse("no dnd controller must not be a fake success", result.success)
+        assertEquals("DND_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setDeviceControlDndUnchangedIsReportedAsFailure() {
+        // The DND controller reads the filter back; a request the device ignored must not be
+        // dressed up as success.
+        val recorder = RecordingDndController(
+            DndResult(false, "DND_UNCHANGED", "Do Not Disturb stayed at off")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            dndController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("dnd", "none"))
+        }
+        assertFalse(result.success)
+        assertEquals("DND_UNCHANGED", result.method)
+    }
+
+    @Test
+    fun setDeviceControlDndPermissionDeniedIsReportedHonestly() {
+        // Notification-policy access is enforced by the platform; the honest DND_PERMISSION
+        // reason must survive to the caller rather than being masked as a success.
+        val recorder = RecordingDndController(
+            DndResult(false, "DND_PERMISSION", "Do Not Disturb control needs notification-policy access")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            dndController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("dnd", "none"))
+        }
+        assertFalse(result.success)
+        assertEquals("DND_PERMISSION", result.method)
+    }
+
+    @Test
+    fun setDeviceControlDndSkillKeepsItsControlAndValueOnReplay() {
+        // A learned/scheduled "dnd off" control must not replay turning Do Not Disturb ON.
+        val plan = com.example.planning.TaskPlan(
+            goal = "turn off do not disturb",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "dnd off",
+                    action = AgentAction.SetDeviceControl("dnd", "off"),
+                    rawActionName = "set_device_control", expectedPostcondition = "dnd off",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved dnd skill must be replayable", restored != null)
+        assertEquals(AgentAction.SetDeviceControl("dnd", "off"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun validationAcceptsDndDeviceControl() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("dnd", "none")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("dnd", "priority")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("dnd", "alarms")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("dnd", "off")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("dnd", "maybe")) is ToolValidationResult.Invalid)
+    }
+
+    @Test
     fun setDeviceControlRingerModeReachesTheRingerController() {
         // The ringer_mode control reuses the existing RingerModeController read-back, so it
         // must resolve before the a11y gate (AudioManager-backed, not tree-backed).
@@ -3610,7 +3737,8 @@ class CapabilityUpgradeTest {
         {"steps":[
           {"id":1,"seq":1,"desc":"Torch on","action":"set_device_control","params":{"control":"torch","value":"on"},"expect":"light on","verify":"NONE"},
           {"id":2,"seq":2,"desc":"Torch off","action":"set_device_control","params":{"setting":"Torch","state":"disable"},"expect":"light off","verify":"NONE"},
-          {"id":3,"seq":3,"desc":"Go silent","action":"set_device_control","params":{"control":"ringer_mode","value":"silent"},"expect":"silent","verify":"NONE"}
+          {"id":3,"seq":3,"desc":"Go silent","action":"set_device_control","params":{"control":"ringer_mode","value":"silent"},"expect":"silent","verify":"NONE"},
+          {"id":4,"seq":4,"desc":"DND on","action":"set_device_control","params":{"control":"dnd","value":"priority"},"expect":"priority only","verify":"NONE"}
         ]}
         """.trimIndent()
         val result = TaskPlanParser().parse(json, "device control")
@@ -3619,6 +3747,7 @@ class CapabilityUpgradeTest {
         assertEquals(AgentAction.SetDeviceControl("torch", "on"), steps[0].action)
         assertEquals(AgentAction.SetDeviceControl("torch", "disable"), steps[1].action)
         assertEquals(AgentAction.SetDeviceControl("ringer_mode", "silent"), steps[2].action)
+        assertEquals(AgentAction.SetDeviceControl("dnd", "priority"), steps[3].action)
     }
 
     @Test
@@ -3677,6 +3806,7 @@ class CapabilityUpgradeTest {
         )
         assertTrue("prompt catalogue is missing set_device_control", prompt.contains("set_device_control"))
         assertTrue("prompt catalogue must advertise the ringer_mode control", prompt.contains("ringer_mode"))
+        assertTrue("prompt catalogue must advertise the dnd control", prompt.contains("dnd"))
     }
 
     @Test
@@ -5208,6 +5338,16 @@ class CapabilityUpgradeTest {
         override fun set(mode: RingerMode): RingerModeResult {
             calls += mode
             return result ?: RingerModeResult(true, "RINGER_MODE", "Ringer mode set to ${mode.key}")
+        }
+    }
+
+    private class RecordingDndController(
+        private val result: DndResult? = null
+    ) : DndController {
+        val calls = mutableListOf<DndMode>()
+        override fun set(mode: DndMode): DndResult {
+            calls += mode
+            return result ?: DndResult(true, "DND_MODE", "Do Not Disturb set to ${mode.key}")
         }
     }
 
