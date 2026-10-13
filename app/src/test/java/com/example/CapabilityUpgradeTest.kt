@@ -2478,6 +2478,143 @@ class CapabilityUpgradeTest {
         )
     }
 
+    // --- dictate_note: the "take a voice note" primitive ---
+
+    @Test
+    fun dictateNoteExecutesWithoutAnAccessibilityService() {
+        // dictate_note is the same intent-dispatch primitive as create_note (ACTION_CREATE_NOTE,
+        // no body), so it is service-free and must resolve before the a11y gate.
+        val recorder = RecordingNoteController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            noteController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.DictateNote(title = "Shopping list"))
+        }
+        assertTrue("a dictation note must open without a bound a11y service: $result", result.success)
+        assertEquals("NOTE_DICTATION_OPENED", result.method)
+        assertEquals("the controller must be asked exactly once", 1, recorder.dictatedTitles.size)
+        assertEquals("Shopping list", recorder.dictatedTitles[0])
+        assertTrue("dictate_note must never carry a body", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun dictateNoteRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            noteController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.DictateNote())
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("NOTE_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun dictateNoteReportsFailureHonestlyWhenNoNotesAppExists() {
+        val recorder = RecordingNoteController(
+            NoteResult(false, "NOTE_UNAVAILABLE", "No notes app is available")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            noteController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.DictateNote(title = "x"))
+        }
+        assertFalse("a missing notes app must not be reported as success", result.success)
+        assertEquals("NOTE_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun dictateNoteParserMapsTheToolNameWithAnOptionalTitle() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Dictate a note","action":"dictate_note","params":{"title":"Ideas"},"expect":"notes app voice mode","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Dictate an untitled note","action":"dictate_note","params":{},"expect":"notes app voice mode","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "dictate a note")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.DictateNote(title = "Ideas"), steps[0].action)
+        assertEquals(AgentAction.DictateNote(title = null), steps[1].action)
+    }
+
+    @Test
+    fun dictateNoteValidationAcceptsAnOptionalTitleButRejectsAnOversizedOne() {
+        val registry = ToolRegistry()
+        assertTrue(
+            "an untitled dictation is valid (the app opens its voice mode)",
+            registry.validateAction(AgentAction.DictateNote()) is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "a titled dictation is valid",
+            registry.validateAction(AgentAction.DictateNote(title = "Ideas")) is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "an oversized title must be rejected",
+            registry.validateAction(
+                AgentAction.DictateNote(title = "x".repeat(ToolRegistry.MAX_NOTE_TITLE_CHARS + 1))
+            ) is ToolValidationResult.Invalid
+        )
+    }
+
+    @Test
+    fun dictateNoteSkillKeepsItsTitleOnReplay() {
+        val action = AgentAction.DictateNote(title = "Meeting notes")
+        val params = com.example.planning.TaskPlanSerializer.toJson(
+            com.example.planning.TaskPlan(
+                goal = "dictate", fromModel = true,
+                steps = listOf(
+                    com.example.planning.PlanStep(
+                        id = 1, sequence = 1, description = "dictate",
+                        action = action, rawActionName = "dictate_note",
+                        expectedPostcondition = "notes", verification = com.example.planning.VerificationMethod.NONE
+                    )
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(params, goalOverride = "dictate")
+        assertTrue("a saved dictation skill must be replayable", restored != null)
+        assertEquals(
+            "the title must survive a skill round-trip (toParams)",
+            action, restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun promptAdvertisesDictateNote() {
+        val registry = ToolRegistry()
+        val actions = PlannerPromptBuilder.availableActions(registry)
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_DICTATE_NOTE}",
+            actions.contains(ToolRegistry.TOOL_DICTATE_NOTE)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "take a voice note",
+                desiredOutcome = "notes app voice mode open",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue(
+            "the planning prompt catalogue must advertise dictate_note",
+            prompt.contains(ToolRegistry.TOOL_DICTATE_NOTE)
+        )
+    }
+
+
     @Test
     fun promptAdvertisesCreateNote() {
         val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
@@ -2542,6 +2679,50 @@ class CapabilityUpgradeTest {
         val terminal = awaitTerminal(orchestrator)
         assertTrue("a failed note dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
+
+    @Test
+    fun dictateNoteStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.DictateNote -> ActionResult(true, "NOTE_DICTATION_OPENED", "Opening notes to dictate the note")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Dictate a note","action":"dictate_note","params":{},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("take a voice note", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("dictate_note must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.DictateNote })
+    }
+
+    @Test
+    fun dictateNoteFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.DictateNote -> ActionResult(false, "NOTE_UNAVAILABLE", "No notes app is available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Dictate a note","action":"dictate_note","params":{},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("take a voice note", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed dictation dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
 
     // --- pick_file: the "pick a file / choose a document" primitive ---
 
@@ -5046,9 +5227,14 @@ class CapabilityUpgradeTest {
         private val result: NoteResult? = null
     ) : NoteController {
         val calls = mutableListOf<Pair<String?, String?>>()
+        val dictatedTitles = mutableListOf<String?>()
         override fun createNote(title: String?, content: String?): NoteResult {
             calls += title to content
             return result ?: NoteResult(true, "NOTE_DISPATCHED", "Opening notes to create the note")
+        }
+        override fun dictateNote(title: String?): NoteResult {
+            dictatedTitles += title
+            return result ?: NoteResult(true, "NOTE_DICTATION_OPENED", "Opening notes to dictate the note")
         }
     }
 

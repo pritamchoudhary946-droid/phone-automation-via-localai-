@@ -1,6 +1,37 @@
 
 ---
 
+## SESSION 47 (2026-10-13) - milestone: dictate_note, the "take a voice note" primitive
+
+Where reached: DONE and validated. `create_note` (landed earlier this session) now has a
+sibling that opens the notes app's own editor *by dictation* rather than pre-filling a body:
+- New `AgentAction.DictateNote(title?)` + tool `dictate_note`. Same
+  `Intent.ACTION_CREATE_NOTE` dispatch as `create_note` but with **no** `EXTRA_TEXT`, so the
+  notes app opens ready for the user to speak (an optional title still labels the note). This
+  is the "dictate a note" / "take a voice note" / "start a voice memo in notes" primitive.
+- `NoteController.dictateNote(title)` + `AndroidNoteController.dictateNote` report
+  `NOTE_DICTATION_OPENED` only after the intent was delivered (`NOTE_UNAVAILABLE` /
+  `NOTE_PERMISSION` / `NOTE_ERROR` otherwise); it opens the editor and never claims the note
+  was spoken or saved. Resolved *before* the a11y-service gate, exactly like `create_note`.
+- Wired across every action-vocabulary seam: `AgentAction` (+`getDisplayName`), `ToolRegistry`
+  (const/definition/`MAX_NOTE_TITLE_CHARS` validation; a blank title is valid), `TaskPlanParser`
+  (`TOOL_DICTATE_NOTE` branch with title aliases), `HybridStepExecutor.decide` (deterministic
+  fast path), `PlannerPromptBuilder.ACTION_CATALOG`, `PlanVariables.substitute`,
+  `AndroidDeviceAutomation.execute` (`noteController.dictateNote`), `TaskPlanSerializer`
+  (`toParams`/`toolNameFor`), `TaskOrchestrator.verifyAction` self-evidencing rule.
+- Tests (CapabilityUpgradeTest, 9 new): `dictateNoteExecutesWithoutAnAccessibilityService`,
+  `dictateNoteRefusesHonestlyWhenUnwired`, `dictateNoteReportsFailureHonestlyWhenNoNotesAppExists`,
+  `dictateNoteParserMapsTheToolNameWithAnOptionalTitle`,
+  `dictateNoteValidationAcceptsAnOptionalTitleButRejectsAnOversizedOne`,
+  `dictateNoteSkillKeepsItsTitleOnReplay`, `promptAdvertisesDictateNote`,
+  `dictateNoteStepCompletesFromItsOwnHonestResult`,
+  `dictateNoteFailureIsNotMaskedByTheSelfEvidencingRule`.
+
+Validation (toolchain present): `./gradlew :app:testDebugUnitTest --no-daemon` -> BUILD
+SUCCESSFUL, 513 tests 0 failures 0 errors 0 skipped (504 baseline + 9 new).
+
+---
+
 ## SESSION 46 (2026-10-13) - milestone: ringer_mode as a second backed device control
 
 Where reached: IN PROGRESS -> implementing. `DeviceControl` is generalised from a

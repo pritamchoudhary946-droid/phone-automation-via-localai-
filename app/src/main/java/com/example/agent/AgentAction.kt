@@ -328,6 +328,19 @@ sealed class AgentAction {
      */
     data class Note(val title: String? = null, val content: String? = null) : AgentAction()
     /**
+     * Opens the notes app to create a note by *dictation* - the "dictate a note" /
+     * "take a note by voice" / "make a voice note" primitive. It is the same
+     * [android.content.Intent.ACTION_CREATE_NOTE] dispatch as [Note] (a separate
+     * process no accessibility tap can drive reliably), resolved before the
+     * accessibility-service gate, but it carries only an optional [title] and no body
+     * text, so the notes app opens its editor ready for the user to speak. This is
+     * distinct from [Speak] (which utters text aloud) and from typing a note's body
+     * into the current screen (which is app-specific): it is the general way to start a
+     * voice note on an arbitrary device. It only *opens* the editor for the user to
+     * dictate and save; it never claims the note was spoken or saved (section 3.5).
+     */
+    data class DictateNote(val title: String? = null) : AgentAction()
+    /**
      * Opens the system file/document picker so the user can choose a file - the
      * "pick a file" / "choose a photo to attach" / "select a document" primitive. The
      * picker is a separate process no accessibility-tree read or UI tap can open
@@ -447,6 +460,7 @@ sealed class AgentAction {
                 else -> "Open the calendar ${-dayOffset} days ago"
             }
             is Note -> title?.takeIf { it.isNotBlank() }?.let { "Create note '$it'" } ?: "Create a note"
+            is DictateNote -> title?.takeIf { it.isNotBlank() }?.let { "Dictate note '$it'" } ?: "Dictate a note"
             is PickFile -> buildString {
                 append("Open the file picker")
                 mimeType?.takeIf { it.isNotBlank() }?.let { append(" for $it") }

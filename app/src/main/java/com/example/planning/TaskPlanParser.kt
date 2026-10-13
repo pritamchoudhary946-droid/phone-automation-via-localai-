@@ -330,6 +330,9 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 title = str(params, "title", "name", "subject").ifBlank { null },
                 content = str(params, "content", "text", "body", "message", "note").ifBlank { null }
             )
+            ToolRegistry.TOOL_DICTATE_NOTE -> AgentAction.DictateNote(
+                title = str(params, "title", "name", "label", "subject").ifBlank { null }
+            )
             ToolRegistry.TOOL_PICK_FILE -> AgentAction.PickFile(
                 mimeType = str(params, "mimeType", "mime_type", "type", "fileType", "accept").ifBlank { null },
                 allowMultiple = parseAllowMultiple(params)

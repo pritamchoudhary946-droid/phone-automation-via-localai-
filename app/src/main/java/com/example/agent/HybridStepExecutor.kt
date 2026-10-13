@@ -288,6 +288,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic document-picker dispatch"
             )
 
+            is AgentAction.DictateNote -> FastPathDecision.Execute(
+                action,
+                "deterministic note-dictation dispatch"
+            )
+
             is AgentAction.SummarizeText -> FastPathDecision.Execute(
                 action,
                 "deterministic text summarisation through the configured summarizer"

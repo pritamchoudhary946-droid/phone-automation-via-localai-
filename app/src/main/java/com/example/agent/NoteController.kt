@@ -32,6 +32,19 @@ interface NoteController {
      * result is a failure, never a claimed success.
      */
     fun createNote(title: String?, content: String?): NoteResult
+
+    /**
+     * Opens the notes app to create a note by *dictation*: the same
+     * [Intent.ACTION_CREATE_NOTE] intent but with only an optional [title] and no
+     * [Intent.EXTRA_TEXT], so the notes app opens its editor ready for the user to speak
+     * the body. This is the "dictate a note" / "take a note by voice" primitive. A
+     * non-blank [title] is still carried (a titled dictation); a blank one is allowed
+     * because the app is expected to have opened its voice-input mode. Implementations
+     * must report honestly: if no notes app can handle the request, the result is a
+     * failure, never a claimed success. It opens the editor; it never claims the note
+     * was spoken or saved.
+     */
+    fun dictateNote(title: String?): NoteResult
 }
 
 /**
@@ -73,6 +86,29 @@ class AndroidNoteController(context: Context) : NoteController {
 
     private fun describe(title: String?): String =
         if (!title.isNullOrBlank()) "'$title'" else "a new note"
+
+    override fun dictateNote(title: String?): NoteResult {
+        val hasTitle = !title.isNullOrBlank()
+        val intent = Intent(Intent.ACTION_CREATE_NOTE).apply {
+            // Deliberately no EXTRA_TEXT: leaving the body empty lets the notes app open
+            // its editor in voice-input mode so the user can dictate the note.
+            if (hasTitle) putExtra(Intent.EXTRA_TITLE, title)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            appContext.startActivity(intent)
+            NoteResult(true, "NOTE_DICTATION_OPENED", "Opening notes to dictate ${describe(title)}")
+        } catch (e: android.content.ActivityNotFoundException) {
+            Log.w(TAG, "No notes app can create a note: ${e.message}")
+            NoteResult(false, "NOTE_UNAVAILABLE", "No notes app is available to dictate a note")
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Note dictation denied: ${e.message}")
+            NoteResult(false, "NOTE_PERMISSION", "Creating a note is not permitted on this device")
+        } catch (e: Exception) {
+            Log.w(TAG, "Note dictation failed: ${e.message}")
+            NoteResult(false, "NOTE_ERROR", "Note request failed: ${e.localizedMessage}")
+        }
+    }
 
     companion object {
         private const val TAG = "AndroidNoteController"

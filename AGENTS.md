@@ -306,6 +306,22 @@ and never claims the note was created (`NOTE_UNAVAILABLE` / `NOTE_PERMISSION` /
 `INVALID_NOTE` / `NOTE_ERROR` otherwise). The prompt must never let the model claim a
 note was saved.
 
+`dictate_note` (`AgentAction.DictateNote(title?)` + `NoteController.dictateNote` -> the
+documented `Intent.ACTION_CREATE_NOTE` with only the optional `EXTRA_TITLE`, **no**
+`EXTRA_TEXT` body) follows the same rule: it is the sibling of `create_note` for the
+"dictate a note" / "take a voice note" / "start a voice memo in notes" intent - the notes
+app opens its own editor *ready for the user to speak* rather than pre-filled with a body.
+It is resolved before the a11y gate (the notes app is a separate process; no screen read or
+tap opens it reliably on an arbitrary screen). It carries an optional `title` (bounded by
+`MAX_NOTE_TITLE_CHARS` 200; a blank title is valid - dictation needs no title) and
+deliberately opens the editor without ever saving the note (saving is the user's action,
+section 3.5). Because the notes app is a separate process the app cannot read back that the
+note was spoken or saved, so it reports only that the intent was *delivered*
+(`NOTE_DICTATION_OPENED`) and never claims the note exists (`NOTE_UNAVAILABLE` /
+`NOTE_PERMISSION` / `NOTE_ERROR` otherwise). The prompt must never let the model claim a
+note was dictated or saved. It is self-evidencing exactly like `create_note` (a successful
+result is the step's evidence; a failure is never masked).
+
 `pick_file` (`AgentAction.PickFile(mimeType?, allowMultiple)` + `FilePickerController` ->
 the documented `Intent.ACTION_GET_CONTENT` with `CATEGORY_OPENABLE`, an optional MIME
 filter and `EXTRA_ALLOW_MULTIPLE`) follows the same rule: no accessibility-tree read or UI
@@ -669,7 +685,7 @@ output is off, read live per call by `AgentPlanner`.
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
   `open_app_info`, `open_settings`, `set_torch`, `set_device_control`,
-  `speak`, `open_calendar`, `create_note`, `pick_file`, `summarize_text` and
+  `speak`, `open_calendar`, `create_note`, `dictate_note`, `pick_file`, `summarize_text` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
@@ -711,6 +727,8 @@ output is off, read live per call by `AgentPlanner`.
   intent was delivered to a calendar app (`CALENDAR_UNAVAILABLE` otherwise), and
   `create_note` reports `NOTE_DISPATCHED` only after the `Intent.ACTION_CREATE_NOTE`
   intent was delivered to a notes app (`NOTE_UNAVAILABLE` otherwise), and
+  `dictate_note` reports `NOTE_DICTATION_OPENED` only after the same intent (with no body)
+  was delivered to a notes app (`NOTE_UNAVAILABLE` otherwise), and
   `pick_file` reports `FILE_PICKER_OPENED` only after the `Intent.ACTION_GET_CONTENT`
   picker intent was delivered (`FILE_PICKER_UNAVAILABLE` otherwise), and
   `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
