@@ -40,6 +40,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var locationTriggers by remember { mutableStateOf(settings?.locationTriggersEnabled == true) }
     var briefing by remember { mutableStateOf(settings?.briefingEnabled == true) }
     var triage by remember { mutableStateOf(settings?.notificationTriageEnabled == true) }
+    var clipboardRead by remember { mutableStateOf(settings?.clipboardReadEnabled == true) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -160,6 +161,16 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         ) {
             triage = it
             settings?.notificationTriageEnabled = it
+        }
+
+        ToggleRow(
+            title = "Read clipboard",
+            subtitle = "Let Jarvis read what you last copied (e.g. \"read the code I copied\"). The clipboard can hold a password, so this is off by default.",
+            checked = clipboardRead,
+            testTag = "toggle_clipboard_read"
+        ) {
+            clipboardRead = it
+            settings?.clipboardReadEnabled = it
         }
 
         Spacer(Modifier.height(4.dp))

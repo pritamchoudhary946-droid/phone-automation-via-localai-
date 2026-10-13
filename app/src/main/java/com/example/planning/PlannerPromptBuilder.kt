@@ -91,6 +91,7 @@ object PlannerPromptBuilder {
         """- summarize_text: {"text":"<the text to condense>","maxChars":<optional int>}   (condenses a block of text to a short digest; use for "summarise this page" / "give me the gist of that message" / "summarise the thread" - often pass the value an earlier read step captured as {{name}}; the digest is returned to the loop and can itself be captured, and it never fabricates a summary when the summarizer is unavailable)""",
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
+        """- read_clipboard: {}   (reads the device clipboard's current text; use for "read the code I just copied" / "what did I just copy" - add "captures":["<name>"] to reuse the value as {{name}} in a later step; opt-in)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",
         """- open_notifications: {}   open_quick_settings: {}   open_recents: {}   power_dialog: {}   (power_dialog opens the system power menu - power off / restart / emergency - for the user to choose an item; it only opens the menu and never selects power off itself, so never claim the device was powered off or restarted)""",
         """- navigate_back: {}   navigate_home: {}   wait: {"durationMs":<int>}""",
@@ -103,16 +104,22 @@ object PlannerPromptBuilder {
      * withheld when the opt-in triage capability is off, and the `speak` line when
      * the opt-in speech-output capability is off, matching [availableActions].
      */
-    private fun actionCatalog(notificationTriageEnabled: Boolean, voiceOutputEnabled: Boolean = false): String =
+    private fun actionCatalog(
+        notificationTriageEnabled: Boolean,
+        voiceOutputEnabled: Boolean = false,
+        clipboardReadEnabled: Boolean = false
+    ): String =
         ACTION_CATALOG_LINES
             .filter { notificationTriageEnabled || !it.startsWith("- ${ToolRegistry.TOOL_READ_NOTIFICATIONS}:") }
             .filter { voiceOutputEnabled || !it.startsWith("- ${ToolRegistry.TOOL_SPEAK}:") }
+            .filter { clipboardReadEnabled || !it.startsWith("- ${ToolRegistry.TOOL_READ_CLIPBOARD}:") }
             .joinToString("\n")
 
     fun buildPlanningPrompt(
         request: PlanningRequest,
         notificationTriageEnabled: Boolean = false,
-        voiceOutputEnabled: Boolean = false
+        voiceOutputEnabled: Boolean = false,
+        clipboardReadEnabled: Boolean = false
     ): String = buildString {
         appendLine("Task: produce the ordered subgoals needed to satisfy the user command.")
         appendLine("User command: \"${request.userCommand}\"")
@@ -148,7 +155,7 @@ object PlannerPromptBuilder {
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
         appendLine()
         appendLine(SCHEMA_HINT)
-        appendLine(actionCatalog(notificationTriageEnabled, voiceOutputEnabled))
+        appendLine(actionCatalog(notificationTriageEnabled, voiceOutputEnabled, clipboardReadEnabled))
     }
 
     fun buildStepDecisionPrompt(request: StepDecisionRequest): String = buildString {
@@ -246,7 +253,8 @@ object PlannerPromptBuilder {
     fun availableActions(
         registry: ToolRegistry,
         notificationTriageEnabled: Boolean = false,
-        voiceOutputEnabled: Boolean = false
+        voiceOutputEnabled: Boolean = false,
+        clipboardReadEnabled: Boolean = false
     ): List<String> =
         registry.getRegisteredTools()
             .map { it.name }
@@ -256,6 +264,7 @@ object PlannerPromptBuilder {
             .filter { it != ToolRegistry.TOOL_ASK_CONFIRMATION }
             .filter { notificationTriageEnabled || it != ToolRegistry.TOOL_READ_NOTIFICATIONS }
             .filter { voiceOutputEnabled || it != ToolRegistry.TOOL_SPEAK }
+            .filter { clipboardReadEnabled || it != ToolRegistry.TOOL_READ_CLIPBOARD }
 
     /**
      * Neutralises instruction-like content in untrusted, app-controlled text before

@@ -23,17 +23,25 @@ class AgentPlanner(
     /** Live opt-in gate for the notification-triage capability (plan 9.9). */
     private val notificationTriageEnabled: () -> Boolean = { false },
     /** Live opt-in gate for on-device speech output (the `speak` capability). */
-    private val voiceOutputEnabled: () -> Boolean = { false }
+    private val voiceOutputEnabled: () -> Boolean = { false },
+    /** Live opt-in gate for clipboard reading (the `read_clipboard` capability). */
+    private val clipboardReadEnabled: () -> Boolean = { false }
 ) {
 
     /**
      * Read lazily per call, not captured once, so flipping the Settings toggle takes
      * effect on the next prompt: the opt-in `read_notifications` tool disappears from
      * the advertised catalogue (and its schema from [PlannerPromptBuilder]) while off,
-     * and likewise `speak` while speech output is off.
+     * and likewise `speak` while speech output is off and `read_clipboard` while
+     * clipboard reading is off.
      */
     private fun availableToolNames(): List<String> =
-        PlannerPromptBuilder.availableActions(toolRegistry, notificationTriageEnabled(), voiceOutputEnabled())
+        PlannerPromptBuilder.availableActions(
+            toolRegistry,
+            notificationTriageEnabled(),
+            voiceOutputEnabled(),
+            clipboardReadEnabled()
+        )
 
     /** Hierarchical reflection-on-demand (plan 5.4), shared by the orchestrator. */
     private val reflector = Reflector(inferenceEngine)
@@ -78,7 +86,8 @@ class AgentPlanner(
         val prompt = PlannerPromptBuilder.buildPlanningPrompt(
             request.withCurrentDateTime(),
             notificationTriageEnabled(),
-            voiceOutputEnabled()
+            voiceOutputEnabled(),
+            clipboardReadEnabled()
         )
         var lastRaw = ""
         var lastReason = "unknown"

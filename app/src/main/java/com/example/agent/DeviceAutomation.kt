@@ -290,7 +290,15 @@ class AndroidDeviceAutomation(
     // before the a11y-service gate. An unwired controller gets an honest "unavailable"
     // result, never a silent no-op. The controller reads the level back, so an ignored write
     // (or missing WRITE_SETTINGS access) is reported as failure, not a fake success.
-    private val screenBrightnessController: ScreenBrightnessController? = null
+    private val screenBrightnessController: ScreenBrightnessController? = null,
+    // The clipboard is a system service (ClipboardManager), not an accessibility-tree
+    // control, so like the ringer/torch/dnd/brightness primitives it is resolved before
+    // the a11y-service gate. It is opt-in: the executor refuses honestly when clipboard
+    // reading is off (the clipboard can hold another app's secret), and an unwired reader
+    // gets an honest "unavailable" result rather than a silent no-op. Its non-empty text
+    // is carried as readText so a NONE-verified read self-satisfies.
+    private val clipboardReader: ClipboardReader? = null,
+    private val clipboardReadEnabled: () -> Boolean = { false }
 ) : DeviceAutomation {
 
     companion object {
@@ -410,6 +418,24 @@ class AndroidDeviceAutomation(
         if (action is AgentAction.ReadDeviceStatus) {
             val reader = deviceStatusReader
                 ?: return@withContext ActionResult(false, "STATUS_UNAVAILABLE", "Device status read is not available")
+            val result = reader.read()
+            val digest = result.message.take(ActionResult.MAX_CAPTURED_CHARS).ifBlank { null }
+            return@withContext ActionResult(result.success, result.method, result.message, digest)
+        }
+        // The clipboard is likewise service-free: it reads the system ClipboardManager,
+        // so it is resolved before the a11y-service gate. This is the read half of the
+        // copy/paste duo "read the code I just copied"; opt-in (SECRETS), and the
+        // non-empty text is carried as readText so a NONE-verified step self-satisfies.
+        if (action is AgentAction.ReadClipboard) {
+            if (!clipboardReadEnabled()) {
+                return@withContext ActionResult(
+                    false,
+                    "CLIPBOARD_READ_DISABLED",
+                    "Reading the clipboard is off. Enable it in Settings to read clipboard text."
+                )
+            }
+            val reader = clipboardReader
+                ?: return@withContext ActionResult(false, "CLIPBOARD_UNAVAILABLE", "Clipboard read is not available")
             val result = reader.read()
             val digest = result.message.take(ActionResult.MAX_CAPTURED_CHARS).ifBlank { null }
             return@withContext ActionResult(result.success, result.method, result.message, digest)

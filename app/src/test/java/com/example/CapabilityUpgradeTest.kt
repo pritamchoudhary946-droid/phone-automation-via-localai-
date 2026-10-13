@@ -12,6 +12,8 @@ import com.example.agent.AndroidDeviceStatusReader
 import com.example.agent.AppDirectory
 import com.example.agent.DeviceStatusReader
 import com.example.agent.DeviceStatusResult
+import com.example.agent.ClipboardReader
+import com.example.agent.ClipboardReadResult
 import com.example.agent.AudioAdjustResult
 import com.example.agent.AudioController
 import com.example.agent.AudioStream
@@ -5397,6 +5399,150 @@ class CapabilityUpgradeTest {
         )
     }
 
+    // --- read_clipboard: the read half of the clipboard trio, opt-in and service-free ---
+
+    @Test
+    fun readClipboardExecutesWithoutAnAccessibilityService() {
+        // The clipboard lives on the system ClipboardManager, not the a11y tree, so the
+        // read must resolve before the a11y-service gate (like read_notifications /
+        // read_device_status). Before this it would fall through to NO_SERVICE.
+        val reader = RecordingClipboardReader("fun add(a: Int, b: Int) = a + b")
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            clipboardReader = reader,
+            clipboardReadEnabled = { true }
+        )
+
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.ReadClipboard) }
+
+        assertTrue("clipboard read must succeed without a bound a11y service: $result", result.success)
+        assertEquals("READ_CLIPBOARD", result.method)
+        assertEquals(1, reader.calls)
+        assertEquals(
+            "the clipboard text must be carried as readText so a NONE step can self-satisfy",
+            "fun add(a: Int, b: Int) = a + b",
+            result.readText
+        )
+    }
+
+    @Test
+    fun readClipboardRefusesHonestlyWhenOptOut() {
+        // Reading the clipboard is opt-in (it can hold a password): with the toggle off
+        // the executor must refuse clearly and never touch the clipboard.
+        val reader = RecordingClipboardReader("secret")
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            clipboardReader = reader,
+            clipboardReadEnabled = { false }
+        )
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.ReadClipboard) }
+        assertFalse("an opted-out clipboard read must not succeed", result.success)
+        assertEquals("CLIPBOARD_READ_DISABLED", result.method)
+        assertEquals("an opted-out read must never touch the clipboard", 0, reader.calls)
+    }
+
+    @Test
+    fun readClipboardRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            clipboardReader = null,
+            clipboardReadEnabled = { true }
+        )
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.ReadClipboard) }
+        assertFalse("an unwired reader must not be a fake success", result.success)
+        assertEquals("CLIPBOARD_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun readClipboardStepCompletesFromItsOwnDigestWithoutAScreenChange() = kotlinx.coroutines.runBlocking {
+        // Same self-evidencing class as read_notifications/read_device_status: the digest
+        // IS the goal evidence, so a NONE-verified step must complete rather than retry
+        // to exhaustion, and the goal gate must accept it.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.ReadClipboard ->
+                        ActionResult(true, "READ_CLIPBOARD", "hello world", readText = "hello world")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Read the clipboard","action":"read_clipboard","params":{}}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("what did I just copy", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("read_clipboard with NONE verification must complete, got $terminal", terminal is OrchestratorState.Completed)
+    }
+
+    @Test
+    fun parserMapsReadClipboardToTheAction() {
+        val parsed = TaskPlanParser().parse(
+            """{"steps":[{"id":1,"seq":1,"desc":"Read the clipboard","action":"read_clipboard","params":{}}]}""",
+            "what did I just copy"
+        )
+        assertTrue("plan must parse: $parsed", parsed is PlanParseResult.Success)
+        val step = (parsed as PlanParseResult.Success).plan.steps.first()
+        assertTrue("read_clipboard must map to AgentAction.ReadClipboard", step.action is AgentAction.ReadClipboard)
+    }
+
+    @Test
+    fun validationAcceptsReadClipboard() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.ReadClipboard) is ToolValidationResult.Valid)
+    }
+
+    @Test
+    fun readClipboardIsWithheldFromThePromptAndToolListUntilOptedIn() {
+        // The capability is opt-in, so the planner must not be told about it (and could
+        // not plan a step the executor would refuse) while the toggle is off. This is the
+        // same live-gate rule as read_notifications / speak; both the tool list and the
+        // schema line must be withheld, and both must reappear once it is on.
+        val off = PlannerPromptBuilder.availableActions(ToolRegistry(), clipboardReadEnabled = false)
+        assertFalse("read_clipboard must not be advertised while off", off.contains(ToolRegistry.TOOL_READ_CLIPBOARD))
+
+        val on = PlannerPromptBuilder.availableActions(ToolRegistry(), clipboardReadEnabled = true)
+        assertTrue("read_clipboard must be advertised once opted in", on.contains(ToolRegistry.TOOL_READ_CLIPBOARD))
+
+        val request = PlanningRequest(
+            userCommand = "read the code I copied",
+            desiredOutcome = "clipboard text",
+            foregroundPackage = "com.android.launcher",
+            screenSummary = "Home",
+            completedStepsSummary = "",
+            lastActionResult = null,
+            remainingStepBudget = 5,
+            availableActions = off
+        )
+        val promptOff = PlannerPromptBuilder.buildPlanningPrompt(request, clipboardReadEnabled = false)
+        assertFalse("the schema line must be withheld while off", promptOff.contains("- read_clipboard:"))
+        val promptOn = PlannerPromptBuilder.buildPlanningPrompt(request, clipboardReadEnabled = true)
+        assertTrue("the schema line must appear once opted in", promptOn.contains("- read_clipboard:"))
+    }
+
+    @Test
+    fun readClipboardSkillKeepsItsToolNameOnReplay() {
+        val plan = TaskPlan(
+            goal = "clipboard check",
+            fromModel = true,
+            steps = listOf(planStep(1, AgentAction.ReadClipboard, "read_clipboard"))
+        )
+        val restored = TaskPlanSerializer.fromJson(TaskPlanSerializer.toJson(plan), goalOverride = plan.goal)
+        assertTrue("a saved skill must replay read_clipboard", restored != null)
+        assertTrue(
+            "replayed step must be ReadClipboard",
+            restored!!.steps.first().action is AgentAction.ReadClipboard
+        )
+    }
+
+
+
     // --- Current date/time (relative-time resolution for set_alarm) ---
 
     @Test
@@ -5465,6 +5611,14 @@ class CapabilityUpgradeTest {
                 method = "READ_DEVICE_STATUS",
                 message = "Battery 80% | Screen on | Ringer silent | Network wifi"
             )
+        }
+    }
+
+    private class RecordingClipboardReader(private val text: String) : ClipboardReader {
+        var calls = 0
+        override fun read(): ClipboardReadResult {
+            calls++
+            return ClipboardReadResult(true, "READ_CLIPBOARD", text)
         }
     }
 
