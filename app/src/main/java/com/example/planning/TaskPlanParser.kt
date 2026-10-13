@@ -343,6 +343,7 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
+            ToolRegistry.TOOL_READ_CLIPBOARD -> AgentAction.ReadClipboard
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
             ToolRegistry.TOOL_OPEN_QUICK_SETTINGS -> AgentAction.OpenQuickSettings
             ToolRegistry.TOOL_OPEN_RECENTS -> AgentAction.PressRecents
@@ -435,6 +436,7 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
     private fun producesReadableText(action: AgentAction): Boolean =
         action is AgentAction.ReadText || action is AgentAction.ReadPageContent ||
             action is AgentAction.ReadNotifications || action is AgentAction.ReadDeviceStatus ||
+            action is AgentAction.ReadClipboard ||
             action is AgentAction.SummarizeText
 
     /**

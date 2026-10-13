@@ -381,6 +381,20 @@ sealed class AgentAction {
      * a service-backed read resolved before the accessibility-service gate.
      */
     object ReadDeviceStatus : AgentAction()
+    /**
+     * Reads the device clipboard back to the agent loop - the read half of the
+     * clipboard trio ([CopyText]/[PasteText]/[ReadClipboard]).
+     *
+     * The clipboard is a system service (`ClipboardManager`), not an accessibility-tree
+     * control: no screen read reflects its contents, so "what did I just copy?" or
+     * "read the code I copied and translate it" cannot be answered by a UI read. Like
+     * [ReadNotifications] it is a service-backed read resolved before the
+     * accessibility-service gate, it is opt-in (the clipboard can hold whatever was
+     * last copied, including another app's password), and its non-empty text is carried
+     * as [ActionResult.readText] so a NONE-verified read self-satisfies and a
+     * `captures` step can pass the value to a later step.
+     */
+    object ReadClipboard : AgentAction()
     object OpenNotifications : AgentAction()
     object OpenQuickSettings : AgentAction()
     object PressRecents : AgentAction()
@@ -480,6 +494,7 @@ sealed class AgentAction {
             is SummarizeText -> "Summarise ${text.length} chars of text"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
+            is ReadClipboard -> "Read clipboard"
             is OpenNotifications -> "Open notification shade"
             is OpenQuickSettings -> "Open quick settings"
             is PressRecents -> "Open recents"

@@ -67,6 +67,7 @@ open class ToolRegistry {
         const val TOOL_SUMMARIZE_TEXT = "summarize_text"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
+        const val TOOL_READ_CLIPBOARD = "read_clipboard"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
         const val TOOL_OPEN_QUICK_SETTINGS = "open_quick_settings"
         const val TOOL_OPEN_RECENTS = "open_recents"
@@ -360,6 +361,11 @@ open class ToolRegistry {
         TOOL_READ_DEVICE_STATUS to ToolDefinition(
             name = TOOL_READ_DEVICE_STATUS,
             description = "Reads the device's own status: battery level/charging, screen on/off, ringer mode and connectivity. Use for questions like 'how much battery do I have', 'is wifi on', 'am I on silent' - no screen read or tap can answer these",
+            requiredParameters = emptyList()
+        ),
+        TOOL_READ_CLIPBOARD to ToolDefinition(
+            name = TOOL_READ_CLIPBOARD,
+            description = "Reads the device clipboard's current text. Use this to see what the user last copied (e.g. 'read the code I copied', 'what did I just copy') and to use that value in a later step (declare it with captures and reference {{name}}). Returns an honest empty result when the clipboard holds no text",
             requiredParameters = emptyList()
         ),
         TOOL_OPEN_NOTIFICATIONS to ToolDefinition(
@@ -802,6 +808,7 @@ open class ToolRegistry {
             is AgentAction.ReadText,
             is AgentAction.ReadNotifications,
             is AgentAction.ReadDeviceStatus,
+            is AgentAction.ReadClipboard,
             is AgentAction.OpenNotifications,
             is AgentAction.OpenQuickSettings,
             is AgentAction.PressRecents,

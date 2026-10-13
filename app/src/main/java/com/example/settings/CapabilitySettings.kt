@@ -66,6 +66,16 @@ class CapabilitySettings(context: Context) {
         get() = prefs.getBoolean(KEY_NOTIFICATION_TRIAGE, false)
         set(v) = prefs.edit().putBoolean(KEY_NOTIFICATION_TRIAGE, v).apply()
 
+    /**
+     * Clipboard reading (`read_clipboard`). Off by default: the clipboard can hold
+     * another app's secret (a password, a one-time code), so reading it is opt-in,
+     * exactly like notification triage. While off the executor refuses the action and
+     * the planner does not advertise it.
+     */
+    var clipboardReadEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CLIPBOARD_READ, false)
+        set(v) = prefs.edit().putBoolean(KEY_CLIPBOARD_READ, v).apply()
+
     companion object {
         const val PREFS = "capability_prefs"
         const val KEY_VOICE_OUTPUT = "voice_output_enabled"
@@ -78,5 +88,6 @@ class CapabilitySettings(context: Context) {
         const val KEY_BRIEFING = "briefing_enabled"
         const val KEY_BRIEFING_MINUTE = "briefing_minute_of_day"
         const val KEY_NOTIFICATION_TRIAGE = "notification_triage_enabled"
+        const val KEY_CLIPBOARD_READ = "clipboard_read_enabled"
     }
 }

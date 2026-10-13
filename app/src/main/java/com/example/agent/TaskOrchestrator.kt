@@ -105,6 +105,8 @@ class TaskOrchestrator(
     private val notificationTriageEnabled: () -> Boolean = { false },
     /** Live opt-in gate for on-device speech output (the `speak` capability). */
     private val voiceOutputEnabled: () -> Boolean = { false },
+    /** Live opt-in gate for clipboard reading (the `read_clipboard` capability). */
+    private val clipboardReadEnabled: () -> Boolean = { false },
     /** Injectable live-condition sampler for event triggers (plan 9.2); test seam. */
     private val conditionsProvider: (() -> com.example.automation.TriggerMatcher.Conditions)? = null,
     /** Injectable battery-guard decision for event triggers (plan 9.14); test seam. */
@@ -1132,6 +1134,7 @@ class TaskOrchestrator(
             is AgentAction.WebSearch, is AgentAction.ReadUrl,
             is AgentAction.ReadText, is AgentAction.ReadPageContent,
             is AgentAction.ReadNotifications, is AgentAction.ReadDeviceStatus,
+            is AgentAction.ReadClipboard,
             // Device-control actions act on a system service no screen reflects; a
             // completed, honestly-read-back volume/media/ringer command is its own
             // evidence, exactly like the read actions above.
@@ -1331,12 +1334,14 @@ class TaskOrchestrator(
         if (step.verification == VerificationMethod.NONE &&
             (action is AgentAction.ReadText || action is AgentAction.ReadPageContent ||
                 action is AgentAction.ReadNotifications || action is AgentAction.ReadDeviceStatus ||
+                action is AgentAction.ReadClipboard ||
                 action is AgentAction.SummarizeText)
         ) {
             val captured = result.readText
             val what = when (action) {
                 is AgentAction.ReadNotifications -> "notification digest"
                 is AgentAction.ReadDeviceStatus -> "device status"
+                is AgentAction.ReadClipboard -> "clipboard text"
                 is AgentAction.SummarizeText -> "summary"
                 else -> "visible text"
             }
@@ -1999,7 +2004,8 @@ class TaskOrchestrator(
                         availableActions = PlannerPromptBuilder.availableActions(
                             toolRegistry,
                             notificationTriageEnabled(),
-                            voiceOutputEnabled()
+                            voiceOutputEnabled(),
+                            clipboardReadEnabled()
                         )
                     )
                 )

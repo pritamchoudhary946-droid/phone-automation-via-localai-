@@ -305,6 +305,7 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
 
             AgentAction.ReadText,
             AgentAction.ReadDeviceStatus,
+            AgentAction.ReadClipboard,
             AgentAction.OpenNotifications,
             AgentAction.OpenQuickSettings,
             AgentAction.PressRecents,

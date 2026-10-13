@@ -580,6 +580,19 @@ output is off, read live per call by `AgentPlanner`.
   goal gate's `selfEvidencingToolSatisfied(ReadNotifications)` allowance was
   unreachable and every triage read failed. Do not drop the `readText` carry or the
   self-satisfaction branch.
+- `ReadClipboard` is `ClipboardManager`-backed and must NOT sit behind the
+  accessibility-service gate: `AndroidDeviceAutomation.execute` resolves it (its own
+  opt-in `clipboardReadEnabled` check, then `ClipboardReader.read()`) *before*
+  `serviceProvider()`, so an opted-in read works without a bound a11y service and is
+  never misreported as `NO_SERVICE`. Like `read_notifications` it is opt-in (the
+  clipboard can hold a password): with the flag off the executor refuses
+  `CLIPBOARD_READ_DISABLED` and never touches the clipboard, and the *prompt* withholds
+  `read_clipboard` from both `availableActions(...)` and `ACTION_CATALOG` while off
+  (the same live `() -> Boolean` rule; `AgentPlanner` and `TaskOrchestrator` both read
+  it per call, default `{ false }`). The non-empty text is carried as
+  `ActionResult.readText` so a NONE-verified step self-satisfies (empty -> failure,
+  never a fake success). Keep the reader service-free, honest (an empty/non-text clip
+  is a failure, not a blank success) and the gate live.
 
 ## Jarvis Phase 5 autonomy & self-healing (do not regress)
 - The execution loop replaces "retry the same action N times then fail" with a

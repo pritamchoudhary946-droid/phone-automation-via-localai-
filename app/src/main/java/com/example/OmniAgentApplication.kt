@@ -103,7 +103,10 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             notificationTriageEnabled = { settings.notificationTriageEnabled },
             // Only advertise `speak` to the planner while speech output is on, so the
             // model can never emit a step the executor would refuse.
-            voiceOutputEnabled = { settings.voiceOutputEnabled }
+            voiceOutputEnabled = { settings.voiceOutputEnabled },
+            // Only advertise `read_clipboard` to the planner while clipboard reading is
+            // on, so the model can never emit a step the executor would refuse.
+            clipboardReadEnabled = { settings.clipboardReadEnabled }
         )
         agentEngine = AgentEngine(this, inferenceEngine, planner)
 
@@ -241,7 +244,14 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // setting like the ringer/torch/dnd primitives (no UI tap sets it reliably on
                 // an arbitrary screen). It reads the level back, so an ignored write - or a
                 // missing WRITE_SETTINGS grant - is reported as failure, not a fake success.
-                screenBrightnessController = com.example.agent.AndroidScreenBrightnessController(this)
+                screenBrightnessController = com.example.agent.AndroidScreenBrightnessController(this),
+                // Clipboard-read primitive: reads the system ClipboardManager, service-free
+                // like the device-status/notification reads (no screen reflects the
+                // clipboard). It is opt-in (the clipboard can hold another app's secret)
+                // and refuses honestly when off; its non-empty text is carried as readText
+                // so a NONE-verified read self-satisfies.
+                clipboardReader = com.example.agent.AndroidClipboardReader(this),
+                clipboardReadEnabled = { settings.clipboardReadEnabled }
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
@@ -256,7 +266,9 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             // 9.9: keep the advertised catalogue in step with the executor gate.
             notificationTriageEnabled = { settings.notificationTriageEnabled },
             // Keep `speak` in step with the executor's opt-in speech gate.
-            voiceOutputEnabled = { settings.voiceOutputEnabled }
+            voiceOutputEnabled = { settings.voiceOutputEnabled },
+            // Keep `read_clipboard` in step with the executor's opt-in clipboard gate.
+            clipboardReadEnabled = { settings.clipboardReadEnabled }
         )
 
         // 7.8: re-arm (or cancel) any persisted automations according to the current
