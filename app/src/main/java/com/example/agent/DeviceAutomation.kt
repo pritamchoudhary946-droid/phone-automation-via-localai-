@@ -278,7 +278,13 @@ class AndroidDeviceAutomation(
     // remote LLM API), not the accessibility tree, so like Speak/ReadNotifications it is
     // resolved before the a11y-service gate. An unwired summarizer gets an honest
     // "unavailable" result, never a fabricated digest.
-    private val nanoSummarizer: NanoSummarizer = com.example.model.UnavailableNanoSummarizer
+    private val nanoSummarizer: NanoSummarizer = com.example.model.UnavailableNanoSummarizer,
+    // Do Not Disturb is a system notification-policy setting (NotificationManager), not an
+    // accessibility-tree control, so like the ringer/torch primitives it is resolved before
+    // the a11y-service gate. An unwired controller gets an honest "unavailable" result,
+    // never a silent no-op. The controller reads the interruption filter back, so an
+    // ignored change (or missing policy access) is reported as failure, not a fake success.
+    private val dndController: DndController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -589,8 +595,8 @@ class AndroidDeviceAutomation(
         // pair through DeviceControl first (an unknown control or a value invalid for that
         // control is refused honestly, no dispatch), then delegates to the existing honest
         // read-back controller for the named control: torch -> TorchController, ringer_mode
-        // -> RingerModeController. Like set_torch/set_ringer_mode it is resolved before the
-        // a11y-service gate (both are system-service backed, not tree-backed).
+        // -> RingerModeController, dnd -> DndController. Like set_torch/set_ringer_mode it is
+        // resolved before the a11y-service gate (all are system-service backed, not tree-backed).
         if (action is AgentAction.SetDeviceControl) {
             when (val op = DeviceControl.resolve(action.control, action.value)) {
                 is DeviceControlOp.Torch -> {
@@ -602,6 +608,12 @@ class AndroidDeviceAutomation(
                 is DeviceControlOp.RingerMode -> {
                     val controller = ringerModeController
                         ?: return@withContext ActionResult(false, "RINGER_UNAVAILABLE", "Ringer mode control is not available")
+                    val result = controller.set(op.mode)
+                    return@withContext ActionResult(result.success, result.method, result.message)
+                }
+                is DeviceControlOp.Dnd -> {
+                    val controller = dndController
+                        ?: return@withContext ActionResult(false, "DND_UNAVAILABLE", "Do Not Disturb control is not available")
                     val result = controller.set(op.mode)
                     return@withContext ActionResult(result.success, result.method, result.message)
                 }

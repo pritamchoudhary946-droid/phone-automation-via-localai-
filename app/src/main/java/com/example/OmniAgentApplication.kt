@@ -229,7 +229,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // the shared configured summarizer, service-free like the speak/read
                 // primitives (no screen reflects a summarisation). An unconfigured engine
                 // is an honest SUMMARY_UNAVAILABLE, never a fabricated digest.
-                nanoSummarizer = nanoSummarizer
+                nanoSummarizer = nanoSummarizer,
+                // Do-Not-Disturb control: backs the `dnd` control of set_device_control via
+                // the NotificationManager interruption filter, service-free like the
+                // ringer/torch primitives (no UI tap toggles DND reliably on an arbitrary
+                // screen). It reads the filter back, so an ignored change - or a missing
+                // notification-policy grant - is reported as failure, not a fake success.
+                dndController = com.example.agent.AndroidDndController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

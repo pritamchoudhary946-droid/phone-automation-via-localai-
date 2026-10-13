@@ -307,7 +307,7 @@ open class ToolRegistry {
         ),
         TOOL_SET_DEVICE_CONTROL to ToolDefinition(
             name = TOOL_SET_DEVICE_CONTROL,
-            description = "Sets a device control to an explicit on/off value. Use for a scheduled automation's action, e.g. 'turn the flashlight on when charging starts', 'turn the flashlight off when battery is low'. The only control is torch; the value is on or off. It reads the state back, so a change the hardware ignored is reported as a failure, never a fake success",
+            description = "Sets a device control to an explicit value. Use for a scheduled automation's action, e.g. 'turn the flashlight on when charging starts', 'go silent at night', 'turn on do not disturb'. The controls are torch (value on/off), ringer_mode (value silent/vibrate/normal) and dnd (value off/priority/alarms/none). It reads the state back, so a change the device ignored is reported as a failure, never a fake success",
             requiredParameters = listOf("control", "value"),
             optionalParameters = listOf("setting", "target", "name", "state", "on")
         ),
@@ -679,12 +679,13 @@ open class ToolRegistry {
             // reject; it is always a valid request (the executor reports honestly when no
             // flash is available).
             is AgentAction.SetTorch -> ToolValidationResult.Valid
-            // set_device_control: reject an unknown control or a non-on/off value before any
-            // dispatch, so a malformed plan/automation cannot reach the executor.
+            // set_device_control: reject an unknown control or a value invalid for that
+            // control before any dispatch, so a malformed plan/automation cannot reach the
+            // executor.
             is AgentAction.SetDeviceControl -> {
                 if (com.example.agent.DeviceControl.resolve(action.control, action.value) == null) {
                     ToolValidationResult.Invalid(
-                        "set_device_control requires control=${com.example.agent.DeviceControl.keys().joinToString("/")} and value on/off: '${action.control}'='${action.value}'"
+                        "set_device_control requires a known control (${com.example.agent.DeviceControl.keys().joinToString("/")}) and a value valid for it: '${action.control}'='${action.value}'"
                     )
                 } else {
                     ToolValidationResult.Valid
