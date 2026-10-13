@@ -12,6 +12,12 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Lets the agent change device volume (the adjust_volume media-control primitive). -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Lets the agent set the screen brightness. WRITE_SETTINGS is a special ("modify system
+         settings") permission the user grants from Settings, not a runtime dialog; the
+         brightness controller checks Settings.System.canWrite and reports honestly if unset. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <queries>
         <intent>

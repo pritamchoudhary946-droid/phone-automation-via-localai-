@@ -1,5 +1,55 @@
 ---
 
+## SESSION 52 (2026-10-13) - milestone: screen-brightness device control (`set_device_control` control=brightness)
+
+Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261013-2031`).
+
+New capability: a scheduled/condition automation (or a direct instruction) can now set the
+display brightness - a real system display setting Jarvis could not previously change.
+It is a fourth backed control of the existing `set_device_control` primitive (controls:
+torch, ringer_mode, dnd, **brightness**), so it is a mapping, not a new tool, exactly as
+the architecture rule requires.
+
+- New `ScreenBrightness` *closed* enum (`dim`/`low`/`medium`/`high`/`max` -> a 0-255
+  backlight level) so an invalid level can never index `Settings.System` incorrectly.
+  `ScreenBrightness.fromKey(...)` accepts natural aliases (normal/half/mid -> medium,
+  full/brightest -> max, darkest/minimum/dimmer -> dim, ...); `percentFromValue`/
+  `levelFromValue` parse a 0-100 percentage ("40", "40%", "40 percent") and clamp it.
+- New `ScreenBrightnessController` + `AndroidScreenBrightnessController` over the
+  documented `Settings.System.SCREEN_BRIGHTNESS`, guarded by `Settings.System.canWrite`.
+  `BrightnessTarget` is a sealed type: `Absolute(level)` for a named level/percentage and
+  `Relative(delta)` for "brighter"/"dimmer", whose level is read at execution time.
+- Wired into `DeviceControl.resolve(...)` as `DeviceControlOp.Brightness` (the single truth
+  for the accepted vocabulary; `describeValue` renders the resolved target) and into the
+  executor's `SetDeviceControl` dispatch. Resolved *before* the a11y-service gate
+  (system-service backed, like torch/ringer/dnd). Injectable via the
+  `AndroidDeviceAutomation` constructor; wired in `OmniAgentApplication`.
+- Honest verification (never a fake success): the controller checks `Settings.System.canWrite`
+  first (clear `BRIGHTNESS_PERMISSION`), writes, reads the level back and reports
+  `BRIGHTNESS_SET` only on a confirmed write, `BRIGHTNESS_UNCHANGED` when the display
+  ignored it, `BRIGHTNESS_PERMISSION` on a denied write, `BRIGHTNESS_ERROR` on failure.
+  An unwired controller is `BRIGHTNESS_UNAVAILABLE`. A non-success result fails the step
+  (the self-evidencing rule accepts only a *successful* result).
+- Manifest: `WRITE_SETTINGS` declared as a special permission
+  (`tools:ignore="ProtectedPermissions"`); the user grants it from Settings.
+- No new action class, so `AgentAction`/`TaskPlanParser`/`TaskPlanSerializer`/
+  `PlannerPromptBuilder.ACTION_CATALOG` needed no schema change beyond documenting
+  `brightness` as an accepted `control` value; `ToolRegistry` validation already rejects
+  any (control,value) pair `DeviceControl.resolve` returns null for.
+
+Validation (toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64,
+ANDROID_HOME=/opt/android-sdk): targeted `CapabilityUpgradeTest` -> 284 tests 0 failures 0
+errors (7 brightness tests pass: resolver aliases, validation, reaches-controller,
+unwired-refuses-honestly, unchanged-is-failure, permission-is-honest,
+skill-replay-keeps-control-and-value). Full pre-merge gate `bash .github/scripts/verify.sh`
+-> VERIFY OK (recorded in RUN_STATE).
+
+Remaining: further DeviceControl-backed controls as mapping-only additions (airplane-mode);
+no blockers. Standing item: session cap exceeded - human review requested.
+
+---
+
+
 ## SESSION 51 (2026-10-13) - milestone: Do-Not-Disturb device control (`set_device_control` control=dnd)
 
 Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261013-1931`).

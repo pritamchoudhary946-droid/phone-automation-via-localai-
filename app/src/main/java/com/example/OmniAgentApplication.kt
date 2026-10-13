@@ -235,7 +235,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // ringer/torch primitives (no UI tap toggles DND reliably on an arbitrary
                 // screen). It reads the filter back, so an ignored change - or a missing
                 // notification-policy grant - is reported as failure, not a fake success.
-                dndController = com.example.agent.AndroidDndController(this)
+                dndController = com.example.agent.AndroidDndController(this),
+                // Screen-brightness control: backs the `brightness` control of
+                // set_device_control via Settings.System.SCREEN_BRIGHTNESS, a system display
+                // setting like the ringer/torch/dnd primitives (no UI tap sets it reliably on
+                // an arbitrary screen). It reads the level back, so an ignored write - or a
+                // missing WRITE_SETTINGS grant - is reported as failure, not a fake success.
+                screenBrightnessController = com.example.agent.AndroidScreenBrightnessController(this)
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

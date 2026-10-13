@@ -65,6 +65,10 @@ import com.example.agent.RingerModeResult
 import com.example.agent.DndController
 import com.example.agent.DndMode
 import com.example.agent.DndResult
+import com.example.agent.BrightnessResult
+import com.example.agent.BrightnessTarget
+import com.example.agent.ScreenBrightness
+import com.example.agent.ScreenBrightnessController
 import com.example.agent.OrchestratorState
 import com.example.agent.TaskOrchestrator
 import com.example.agent.TimerController
@@ -3629,6 +3633,154 @@ class CapabilityUpgradeTest {
     }
 
     @Test
+    fun deviceControlResolvesBrightnessAliases() {
+        // brightness is a fourth backed control. Named levels map to the closed ScreenBrightness
+        // enum; a percentage becomes an absolute level (clamped to 0-100%), and "brighter" is a
+        // relative step resolved against the live level at execution time.
+        assertEquals(
+            DeviceControlOp.Brightness(BrightnessTarget.Absolute(ScreenBrightness.MEDIUM.level), "medium"),
+            DeviceControl.resolve("brightness", "medium")
+        )
+        assertEquals(
+            DeviceControlOp.Brightness(BrightnessTarget.Absolute(ScreenBrightness.DIM.level), "dim"),
+            DeviceControl.resolve("BRIGHTNESS", "dim")
+        )
+        assertEquals(
+            DeviceControlOp.Brightness(BrightnessTarget.Absolute(ScreenBrightness.MAX.level), "max"),
+            DeviceControl.resolve(" brightness ", "max")
+        )
+        // A numeric value is a percentage of the maximum, so "40" is 40% -> the platform level.
+        assertEquals(
+            DeviceControlOp.Brightness(BrightnessTarget.Absolute(ScreenBrightness.levelFromValue("40")!!), "40"),
+            DeviceControl.resolve("brightness", "40")
+        )
+        assertEquals(
+            DeviceControlOp.Brightness(BrightnessTarget.Absolute(ScreenBrightness.levelFromValue("40")!!), "40%"),
+            DeviceControl.resolve("brightness", "40%")
+        )
+        assertEquals(
+            DeviceControlOp.Brightness(BrightnessTarget.Relative(ScreenBrightness.STEP_LEVEL), "brighter"),
+            DeviceControl.resolve("brightness", "brighter")
+        )
+        // "dimmer" is a named level (darkest the platform allows), not a relative step.
+        assertEquals(
+            DeviceControlOp.Brightness(BrightnessTarget.Absolute(ScreenBrightness.DIM.level), "dimmer"),
+            DeviceControl.resolve("brightness", "dimmer")
+        )
+        // A value that belongs to another control must not be accepted for brightness.
+        assertNull(DeviceControl.resolve("brightness", "on"))
+        assertNull(DeviceControl.resolve("brightness", "maybe"))
+
+        assertEquals("medium", DeviceControl.describeValue("brightness", "medium"))
+        assertEquals("40%", DeviceControl.describeValue("brightness", "40"))
+        assertTrue(DeviceControl.isKnown("brightness"))
+    }
+
+    @Test
+    fun setDeviceControlBrightnessReachesTheBrightnessController() {
+        // The brightness control drives Settings.System, so it must resolve before the a11y
+        // gate (system-display backed, service-free like torch/ringer_mode/dnd).
+        val recorder = RecordingScreenBrightnessController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            screenBrightnessController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("brightness", "high"))
+        }
+        assertTrue("brightness control must apply without a bound a11y service: $result", result.success)
+        assertEquals("BRIGHTNESS_SET", result.method)
+        assertEquals(listOf<BrightnessTarget>(BrightnessTarget.Absolute(ScreenBrightness.HIGH.level)), recorder.calls)
+    }
+
+    @Test
+    fun setDeviceControlBrightnessRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            screenBrightnessController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("brightness", "high"))
+        }
+        assertFalse("no brightness controller must not be a fake success", result.success)
+        assertEquals("BRIGHTNESS_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setDeviceControlBrightnessUnchangedIsReportedAsFailure() {
+        // The controller reads the level back; a write the device ignored must not be dressed
+        // up as success.
+        val recorder = RecordingScreenBrightnessController(
+            BrightnessResult(false, "BRIGHTNESS_UNCHANGED", "Screen brightness stayed at 50%")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            screenBrightnessController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("brightness", "high"))
+        }
+        assertFalse(result.success)
+        assertEquals("BRIGHTNESS_UNCHANGED", result.method)
+    }
+
+    @Test
+    fun setDeviceControlBrightnessPermissionDeniedIsReportedHonestly() {
+        // WRITE_SETTINGS is enforced by the platform; the honest BRIGHTNESS_PERMISSION reason
+        // must survive to the caller rather than being masked as a success.
+        val recorder = RecordingScreenBrightnessController(
+            BrightnessResult(false, "BRIGHTNESS_PERMISSION", "Screen brightness needs write-settings access")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            screenBrightnessController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("brightness", "high"))
+        }
+        assertFalse(result.success)
+        assertEquals("BRIGHTNESS_PERMISSION", result.method)
+    }
+
+    @Test
+    fun setDeviceControlBrightnessSkillKeepsItsControlAndValueOnReplay() {
+        // A learned/scheduled "brightness dim" control must replay the same target, not a default.
+        val plan = com.example.planning.TaskPlan(
+            goal = "dim the screen",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "brightness dim",
+                    action = AgentAction.SetDeviceControl("brightness", "dim"),
+                    rawActionName = "set_device_control", expectedPostcondition = "screen dimmed",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved brightness skill must be replayable", restored != null)
+        assertEquals(AgentAction.SetDeviceControl("brightness", "dim"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun validationAcceptsBrightnessDeviceControl() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("brightness", "dim")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("brightness", "medium")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("brightness", "75%")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("brightness", "brighter")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("brightness", "maybe")) is ToolValidationResult.Invalid)
+    }
+
+
+    @Test
     fun setDeviceControlRingerModeReachesTheRingerController() {
         // The ringer_mode control reuses the existing RingerModeController read-back, so it
         // must resolve before the a11y gate (AudioManager-backed, not tree-backed).
@@ -3807,6 +3959,7 @@ class CapabilityUpgradeTest {
         assertTrue("prompt catalogue is missing set_device_control", prompt.contains("set_device_control"))
         assertTrue("prompt catalogue must advertise the ringer_mode control", prompt.contains("ringer_mode"))
         assertTrue("prompt catalogue must advertise the dnd control", prompt.contains("dnd"))
+        assertTrue("prompt catalogue must advertise the brightness control", prompt.contains("brightness"))
     }
 
     @Test
@@ -5348,6 +5501,20 @@ class CapabilityUpgradeTest {
         override fun set(mode: DndMode): DndResult {
             calls += mode
             return result ?: DndResult(true, "DND_MODE", "Do Not Disturb set to ${mode.key}")
+        }
+    }
+
+    private class RecordingScreenBrightnessController(
+        private val result: BrightnessResult? = null
+    ) : ScreenBrightnessController {
+        val calls = mutableListOf<BrightnessTarget>()
+        override fun set(target: BrightnessTarget): BrightnessResult {
+            calls += target
+            val pct = when (target) {
+                is BrightnessTarget.Absolute -> target.level * 100 / ScreenBrightness.MAX_LEVEL
+                is BrightnessTarget.Relative -> target.delta
+            }
+            return result ?: BrightnessResult(true, "BRIGHTNESS_SET", "Screen brightness set to $pct%")
         }
     }
 

@@ -30,6 +30,9 @@ sealed interface DeviceControlOp {
 
     /** Switch Do Not Disturb to [mode] (off / priority / alarms / none). */
     data class Dnd(val mode: com.example.agent.DndMode) : DeviceControlOp
+
+    /** Set the screen brightness to [target] (a named level, percentage or relative step). */
+    data class Brightness(val target: com.example.agent.BrightnessTarget, val value: String) : DeviceControlOp
 }
 
 /**
@@ -41,17 +44,20 @@ sealed interface DeviceControlOp {
  *
  * Three controls are backed today, each reusing an existing honest read-back primitive:
  * `torch` (on/off -> the [TorchController] camera-hardware toggle), `ringer_mode`
- * (silent/vibrate/normal -> the [RingerModeController] system-audio setting) and `dnd`
- * (off/priority/alarms/none -> the [DndController] system notification-policy setting).
- * A new control is a mapping here plus a dispatch arm, never a new tool.
+ * (silent/vibrate/normal -> the [RingerModeController] system-audio setting), `dnd`
+ * (off/priority/alarms/none -> the [DndController] system notification-policy setting) and
+ * `brightness` (a named level, a 0-100 percentage, or a relative "brighter"/"dimmer" step
+ * -> the [ScreenBrightnessController] system display setting). A new control is a mapping
+ * here plus a dispatch arm, never a new tool.
  */
 object DeviceControl {
     const val TORCH = "torch"
     const val RINGER_MODE = "ringer_mode"
     const val DND = "dnd"
+    const val BRIGHTNESS = "brightness"
 
     /** The controls `set_device_control` understands. */
-    fun keys(): List<String> = listOf(TORCH, RINGER_MODE, DND)
+    fun keys(): List<String> = listOf(TORCH, RINGER_MODE, DND, BRIGHTNESS)
 
     /**
      * Resolves a ([control], [value]) pair into the typed op the executor dispatches, or
@@ -65,6 +71,28 @@ object DeviceControl {
             TORCH -> onOff(normalisedValue)?.let { DeviceControlOp.Torch(it) }
             RINGER_MODE -> com.example.agent.RingerMode.fromKey(normalisedValue)?.let { DeviceControlOp.RingerMode(it) }
             DND -> com.example.agent.DndMode.fromKey(normalisedValue)?.let { DeviceControlOp.Dnd(it) }
+            BRIGHTNESS -> resolveBrightness(normalisedValue)?.let { DeviceControlOp.Brightness(it, normalisedValue) }
+            else -> null
+        }
+    }
+
+    /**
+     * Resolves a `brightness` value to a typed [BrightnessTarget], or null when it is not a
+     * named level, a numeric percentage, or a relative "brighter"/"dimmer" step. A relative
+     * step is resolved against the live level at execution time, never against a fixed base.
+     */
+    private fun resolveBrightness(value: String): com.example.agent.BrightnessTarget? {
+        com.example.agent.ScreenBrightness.fromKey(value)?.let {
+            return com.example.agent.BrightnessTarget.Absolute(it.level)
+        }
+        com.example.agent.ScreenBrightness.levelFromValue(value)?.let {
+            return com.example.agent.BrightnessTarget.Absolute(it)
+        }
+        return when (value) {
+            "brighter", "up", "increase", "raise", "more" ->
+                com.example.agent.BrightnessTarget.Relative(com.example.agent.ScreenBrightness.STEP_LEVEL)
+            "down", "decrease", "lower", "less", "darken" ->
+                com.example.agent.BrightnessTarget.Relative(-com.example.agent.ScreenBrightness.STEP_LEVEL)
             else -> null
         }
     }
@@ -84,6 +112,12 @@ object DeviceControl {
             is DeviceControlOp.Torch -> if (op.on) "on" else "off"
             is DeviceControlOp.RingerMode -> op.mode.key
             is DeviceControlOp.Dnd -> op.mode.key
+            is DeviceControlOp.Brightness -> when (val target = op.target) {
+                is com.example.agent.BrightnessTarget.Absolute ->
+                    com.example.agent.ScreenBrightness.entries.firstOrNull { it.level == target.level }?.key
+                        ?: "${target.level * 100 / com.example.agent.ScreenBrightness.MAX_LEVEL}%"
+                is com.example.agent.BrightnessTarget.Relative -> if (target.delta > 0) "brighter" else "dimmer"
+            }
             null -> value.trim()
         }
 }

@@ -284,7 +284,13 @@ class AndroidDeviceAutomation(
     // the a11y-service gate. An unwired controller gets an honest "unavailable" result,
     // never a silent no-op. The controller reads the interruption filter back, so an
     // ignored change (or missing policy access) is reported as failure, not a fake success.
-    private val dndController: DndController? = null
+    private val dndController: DndController? = null,
+    // The screen brightness is a system display setting (Settings.System), not an
+    // accessibility-tree control, so like the ringer/torch/dnd primitives it is resolved
+    // before the a11y-service gate. An unwired controller gets an honest "unavailable"
+    // result, never a silent no-op. The controller reads the level back, so an ignored write
+    // (or missing WRITE_SETTINGS access) is reported as failure, not a fake success.
+    private val screenBrightnessController: ScreenBrightnessController? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -615,6 +621,12 @@ class AndroidDeviceAutomation(
                     val controller = dndController
                         ?: return@withContext ActionResult(false, "DND_UNAVAILABLE", "Do Not Disturb control is not available")
                     val result = controller.set(op.mode)
+                    return@withContext ActionResult(result.success, result.method, result.message)
+                }
+                is DeviceControlOp.Brightness -> {
+                    val controller = screenBrightnessController
+                        ?: return@withContext ActionResult(false, "BRIGHTNESS_UNAVAILABLE", "Screen brightness control is not available")
+                    val result = controller.set(op.target)
                     return@withContext ActionResult(result.success, result.method, result.message)
                 }
                 null -> return@withContext ActionResult(

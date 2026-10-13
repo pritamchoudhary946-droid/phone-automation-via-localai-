@@ -408,7 +408,7 @@ new tool. It is resolved *before* the a11y gate (device-backed, like `set_torch`
 The pure, unit-tested `com.example.agent.DeviceControl.resolve(control, value)` is the
 single truth for the accepted vocabulary: it trims and lower-cases both fields and
 returns a typed `DeviceControlOp` or **null** for an unknown control or a value invalid
-for that control. Three controls are backed, each reusing an existing honest read-back
+for that control. Four controls are backed, each reusing an existing honest read-back
 primitive so no new action class is needed:
 - `torch` — value `on`/`off` (on/off aliases `on`/`off`/`enable`/`disable`/`yes`/`no`/
   `true`/`false`/`1`/`0`, case-insensitively) dispatched to the existing `TorchController`
@@ -428,6 +428,25 @@ primitive so no new action class is needed:
   on total silence" / "only let priority contacts through" primitive, distinct from
   `ringer_mode` (which controls whether the phone *rings*, while DND controls which
   *notifications* may interrupt at all).
+- `brightness` — value is a named level (`dim`/`low`/`medium`/`high`/`max`, aliases
+  `normal`/`half`/`mid`, `full`/`brightest`, `minimum`/`darkest`, `dimmer`/`dark`, ...),
+  a 0-100 percentage (`40`, `40%`, `40 percent`, clamped), or a relative step
+  (`brighter`/`up`/`increase`/`raise`/`more`, `down`/`decrease`/`lower`/`less`/`darken`),
+  dispatched to `ScreenBrightnessController` (`AndroidScreenBrightnessController` over
+  `Settings.System.SCREEN_BRIGHTNESS`, guarded by `Settings.System.canWrite`).
+  `ScreenBrightness` is a *closed* enum mapping each named level to a 0-255 backlight
+  value, and `DeviceControl.resolveBrightness` produces a typed `BrightnessTarget`
+  (`Absolute(level)` for a named level/percentage, `Relative(delta)` for a step resolved
+  against the level read at execution time), so an invalid value can never index the
+  platform. Read-back `BRIGHTNESS_SET`, `BRIGHTNESS_UNCHANGED` on an ignored write,
+  `BRIGHTNESS_PERMISSION` when `WRITE_SETTINGS` special access is not granted,
+  `BRIGHTNESS_UNAVAILABLE` when the controller is unwired, `BRIGHTNESS_ERROR` on a
+  resolver failure. This is the "dim the screen" / "turn the brightness up" / "set
+  brightness to 40%" primitive, a system display setting no accessibility-tree read or
+  UI tap can set reliably on an arbitrary screen (it lives in quick settings / the
+  display panel, usually off-screen). It needs the `WRITE_SETTINGS` special permission
+  declared in the manifest (`tools:ignore="ProtectedPermissions"`); the user grants it
+  from Settings, and the controller reports `BRIGHTNESS_PERMISSION` honestly until then.
 Because the resolver rejects anything it cannot run, an unknown control is refused
 honestly (`UNSUPPORTED_DEVICE_CONTROL` at execute, `Invalid` at validation) and never
 dispatched — so the prompt can never advertise a control the executor cannot execute. Carried through
@@ -437,7 +456,9 @@ dispatched — so the prompt can never advertise a control the executor cannot e
 fields so a scheduled/learned control replays correctly). A control acts on a system
 service no accessibility screen reflects, so `verifyAction` accepts a successful result
 as the step's evidence via the same self-evidencing rule as `set_torch`, and a
-`TORCH_UNCHANGED`/`RINGER_UNCHANGED`/`DND_UNCHANGED` result still fails the step (never masked).
+`TORCH_UNCHANGED`/`RINGER_UNCHANGED`/`DND_UNCHANGED`/`BRIGHTNESS_UNCHANGED` result still
+fails the step (never masked) and a `BRIGHTNESS_PERMISSION` (ungranted `WRITE_SETTINGS`)
+fails it honestly too.
 
 `speak` (`AgentAction.Speak(text)` + `SpeakController` -> the platform `TextToSpeech`
 engine) follows the same rule: speech output is a platform TTS service, not an
@@ -768,7 +789,10 @@ output is off, read live per call by `AgentPlanner`.
   confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise), and
   `set_device_control` reports the backed control's honest result (its `torch` control
   reuses `set_torch`'s read-back, its `ringer_mode` control reuses `RingerModeController`'s
-  read-back, and an unknown control is `UNSUPPORTED_DEVICE_CONTROL`), and
+  read-back, its `dnd` control reuses `DndController`'s interrupt-filter read-back, its
+  `brightness` control reuses `ScreenBrightnessController`'s `Settings.System` read-back -
+  `BRIGHTNESS_SET` only on a confirmed write, `BRIGHTNESS_PERMISSION`/`BRIGHTNESS_UNCHANGED`
+  otherwise - and an unknown control is `UNSUPPORTED_DEVICE_CONTROL`), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the
   utterance (`TTS_UNAVAILABLE` / `SPEAK_DISABLED` otherwise), and `summarize_text`
   reports `SUMMARY_OK` only with a non-blank digest from the configured summarizer
