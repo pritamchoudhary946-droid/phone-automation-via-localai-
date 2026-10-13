@@ -122,7 +122,9 @@ object TaskPlanSerializer {
         is AgentAction.NavigateTo -> JSONObject().put("target", target)
         is AgentAction.OpenAppInfo -> JSONObject().put("packageName", packageName)
         is AgentAction.OpenSettings -> JSONObject().put("panel", panel)
-        is AgentAction.OpenCalendar -> JSONObject()
+        is AgentAction.OpenCalendar -> JSONObject().apply {
+            put("dayOffset", dayOffset)
+        }
         is AgentAction.Note -> JSONObject().apply {
             if (!title.isNullOrBlank()) put("title", title)
             if (!content.isNullOrBlank()) put("content", content)

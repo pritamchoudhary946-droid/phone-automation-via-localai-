@@ -319,7 +319,9 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 panel = str(params, "panel", "name", "setting", "settingsPanel", "section", "target", "value")
                     .trim().lowercase().replace(' ', '_').replace('-', '_')
             )
-            ToolRegistry.TOOL_OPEN_CALENDAR -> AgentAction.OpenCalendar
+            ToolRegistry.TOOL_OPEN_CALENDAR -> AgentAction.OpenCalendar(
+                dayOffset = parseEventDayOffset(params)
+            )
             ToolRegistry.TOOL_CREATE_NOTE -> AgentAction.Note(
                 title = str(params, "title", "name", "subject").ifBlank { null },
                 content = str(params, "content", "text", "body", "message", "note").ifBlank { null }

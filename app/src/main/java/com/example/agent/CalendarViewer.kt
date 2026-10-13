@@ -31,11 +31,12 @@ data class CalendarViewResult(
  */
 interface CalendarViewer {
     /**
-     * Opens the calendar at the day containing [nowMillis]. Implementations must report
+     * Opens the calendar at the day [dayOffset] days from the day containing [nowMillis]
+     * (0 = today, 1 = tomorrow, negative = a past day). Implementations must report
      * honestly: if no calendar app can handle the request the result is a failure, never
      * a claimed success. A successful result means only that the calendar was *opened*.
      */
-    fun openCalendar(nowMillis: Long): CalendarViewResult
+    fun openCalendar(nowMillis: Long, dayOffset: Int): CalendarViewResult
 }
 
 /**
@@ -49,11 +50,12 @@ class AndroidCalendarViewer(context: Context) : CalendarViewer {
 
     private val appContext = context.applicationContext
 
-    override fun openCalendar(nowMillis: Long): CalendarViewResult {
-        // Prefer the agenda/time URI so the calendar opens on the current day.
+    override fun openCalendar(nowMillis: Long, dayOffset: Int): CalendarViewResult {
+        // Prefer the agenda/time URI so the calendar opens on the chosen day.
+        val targetMillis = dayStart(nowMillis, java.util.TimeZone.getDefault(), dayOffset)
         val timeUri = CalendarContract.CONTENT_URI.buildUpon()
             .appendPath("time")
-            .appendPath(nowMillis.toString())
+            .appendPath(targetMillis.toString())
             .build()
         try {
             appContext.startActivity(
@@ -95,5 +97,21 @@ class AndroidCalendarViewer(context: Context) : CalendarViewer {
 
     companion object {
         private const val TAG = "AndroidCalendarViewer"
+
+        /**
+         * Resolves the midnight (local) instant of the day [dayOffset] days from the day
+         * containing [nowMillis]. Pure so the resolved instant is unit-testable without a
+         * device; the calendar time URI receives an absolute instant, not a relative day.
+         */
+        fun dayStart(nowMillis: Long, zone: java.util.TimeZone, dayOffset: Int): Long {
+            val cal = java.util.Calendar.getInstance(zone)
+            cal.timeInMillis = nowMillis
+            cal.add(java.util.Calendar.DAY_OF_YEAR, dayOffset)
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            return cal.timeInMillis
+        }
     }
 }

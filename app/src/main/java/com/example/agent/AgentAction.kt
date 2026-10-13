@@ -299,8 +299,13 @@ sealed class AgentAction {
      * documented calendar-app launch fallback) and resolved before the
      * accessibility-service gate. It only *opens* the calendar for the user to look at;
      * it never adds or changes an event (use [AddCalendarEvent] to create one).
+     *
+     * [dayOffset] is the day to open at (0 = today, 1 = tomorrow, negative = a past
+     * day); "show my calendar for next Monday" is resolved by the planner into the
+     * numeric offset, and the viewer opens the calendar on that day rather than always
+     * on today.
      */
-    object OpenCalendar : AgentAction()
+    data class OpenCalendar(val dayOffset: Int = 0) : AgentAction()
     /**
      * Opens the notes app to create a note titled [title] with [content] - the "note
      * down that ..." / "make a note titled Shopping" primitive. Like [AddContact] the
@@ -409,7 +414,13 @@ sealed class AgentAction {
             is SetTorch -> if (on) "Turn the flashlight on" else "Turn the flashlight off"
             is Speak -> "Say: \"$text\""
             is OpenSettings -> "Open ${panel} settings"
-            is OpenCalendar -> "Open the calendar"
+            is OpenCalendar -> when (dayOffset) {
+                0 -> "Open the calendar"
+                1 -> "Open the calendar for tomorrow"
+                -1 -> "Open the calendar for yesterday"
+                in 2..Int.MAX_VALUE -> "Open the calendar in $dayOffset days"
+                else -> "Open the calendar ${-dayOffset} days ago"
+            }
             is Note -> title?.takeIf { it.isNotBlank() }?.let { "Create note '$it'" } ?: "Create a note"
             is SummarizeText -> "Summarise ${text.length} chars of text"
             is ReadNotifications -> "Read notifications"
