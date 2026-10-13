@@ -3,6 +3,7 @@ package com.example.agent
 import android.content.Context
 import android.util.Log
 import com.example.data.local.AgentDatabase
+import com.example.data.local.AutomationEntity
 import com.example.data.local.CheckpointEntity
 import com.example.data.local.EpisodeEntity
 import com.example.data.local.SavedSkillEntity
@@ -330,6 +331,73 @@ class TaskOrchestrator(
             startTask(skill.goal, resumePlan = plan)
         }
     }
+
+    // --- 7.8 scheduled automations: create / list / remove ----------------------
+
+    /**
+     * Schedules a saved skill to run repeatedly on an interval (plan 7.8). The automation
+     * is off unless the master switch is on; without a matching saved skill there is
+     * nothing to schedule, so this returns null rather than persisting a dead automation.
+     */
+    suspend fun scheduleAutomation(skillName: String, intervalMinutes: Int, enabled: Boolean = true): Long? {
+        val skill = runCatching { database.skillDao().getSkill(skillName) }.getOrNull() ?: return null
+        val automation = AutomationEntity(
+            skillName = skill.name,
+            triggerType = com.example.automation.AutomationTrigger.INTERVAL,
+            triggerValue = com.example.automation.AutomationGate.intervalMinutes(intervalMinutes).toString(),
+            enabled = enabled
+        )
+        val id = withContext(Dispatchers.IO) {
+            database.automationDao().upsertAutomation(automation)
+        }
+        resyncAutomations()
+        return id
+    }
+
+    /** Stops a scheduled automation and cancels its work (plan 7.8). */
+    suspend fun cancelAutomation(automationId: Long) {
+        withContext(Dispatchers.IO) { database.automationDao().deleteAutomation(automationId) }
+        resyncAutomations()
+    }
+
+    /**
+     * Deletes a saved skill and every automation scheduled against it, so removing a
+     * skill never leaves a scheduled job that would fail on a missing skill (plan 7.8).
+     */
+    suspend fun deleteSkill(skillName: String) {
+        val orphans = withContext(Dispatchers.IO) {
+            val scheduled = database.automationDao().getAutomationsForSkill(skillName)
+            scheduled.forEach { database.automationDao().deleteAutomation(it.id) }
+            database.skillDao().deleteSkill(skillName)
+            scheduled
+        }
+        if (orphans.isNotEmpty()) resyncAutomations()
+    }
+
+    /** Re-arms every persisted automation against the current master switch (plan 7.8). */
+    fun resyncAutomations() {
+        (context.applicationContext as? com.example.OmniAgentApplication)?.let {
+            scope.launch { runCatching { it.syncAutomations() } }
+        }
+    }
+
+    /**
+     * True when a specific scheduled automation is still persisted, still enabled and the
+     * master switch is on (plan 7.8). The worker re-checks this at run time, so a stale job
+     * whose automation was disabled, deleted or whose skill was removed can never drive the
+     * orchestrator — cancelling the unique work is best-effort, this is the real gate.
+     */
+    suspend fun automationIsArmed(automationId: Long): Boolean {
+        if (!com.example.settings.CapabilitySettings(context).automationsEnabled) return false
+        val row = withContext(Dispatchers.IO) { database.automationDao().getAutomationById(automationId) }
+            ?: return false
+        return row.enabled
+    }
+
+    /** True when a skill by this name still exists, so a scheduled replay is not a dead run. */
+    suspend fun skillExists(skillName: String): Boolean =
+        withContext(Dispatchers.IO) { database.skillDao().getSkill(skillName) } != null
+
 
     private suspend fun runAgentLoop(task: TaskEntity, resumePlan: TaskPlan? = null) {
         executionJob = scope.launch {

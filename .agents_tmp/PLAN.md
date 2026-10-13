@@ -1,6 +1,33 @@
 
 ---
 
+## SESSION 43 (2026-10-13) - milestone: scheduled-automation reachable capability (Automations surface + per-automation armed gate)
+
+Status: IN PROGRESS -> DONE.
+- `TaskOrchestrator.scheduleAutomation(skillName, intervalMinutes)` now REQUIRES a
+  matching saved skill (returns null otherwise, so no dead automation is persisted),
+  clamps the interval through `AutomationGate.intervalMinutes`, persists an
+  `AutomationEntity` and re-syncs the worker.
+- New `TaskOrchestrator.cancelAutomation(id)`, `deleteSkill(name)` (removes the skill
+  AND every automation scheduled against it), `automationIsArmed(id)` (master switch
+  AND the row still enabled AND still persisted - the real run-time gate),
+  `skillExists(name)`.
+- New `AgentDao.AutomationDao.getAutomationsForSkill`, `getAutomationById`,
+  `setAutomationEnabled`.
+- `LibraryScreen` gains a third "Automations" tab (Skills / Memory / Automations):
+  lists scheduled automations, shows interval + enabled state, honest "Automations are
+  OFF" banner when the master switch is off, and a per-automation delete. Skill
+  deletion is routed through `orchestrator.deleteSkill(...)` so no orphan automations
+  remain. Added a rename dialog and a "+" schedule affordance per skill.
+- Tests (CapabilityUpgradeTest, 5 new): `scheduleAutomationRequiresAnExistingSkill`,
+  `scheduleAutomationPersistsClampsAndDeletes`, `automationIsArmedOnlyWhenMasterAndItemAreOn`,
+  `deleteSkillRemovesEveryAutomationScheduledAgainstIt`, `skillExistsTracksThePersistedSkill`.
+- Validation: `./gradlew :app:testDebugUnitTest --no-daemon` -> BUILD SUCCESSFUL,
+  485 tests, 0 failures, 0 errors.
+- Next: assembleDebug gate below (session 43 final).
+
+---
+
 ## SESSION 42 (2026-10-13) - milestone: file/document picking (pick_file)
 
 Status: DONE. Jarvis can now open the system file/document picker.

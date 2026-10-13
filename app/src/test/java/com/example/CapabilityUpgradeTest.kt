@@ -74,10 +74,17 @@ import com.example.planning.TaskPlan
 import com.example.planning.TaskPlanParser
 import com.example.planning.TaskPlanSerializer
 import com.example.planning.VerificationMethod
+import com.example.automation.AutomationGate
+import com.example.automation.AutomationTrigger
+import com.example.data.local.AgentDatabase
+import com.example.data.local.SavedSkillEntity
+import com.example.settings.CapabilitySettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -4798,6 +4805,103 @@ class CapabilityUpgradeTest {
             return result ?: SpeakResult(true, "SPOKEN", "Said: $text")
         }
     }
+
+    // --- 7.8 scheduled-automation capability: create/list/remove + the armed gate ---
+
+    @Test
+    fun scheduleAutomationRequiresAnExistingSkill() {
+        val engine = modelEngine(emptyPlanJson())
+        val orchestrator = newOrchestrator(engine, FakeDeviceAutomation())
+        val id = runBlocking { orchestrator.scheduleAutomation("no_such_skill", 60) }
+        assertNull("scheduling a skill that does not exist must not persist a dead automation", id)
+        val rows = runBlocking { AgentDatabase.getInstance(context).automationDao().getAllAutomations().first() }
+        assertTrue(rows.isEmpty())
+    }
+
+    @Test
+    fun scheduleAutomationPersistsClampsAndDeletes() {
+        val engine = modelEngine(emptyPlanJson())
+        val orchestrator = newOrchestrator(engine, FakeDeviceAutomation())
+        val dao = AgentDatabase.getInstance(context).automationDao()
+        val skillDao = AgentDatabase.getInstance(context).skillDao()
+        runBlocking { skillDao.upsertSkill(SavedSkillEntity(name = "night_mode", goal = "turn on night mode", planJson = emptyPlanJson())) }
+
+        val id = runBlocking { orchestrator.scheduleAutomation("night_mode", 5) }
+        assertTrue("a real skill must persist an automation", id != null && id!! > 0)
+
+        val row = runBlocking { dao.getAutomationById(id!!) }
+        assertEquals("night_mode", row?.skillName)
+        assertEquals(AutomationTrigger.INTERVAL, row?.triggerType)
+        assertEquals("5 minutes must clamp to the 15-minute floor", "15", row?.triggerValue)
+        assertTrue(row?.enabled == true)
+        assertEquals(1, runBlocking { dao.getAutomationsForSkill("night_mode") }.size)
+
+        runBlocking { orchestrator.cancelAutomation(id!!) }
+        assertNull("cancelling must remove the persisted automation", runBlocking { dao.getAutomationById(id!!) })
+        assertTrue(runBlocking { dao.getAllAutomations().first() }.isEmpty())
+    }
+
+    @Test
+    fun automationIsArmedOnlyWhenMasterAndItemAreOn() {
+        val settings = CapabilitySettings(context)
+        settings.automationsEnabled = false
+        val engine = modelEngine(emptyPlanJson())
+        val orchestrator = newOrchestrator(engine, FakeDeviceAutomation())
+        val dao = AgentDatabase.getInstance(context).automationDao()
+        val skillDao = AgentDatabase.getInstance(context).skillDao()
+        runBlocking { skillDao.upsertSkill(SavedSkillEntity(name = "morning", goal = "brief me", planJson = emptyPlanJson())) }
+        val id = runBlocking { orchestrator.scheduleAutomation("morning", 60) }!!
+
+        assertFalse("master switch off must disarm even an enabled automation",
+            runBlocking { orchestrator.automationIsArmed(id) })
+
+        settings.automationsEnabled = true
+        assertTrue(runBlocking { orchestrator.automationIsArmed(id) })
+
+        // Disabling the individual automation disarms it even with the master switch on.
+        runBlocking { dao.setAutomationEnabled(id, false) }
+        assertFalse(runBlocking { orchestrator.automationIsArmed(id) })
+
+        runBlocking { dao.setAutomationEnabled(id, true) }
+        assertTrue(runBlocking { orchestrator.automationIsArmed(id) })
+
+        // Deleting the row (e.g. the skill was removed) disarms it.
+        runBlocking { orchestrator.deleteSkill("morning") }
+        assertFalse(runBlocking { orchestrator.automationIsArmed(id) })
+        assertTrue(runBlocking { dao.getAutomationsForSkill("morning") }.isEmpty())
+        settings.automationsEnabled = false
+    }
+
+    @Test
+    fun deleteSkillRemovesEveryAutomationScheduledAgainstIt() {
+        val engine = modelEngine(emptyPlanJson())
+        val orchestrator = newOrchestrator(engine, FakeDeviceAutomation())
+        val dao = AgentDatabase.getInstance(context).automationDao()
+        val skillDao = AgentDatabase.getInstance(context).skillDao()
+        runBlocking { skillDao.upsertSkill(SavedSkillEntity(name = "dup", goal = "goal", planJson = emptyPlanJson())) }
+        runBlocking { orchestrator.scheduleAutomation("dup", 15) }
+        runBlocking { orchestrator.scheduleAutomation("dup", 30) }
+        assertEquals(2, runBlocking { dao.getAutomationsForSkill("dup") }.size)
+
+        runBlocking { orchestrator.deleteSkill("dup") }
+        assertTrue("removing a skill must remove every automation scheduled against it",
+            runBlocking { dao.getAutomationsForSkill("dup") }.isEmpty())
+        assertNull(runBlocking { skillDao.getSkill("dup") })
+    }
+
+    @Test
+    fun skillExistsTracksThePersistedSkill() {
+        val engine = modelEngine(emptyPlanJson())
+        val orchestrator = newOrchestrator(engine, FakeDeviceAutomation())
+        val skillDao = AgentDatabase.getInstance(context).skillDao()
+        assertFalse(runBlocking { orchestrator.skillExists("gone") })
+        runBlocking { skillDao.upsertSkill(SavedSkillEntity(name = "here", goal = "g", planJson = emptyPlanJson())) }
+        assertTrue(runBlocking { orchestrator.skillExists("here") })
+        runBlocking { orchestrator.deleteSkill("here") }
+        assertFalse(runBlocking { orchestrator.skillExists("here") })
+    }
+
+    private fun emptyPlanJson(): String = "{\"steps\":[]}"
 
     private fun planStep(id: Int, action: AgentAction, rawName: String) = com.example.planning.PlanStep(
         id = id,

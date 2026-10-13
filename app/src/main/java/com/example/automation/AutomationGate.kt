@@ -8,11 +8,14 @@ package com.example.automation
  * no WorkManager/device.
  */
 object AutomationGate {
+    /** WorkManager's periodic minimum; also the floor the UI enforces before scheduling. */
+    const val MIN_INTERVAL_MINUTES = 15
+
     fun isSchedulable(masterEnabled: Boolean, automationEnabled: Boolean): Boolean =
         masterEnabled && automationEnabled
 
     /** Periodic interval in minutes, clamped to WorkManager's 15-minute minimum. */
-    fun intervalMinutes(rawMinutes: Int): Long = rawMinutes.coerceAtLeast(15).toLong()
+    fun intervalMinutes(rawMinutes: Int): Long = rawMinutes.coerceAtLeast(MIN_INTERVAL_MINUTES).toLong()
 }
 
 /** Kinds of trigger an automation can have. */
