@@ -252,6 +252,11 @@ class AndroidDeviceAutomation(
     // control, so like the contact/calendar inserts it is resolved before the a11y-service
     // gate. An unwired controller gets an honest "unavailable" result, never a silent no-op.
     private val noteController: NoteController? = null,
+    // pick_file dispatches the platform's own document picker (Intent.ACTION_GET_CONTENT),
+    // not an accessibility-tree control, so like create_note it is resolved before the
+    // a11y-service gate. An unwired controller gets an honest "unavailable" result, never a
+    // silent no-op. It only opens the picker for the user to choose; it reads/deletes nothing.
+    private val filePickerController: FilePickerController? = null,
     // summarize_text condenses a block of text through the configured summarizer (the
     // remote LLM API), not the accessibility tree, so like Speak/ReadNotifications it is
     // resolved before the a11y-service gate. An unwired summarizer gets an honest
@@ -610,6 +615,16 @@ class AndroidDeviceAutomation(
             val creator = noteController
                 ?: return@withContext ActionResult(false, "NOTE_UNAVAILABLE", "Note dispatch is not available")
             val result = creator.createNote(action.title, action.content)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // pick_file is an intent-dispatch primitive like create_note: the platform document
+        // picker is a separate process and no screen read or tap opens it reliably on an
+        // arbitrary screen, so it is resolved before the a11y-service gate. It reports only
+        // that the picker intent was delivered; it never reads or deletes a file.
+        if (action is AgentAction.PickFile) {
+            val picker = filePickerController
+                ?: return@withContext ActionResult(false, "FILE_PICKER_UNAVAILABLE", "File picker dispatch is not available")
+            val result = picker.pickFile(action.mimeType, action.allowMultiple)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         // summarize_text condenses a block of text through the configured summarizer (the

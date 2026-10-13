@@ -129,6 +129,10 @@ object TaskPlanSerializer {
             if (!title.isNullOrBlank()) put("title", title)
             if (!content.isNullOrBlank()) put("content", content)
         }
+        is AgentAction.PickFile -> JSONObject().apply {
+            if (!mimeType.isNullOrBlank()) put("mimeType", mimeType)
+            if (allowMultiple) put("allowMultiple", true)
+        }
         is AgentAction.SummarizeText -> JSONObject().apply {
             put("text", text)
             put("maxChars", maxChars)
@@ -243,6 +247,7 @@ object TaskPlanSerializer {
         is AgentAction.OpenSettings -> com.example.agent.ToolRegistry.TOOL_OPEN_SETTINGS
         is AgentAction.OpenCalendar -> com.example.agent.ToolRegistry.TOOL_OPEN_CALENDAR
         is AgentAction.Note -> com.example.agent.ToolRegistry.TOOL_CREATE_NOTE
+        is AgentAction.PickFile -> com.example.agent.ToolRegistry.TOOL_PICK_FILE
         is AgentAction.SummarizeText -> com.example.agent.ToolRegistry.TOOL_SUMMARIZE_TEXT
         is AgentAction.SetTorch -> com.example.agent.ToolRegistry.TOOL_SET_TORCH
         is AgentAction.Speak -> com.example.agent.ToolRegistry.TOOL_SPEAK

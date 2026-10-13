@@ -326,6 +326,10 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 title = str(params, "title", "name", "subject").ifBlank { null },
                 content = str(params, "content", "text", "body", "message", "note").ifBlank { null }
             )
+            ToolRegistry.TOOL_PICK_FILE -> AgentAction.PickFile(
+                mimeType = str(params, "mimeType", "mime_type", "type", "fileType", "accept").ifBlank { null },
+                allowMultiple = parseAllowMultiple(params)
+            )
             ToolRegistry.TOOL_SUMMARIZE_TEXT -> AgentAction.SummarizeText(
                 text = str(params, "text", "content", "value", "body", "message"),
                 maxChars = parseSummaryChars(params)
@@ -514,6 +518,27 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             }
         }
         return true
+    }
+
+    /**
+     * Resolves whether a pick_file step lets the user choose more than one file. Accepts
+     * a JSON boolean or a string alias ("true"/"yes"/"many"/"multiple"/"1"); a missing or
+     * unrecognised value defaults to false (a single pick), which is the common intent.
+     */
+    private fun parseAllowMultiple(params: JSONObject): Boolean {
+        for (key in listOf("allowMultiple", "multiple", "many")) {
+            if (!params.has(key)) continue
+            when (val value = params.opt(key)) {
+                is Boolean -> return value
+                is Number -> return value.toInt() != 0
+                is String -> when (value.trim().lowercase()) {
+                    "true", "yes", "many", "multiple", "1" -> return true
+                    "false", "no", "single", "one", "0" -> return false
+                }
+                else -> continue
+            }
+        }
+        return false
     }
 
     /**

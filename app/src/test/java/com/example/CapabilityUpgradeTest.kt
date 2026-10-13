@@ -24,6 +24,8 @@ import com.example.agent.ContactController
 import com.example.agent.ContactResult
 import com.example.agent.NoteController
 import com.example.agent.NoteResult
+import com.example.agent.FilePickerController
+import com.example.agent.FilePickResult
 import com.example.agent.AndroidDialerController
 import com.example.agent.AndroidSmsController
 import com.example.agent.DialResult
@@ -2529,6 +2531,218 @@ class CapabilityUpgradeTest {
         assertTrue("a failed note dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- pick_file: the "pick a file / choose a document" primitive ---
+
+    @Test
+    fun pickFileExecutesWithoutAnAccessibilityService() {
+        // pick_file dispatches the platform's documented ACTION_GET_CONTENT picker, so like
+        // create_note it is service-free and must resolve before the a11y gate.
+        val recorder = RecordingFilePickerController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            filePickerController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.PickFile(mimeType = "image/*", allowMultiple = true))
+        }
+        assertTrue("a file picker must open without a bound a11y service: $result", result.success)
+        assertEquals("FILE_PICKER_OPENED", result.method)
+        assertEquals("the controller must be asked exactly once", 1, recorder.calls.size)
+        assertEquals("image/*" to true, recorder.calls[0])
+    }
+
+    @Test
+    fun pickFileRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            filePickerController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.PickFile())
+        }
+        assertFalse("no controller must not be a fake success", result.success)
+        assertEquals("FILE_PICKER_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun pickFileReportsFailureHonestlyWhenNoPickerExists() {
+        val recorder = RecordingFilePickerController(
+            FilePickResult(false, "FILE_PICKER_UNAVAILABLE", "No file picker is available on this device")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            filePickerController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.PickFile(mimeType = "application/pdf"))
+        }
+        assertFalse("a missing picker must not be reported as success", result.success)
+        assertEquals("FILE_PICKER_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun pickFileParserMapsTheToolNameWithMimeAndMultiple() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Pick a photo","action":"pick_file","params":{"mimeType":"image/*","allowMultiple":true},"expect":"picker open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "let me pick a photo to attach")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val action = (result as PlanParseResult.Success).plan.steps[0].action
+        assertEquals(AgentAction.PickFile(mimeType = "image/*", allowMultiple = true), action)
+    }
+
+    @Test
+    fun pickFileParserAcceptsStringAliasesAndDefaultsToASinglePick() {
+        val aliased = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Pick files","action":"pick_file","params":{"type":"application/pdf","multiple":"yes"},"expect":"picker open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val parsed = TaskPlanParser().parse(aliased, "select some PDFs")
+        assertTrue("parse failed: $parsed", parsed is PlanParseResult.Success)
+        assertEquals(
+            "type/multiple aliases must resolve, and a single pick is the default",
+            AgentAction.PickFile(mimeType = "application/pdf", allowMultiple = true),
+            (parsed as PlanParseResult.Success).plan.steps[0].action
+        )
+
+        val bare = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Open the picker","action":"pick_file","params":{},"expect":"picker open","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val bareParsed = TaskPlanParser().parse(bare, "open the file picker")
+        assertEquals(
+            "a parameterless pick_file is a single any-file pick",
+            AgentAction.PickFile(mimeType = null, allowMultiple = false),
+            (bareParsed as PlanParseResult.Success).plan.steps[0].action
+        )
+    }
+
+    @Test
+    fun validationRejectsAnAbsurdMimeTypeButAcceptsAnyFile() {
+        val registry = ToolRegistry()
+        assertTrue(
+            "an any-file pick (no mime filter) is valid",
+            registry.validateAction(AgentAction.PickFile()) is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "a normal mime filter is valid",
+            registry.validateAction(AgentAction.PickFile(mimeType = "application/pdf")) is ToolValidationResult.Valid
+        )
+        assertTrue(
+            "an oversized mime filter must be rejected so a malformed plan cannot hand the picker nonsense",
+            registry.validateAction(
+                AgentAction.PickFile(mimeType = "x".repeat(ToolRegistry.MAX_MIME_TYPE_CHARS + 1))
+            ) is ToolValidationResult.Invalid
+        )
+    }
+
+    @Test
+    fun pickFileSkillKeepsMimeAndMultipleOnReplay() {
+        val action = AgentAction.PickFile(mimeType = "image/*", allowMultiple = true)
+        val params = com.example.planning.TaskPlanSerializer.toJson(
+            com.example.planning.TaskPlan(
+                goal = "pick", fromModel = true,
+                steps = listOf(
+                    com.example.planning.PlanStep(
+                        id = 1, sequence = 1, description = "pick",
+                        action = action, rawActionName = "pick_file",
+                        expectedPostcondition = "picker", verification = com.example.planning.VerificationMethod.NONE
+                    )
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(params, goalOverride = "pick")
+        assertTrue("a saved pick_file skill must be replayable", restored != null)
+        assertEquals(
+            "mimeType and allowMultiple must survive a skill round-trip (toParams)",
+            action, restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun fastPathPicksFileDeterministically() {
+        val executor = HybridStepExecutor(AppDirectory(context))
+        val step = planStep(1, AgentAction.PickFile(mimeType = "image/*"), "pick_file")
+        val decision = executor.decide(
+            listOf(step), 0,
+            observation("com.android.launcher", "Home", 1),
+            nudgeUsed = false
+        )
+        assertTrue("expected a deterministic Execute, got $decision", decision is FastPathDecision.Execute)
+    }
+
+    @Test
+    fun promptAdvertisesPickFile() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_PICK_FILE}",
+            actions.contains(ToolRegistry.TOOL_PICK_FILE)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "pick a photo to attach",
+                desiredOutcome = "file picker open",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing pick_file", prompt.contains("pick_file"))
+    }
+
+    @Test
+    fun pickFileStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.PickFile -> ActionResult(true, "FILE_PICKER_OPENED", "Opening the file picker")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the picker","action":"pick_file","params":{},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open the file picker", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("pick_file must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.PickFile })
+    }
+
+    @Test
+    fun pickFileFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.PickFile -> ActionResult(false, "FILE_PICKER_UNAVAILABLE", "File picker dispatch is not available")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the picker","action":"pick_file","params":{},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open the file picker", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed picker dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- summarize_text: the "summarise this page/message/thread" primitive ---
 
     @Test
@@ -4549,6 +4763,16 @@ class CapabilityUpgradeTest {
         override fun createNote(title: String?, content: String?): NoteResult {
             calls += title to content
             return result ?: NoteResult(true, "NOTE_DISPATCHED", "Opening notes to create the note")
+        }
+    }
+
+    private class RecordingFilePickerController(
+        private val result: FilePickResult? = null
+    ) : FilePickerController {
+        val calls = mutableListOf<Pair<String?, Boolean>>()
+        override fun pickFile(mimeType: String?, allowMultiple: Boolean): FilePickResult {
+            calls += mimeType to allowMultiple
+            return result ?: FilePickResult(true, "FILE_PICKER_OPENED", "Opening the file picker")
         }
     }
 

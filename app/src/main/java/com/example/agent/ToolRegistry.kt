@@ -61,6 +61,7 @@ open class ToolRegistry {
         const val TOOL_OPEN_SETTINGS = "open_settings"
         const val TOOL_OPEN_CALENDAR = "open_calendar"
         const val TOOL_CREATE_NOTE = "create_note"
+        const val TOOL_PICK_FILE = "pick_file"
         const val TOOL_SUMMARIZE_TEXT = "summarize_text"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
@@ -81,6 +82,8 @@ open class ToolRegistry {
         /** Upper bound on a note title/body so a runaway model value cannot flood the notes editor. */
         const val MAX_NOTE_TITLE_CHARS = 200
         const val MAX_NOTE_CONTENT_CHARS = 2000
+        /** Longest mime type a pick_file step may request, to bound the picker filter value. */
+        const val MAX_MIME_TYPE_CHARS = 100
         /** Longest text a single summarize_text step may condense, to bound summarizer work. */
         const val MAX_SUMMARIZE_INPUT_CHARS = 8000
         /** Bounds on the requested summary length so a runaway value cannot distort the digest. */
@@ -321,6 +324,12 @@ open class ToolRegistry {
             description = "Opens the notes app to create a note. Use for 'make a note that the wifi password is 1234', 'note down to call Sam tomorrow', 'create a note titled Shopping'. Provide a title and/or the note text. No screen read or tap can create a note reliably",
             requiredParameters = emptyList(),
             optionalParameters = listOf("title", "content", "text", "body", "message", "name")
+        ),
+        TOOL_PICK_FILE to ToolDefinition(
+            name = TOOL_PICK_FILE,
+            description = "Opens the system file/document picker so the user can choose a file. Use for 'pick a file', 'choose a photo to attach', 'select a document', 'open the file picker'. Optionally filter by a mimeType such as image/*, video/*, audio/*, application/pdf or text/plain, and set allowMultiple to let the user pick more than one. It only opens the picker for the user to choose; it never reads, deletes or uploads anything",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("mimeType", "mime_type", "type", "fileType", "accept", "multiple", "allowMultiple", "many")
         ),
         TOOL_SUMMARIZE_TEXT to ToolDefinition(
             name = TOOL_SUMMARIZE_TEXT,
@@ -688,6 +697,18 @@ open class ToolRegistry {
                     (action.content?.length ?: 0) > MAX_NOTE_CONTENT_CHARS ->
                         ToolValidationResult.Invalid("create_note content is too long (max $MAX_NOTE_CONTENT_CHARS chars)")
                     else -> ToolValidationResult.Valid
+                }
+            }
+            // pick_file's only parameter is an optional mime filter; reject an absurd one so
+            // a malformed plan cannot hand the picker a nonsense type. A blank type is fine
+            // (any file) so it is never rejected.
+            is AgentAction.PickFile -> {
+                if ((action.mimeType?.length ?: 0) > MAX_MIME_TYPE_CHARS) {
+                    ToolValidationResult.Invalid(
+                        "pick_file mimeType is too long (max $MAX_MIME_TYPE_CHARS chars)"
+                    )
+                } else {
+                    ToolValidationResult.Valid
                 }
             }
             is AgentAction.SummarizeText -> {

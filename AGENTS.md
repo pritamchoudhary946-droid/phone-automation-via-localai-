@@ -306,6 +306,24 @@ and never claims the note was created (`NOTE_UNAVAILABLE` / `NOTE_PERMISSION` /
 `INVALID_NOTE` / `NOTE_ERROR` otherwise). The prompt must never let the model claim a
 note was saved.
 
+`pick_file` (`AgentAction.PickFile(mimeType?, allowMultiple)` + `FilePickerController` ->
+the documented `Intent.ACTION_GET_CONTENT` with `CATEGORY_OPENABLE`, an optional MIME
+filter and `EXTRA_ALLOW_MULTIPLE`) follows the same rule: no accessibility-tree read or UI
+tap opens the system file/document picker reliably on an arbitrary screen (and driving a
+specific file-manager UI would be app-specific), so it is resolved before the a11y gate and
+opens the picker for the user to choose a file (e.g. "attach a photo", "choose a
+document"). It carries an optional `mimeType` (null/blank means any file) and
+`allowMultiple`; `ToolRegistry` validation rejects an over-`MAX_MIME_TYPE_CHARS`-long MIME
+type with `Invalid` before any intent is built, otherwise `AndroidFilePickerController`
+dispatches `ACTION_GET_CONTENT`. It only *opens* the picker; it never reads, deletes,
+uploads or copies the chosen file itself, so the selection stays under the user's control
+(section 3.5). Because the picker is a separate process the app cannot read back which file
+was chosen, so it reports only that the picker was *delivered* (`FILE_PICKER_OPENED`) and
+never claims a file was selected (`FILE_PICKER_UNAVAILABLE` / `FILE_PICKER_PERMISSION` /
+`FILE_PICKER_ERROR` otherwise). It is injectable via the `AndroidDeviceAutomation`
+constructor and wired in `OmniAgentApplication`. The prompt must never let the model claim
+a file was selected.
+
 `summarize_text` (`AgentAction.SummarizeText(text, maxChars)` + the shared
 `NanoSummarizer` -> the configured cloud LLM engine, the same one behind the
 planning memory/lessons digest) follows the same rule: a summarisation is computed
@@ -607,7 +625,7 @@ output is off, read live per call by `AgentPlanner`.
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
   `open_app_info`, `open_settings`, `set_torch`,
-  `speak`, `open_calendar`, `create_note`, `summarize_text` and
+  `speak`, `open_calendar`, `create_note`, `pick_file`, `summarize_text` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
@@ -649,6 +667,8 @@ output is off, read live per call by `AgentPlanner`.
   intent was delivered to a calendar app (`CALENDAR_UNAVAILABLE` otherwise), and
   `create_note` reports `NOTE_DISPATCHED` only after the `Intent.ACTION_CREATE_NOTE`
   intent was delivered to a notes app (`NOTE_UNAVAILABLE` otherwise), and
+  `pick_file` reports `FILE_PICKER_OPENED` only after the `Intent.ACTION_GET_CONTENT`
+  picker intent was delivered (`FILE_PICKER_UNAVAILABLE` otherwise), and
   `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
   confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the
