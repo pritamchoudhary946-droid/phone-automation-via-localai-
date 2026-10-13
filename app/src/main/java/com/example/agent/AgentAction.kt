@@ -269,6 +269,15 @@ sealed class AgentAction {
      */
     data class SetTorch(val on: Boolean) : AgentAction()
     /**
+     * Sets a device control to [value] - the parameterised form of [SetTorch] used by
+     * scheduled automations, where the same automation row turns the flashlight on in one
+     * condition and off in another. The only supported [control] is "torch", whose [value]
+     * is "on"/"off"; it is dispatched through the same [AndroidTorchController] as
+     * [SetTorch] and read back, so an ignored request is an honest failure, never a fake
+     * success. It is resolved before the accessibility-service gate exactly like [SetTorch].
+     */
+    data class SetDeviceControl(val control: String, val value: String) : AgentAction()
+    /**
      * Speaks [text] aloud through the on-device text-to-speech engine - the "say
      * ..." / "read that out" / "tell me what it says" primitive. Speech output is an
      * opt-in capability ([AndroidSpeakController] is gated by the user's voice-output
@@ -427,6 +436,7 @@ sealed class AgentAction {
             is NavigateTo -> "Open the map at '$target'"
             is OpenAppInfo -> "Open app info for '$packageName'"
             is SetTorch -> if (on) "Turn the flashlight on" else "Turn the flashlight off"
+            is SetDeviceControl -> "Set $control to $value"
             is Speak -> "Say: \"$text\""
             is OpenSettings -> "Open ${panel} settings"
             is OpenCalendar -> when (dayOffset) {

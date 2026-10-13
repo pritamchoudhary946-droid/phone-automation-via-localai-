@@ -312,6 +312,10 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 packageName = str(params, "packageName", "package", "app", "appQuery", "target", "query")
             )
             ToolRegistry.TOOL_SET_TORCH -> AgentAction.SetTorch(on = parseTorchOn(params))
+            ToolRegistry.TOOL_SET_DEVICE_CONTROL -> AgentAction.SetDeviceControl(
+                control = str(params, "control", "setting", "target", "name").trim().lowercase(),
+                value = str(params, "value", "state", "on").trim().lowercase()
+            )
             ToolRegistry.TOOL_SPEAK -> AgentAction.Speak(
                 text = str(params, "text", "message", "say", "content", "value")
             )

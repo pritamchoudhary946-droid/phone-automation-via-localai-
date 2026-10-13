@@ -138,6 +138,9 @@ object TaskPlanSerializer {
             put("maxChars", maxChars)
         }
         is AgentAction.SetTorch -> JSONObject().put("on", on)
+        is AgentAction.SetDeviceControl -> JSONObject()
+            .put("control", control)
+            .put("value", value)
         is AgentAction.Speak -> JSONObject().put("text", text)
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
         else -> null
@@ -250,6 +253,7 @@ object TaskPlanSerializer {
         is AgentAction.PickFile -> com.example.agent.ToolRegistry.TOOL_PICK_FILE
         is AgentAction.SummarizeText -> com.example.agent.ToolRegistry.TOOL_SUMMARIZE_TEXT
         is AgentAction.SetTorch -> com.example.agent.ToolRegistry.TOOL_SET_TORCH
+        is AgentAction.SetDeviceControl -> com.example.agent.ToolRegistry.TOOL_SET_DEVICE_CONTROL
         is AgentAction.Speak -> com.example.agent.ToolRegistry.TOOL_SPEAK
         is AgentAction.PlayMedia -> com.example.agent.ToolRegistry.TOOL_PLAY_MEDIA
         is AgentAction.ReadNotifications -> com.example.agent.ToolRegistry.TOOL_READ_NOTIFICATIONS

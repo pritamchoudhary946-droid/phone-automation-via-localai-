@@ -567,6 +567,23 @@ class AndroidDeviceAutomation(
             val result = controller.setTorch(action.on)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
+        // set_device_control drives a device control (currently the torch) from an explicit
+        // control/value pair, so a scheduled automation has a declarative action it can
+        // replay. It resolves the pair through DeviceControl first (an unknown control or a
+        // non-on/off value is refused honestly, no dispatch), then delegates to the same
+        // torch controller for the honest read-back. Like set_torch it is resolved before
+        // the a11y-service gate (CameraManager-backed, not tree-backed).
+        if (action is AgentAction.SetDeviceControl) {
+            val on = DeviceControl.resolve(action.control, action.value)
+                ?: return@withContext ActionResult(
+                    false, "UNSUPPORTED_DEVICE_CONTROL",
+                    "Unknown device control '${action.control}'='${action.value}'; expected control=${DeviceControl.keys().joinToString("/")} and value on/off"
+                )
+            val controller = torchController
+                ?: return@withContext ActionResult(false, "TORCH_UNAVAILABLE", "Flashlight control is not available")
+            val result = controller.setTorch(on)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
         // Speech output is likewise service-free: it drives the platform TTS engine, so
         // it is resolved before the a11y-service gate. This is the "say good morning" /
         // "tell me what it says" primitive. The controller reports success only once the

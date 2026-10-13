@@ -1112,6 +1112,7 @@ class TaskOrchestrator(
             is AgentAction.SendSms, is AgentAction.ShareText,
             is AgentAction.SendEmail, is AgentAction.NavigateTo,
             is AgentAction.OpenAppInfo, is AgentAction.OpenSettings, is AgentAction.OpenCalendar, is AgentAction.SetTorch,
+            is AgentAction.SetDeviceControl,
             is AgentAction.Note,
             // pick_file opens the platform document picker (a system service no screen
             // reflects); a delivered picker intent is its own evidence, exactly like the
@@ -1321,6 +1322,7 @@ class TaskOrchestrator(
                 action is AgentAction.Note ||
                 action is AgentAction.PickFile ||
                 action is AgentAction.SetTorch ||
+                action is AgentAction.SetDeviceControl ||
                 action is AgentAction.Speak ||
                 action is AgentAction.ReadNotifications)
         ) {
