@@ -207,7 +207,8 @@ class TaskOrchestrator(
     /**
      * The scheduled automation driving the current run (0 = a user-initiated task), so the
      * terminal handler can stamp that automation's [AutomationEntity.lastRunAtMs] once the
-     * run genuinely finishes. Set by the AutomationWorker path and cleared at task start.
+     * run genuinely finishes. Passed through [startTask]; every user-initiated start uses the
+     * default 0, so a later terminal state never stamps an unrelated automation.
      */
     private var activeAutomationId: Long = 0L
 
@@ -287,10 +288,11 @@ class TaskOrchestrator(
         return hit?.value?.let { "You told me: $it" } ?: "I don't have anything stored about that yet."
     }
 
-    fun startTask(goal: String, maxSteps: Int = defaultMaxSteps, resumePlan: TaskPlan? = null) {
+    fun startTask(goal: String, maxSteps: Int = defaultMaxSteps, resumePlan: TaskPlan? = null, automationId: Long = 0L) {
         if (executionJob?.isActive == true) cancelCurrentTask()
-        // A user-initiated task is never attributed to a scheduled automation.
-        activeAutomationId = 0L
+        // Attribution: a scheduled automation passes its id so the run's terminal state
+        // stamps it; every user-initiated start uses the default 0 and stamps nothing.
+        activeAutomationId = automationId
         // 9.3: expand a follow-up ("and send it") into a self-contained goal before it
         // is persisted, so the plan and the history both read correctly.
         val effectiveGoal = when (val r = conversationMemory.resolve(goal)) {
@@ -356,13 +358,12 @@ class TaskOrchestrator(
      */
     fun runAutomation(skill: SavedSkillEntity, automationId: Long): Boolean {
         val goal = skill.goal.ifBlank { return false }
-        activeAutomationId = automationId
         scope.launch { runCatching { database.skillDao().markSkillRun(skill.name, System.currentTimeMillis()) } }
         val plan = if (skill.planJson.isBlank()) null else TaskPlanSerializer.fromJson(skill.planJson, goalOverride = goal)
         if (plan == null) {
             Log.w(TAG, "Automation ${skill.name}: no reconstructable plan; re-planning from its goal")
         }
-        startTask(goal, resumePlan = plan)
+        startTask(goal, resumePlan = plan, automationId = automationId)
         return true
     }
 

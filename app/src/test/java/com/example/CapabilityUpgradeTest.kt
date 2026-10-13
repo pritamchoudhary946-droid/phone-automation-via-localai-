@@ -5507,6 +5507,8 @@ class CapabilityUpgradeTest {
 
         val stamped = dao.getAutomationById(id)?.lastRunAtMs ?: 0L
         assertTrue("a completed automation run must stamp lastRunAtMs", stamped > 0L)
+
+        runBlocking { orchestrator.cancelAutomation(id) }
     }
 
     @Test
