@@ -413,9 +413,17 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
         return names.toList()
     }
 
-    /** True for the approved actions that can return a bounded text digest ([ActionResult.readText]). */
+    /**
+     * True for the approved actions that return a bounded text digest
+     * ([ActionResult.readText]) — the actions a `captures` step may name. Not just the
+     * screen reads: notification triage, device status and summarize_text all carry a
+     * digest, and captures on any other action (e.g. a tap) could only ever be empty,
+     * so it is still rejected.
+     */
     private fun producesReadableText(action: AgentAction): Boolean =
-        action is AgentAction.ReadText || action is AgentAction.ReadPageContent
+        action is AgentAction.ReadText || action is AgentAction.ReadPageContent ||
+            action is AgentAction.ReadNotifications || action is AgentAction.ReadDeviceStatus ||
+            action is AgentAction.SummarizeText
 
     /**
      * Weekday constants for a repeating alarm, bounded to the 1..7 `Calendar` range and

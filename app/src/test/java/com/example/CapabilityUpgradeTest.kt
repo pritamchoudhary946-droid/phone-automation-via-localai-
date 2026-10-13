@@ -4001,6 +4001,94 @@ class CapabilityUpgradeTest {
         assertTrue("no bogus value may be typed", typed.none { it.text == "price: " })
     }
 
+    // --- capture -> summarise -> act: the cross-app {{name}} flow the prompt promises ---
+
+    @Test
+    fun summarizeTextSubstitutesACapturedValueIntoItsText() {
+        // The advertised flow ("read the message, then summarise it") passes the
+        // captured value to summarize_text's text field. Before this branch the
+        // placeholder reached the summariser literally, so the digest condensed the
+        // string "{{message}}" instead of the message.
+        val store = com.example.planning.PlanVariableStore()
+        assertTrue(store.set("message", "the group chat said the meeting moved to 5pm"))
+        val resolved = store.substitute(AgentAction.SummarizeText("summarise this: {{message}}"))
+            as AgentAction.SummarizeText
+        assertEquals("summarise this: the group chat said the meeting moved to 5pm", resolved.text)
+    }
+
+    @Test
+    fun capturedReadFeedsASummarizeStepAndItsDigestFeedsALaterStep() = kotlinx.coroutines.runBlocking {
+        // End-to-end capture -> summarise -> act: step 1 reads a message (captures
+        // {{message}}), step 2 summarises the captured message (captures {{summary}}),
+        // step 3 types the summary into another app. Each hop must carry the real value,
+        // never the literal placeholder.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.whatsapp", "Chat", 1, editable = true)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.ReadText -> ActionResult(
+                        true, "READ_TEXT", "read 40 chars",
+                        readText = "the group chat said the meeting moved to 5pm"
+                    )
+                    is AgentAction.SummarizeText -> ActionResult(
+                        true, "SUMMARY_OK", "meeting moved to 5pm",
+                        readText = "meeting moved to 5pm"
+                    )
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[
+                {"id":1,"seq":1,"desc":"Read the message","action":"read_text","params":{},"captures":["message"]},
+                {"id":2,"seq":2,"desc":"Summarise it","action":"summarize_text","params":{"text":"{{message}}"},"captures":["summary"]},
+                {"id":3,"seq":3,"desc":"Type the summary into Notes","action":"enter_text","params":{"text":"gist: {{summary}}"},"verify":"NONE"}
+            ]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("summarise that message and note it down", maxSteps = 6)
+
+        awaitTerminal(orchestrator)
+
+        val summarised = automation.executed.filterIsInstance<AgentAction.SummarizeText>()
+        assertEquals("the summarise step must receive the captured text, not the placeholder",
+            1, summarised.size)
+        assertEquals("the group chat said the meeting moved to 5pm", summarised.last().text)
+
+        val typed = automation.executed.filterIsInstance<AgentAction.TypeText>()
+        assertTrue("the digest never reached the later typing step", typed.isNotEmpty())
+        assertEquals("gist: meeting moved to 5pm", typed.last().text)
+    }
+
+    @Test
+    fun capturesAreAcceptedOnEveryTextProducingReadAction() {
+        // A captures name only makes sense on a step whose action returns text; the
+        // parser must accept it on the whole read family (read_text, read_page_content,
+        // read_notifications, read_device_status, summarize_text) and still reject it on
+        // an action that produces no text.
+        val cases = listOf(
+            "read_text" to """{"text":"x"}""",
+            "read_page_content" to """{}""",
+            "read_notifications" to """{}""",
+            "read_device_status" to """{}""",
+            "summarize_text" to """{"text":"condense me"}"""
+        )
+        for ((tool, params) in cases) {
+            val result = TaskPlanParser().parse(
+                """{"steps":[{"id":1,"seq":1,"desc":"read","action":"$tool","params":$params,"captures":["v"]}]}""",
+                "capture"
+            )
+            assertTrue("captures must be accepted on $tool, got $result", result is PlanParseResult.Success)
+            assertEquals(listOf("v"), (result as PlanParseResult.Success).plan.steps[0].captures)
+        }
+
+        val rejected = TaskPlanParser().parse(
+            """{"steps":[{"id":1,"seq":1,"desc":"tap","action":"tap_element","params":{"targetText":"x"},"captures":["v"]}]}""",
+            "capture"
+        )
+        assertTrue("captures must still be rejected on a text-less action, got $rejected", rejected is PlanParseResult.Invalid)
+    }
+
     @Test
     fun variableStoreTracksSourceFreshnessAndRefusesSecrets() {
         val store = com.example.planning.PlanVariableStore()

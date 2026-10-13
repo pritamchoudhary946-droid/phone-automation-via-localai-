@@ -1,3 +1,28 @@
+
+---
+
+## SESSION 41 (2026-10-13) - milestone: summarize_text capture support
+
+Status: DONE. `summarize_text` now participates in the 9.4 cross-app `{{name}}`
+variable flow.
+- `PlanVariableStore.substitute()` gained an `AgentAction.SummarizeText` branch, so a
+  value captured by an earlier read step ("read the message, then summarise it") reaches
+  the summariser instead of the literal placeholder.
+- `TaskPlanParser.producesReadableText()` now accepts `ReadNotifications` /
+  `ReadDeviceStatus` / `SummarizeText` alongside `ReadText` / `ReadPageContent`, so a
+  `captures` name is accepted on every action that returns `ActionResult.readText`, and
+  still rejected on a text-less action (a capture that could only ever be empty).
+- `PlannerPromptBuilder` advertises the full capture family (planner instructions + the
+  captures catalogue line) without naming the opt-in `read_notifications` / `speak`
+  tokens, preserving the 9.9/9.7 prompt-gating invariant.
+- Tests (CapabilityUpgradeTest): `summarizeTextSubstitutesACapturedValueIntoItsText`,
+  `capturedReadFeedsASummarizeStepAndItsDigestFeedsALaterStep` (end-to-end
+  capture -> summarise -> act), `capturesAreAcceptedOnEveryTextProducingReadAction`.
+- Validation: `./gradlew :app:testDebugUnitTest --no-daemon` -> BUILD SUCCESSFUL,
+  469 tests, 0 failures, 0 errors.
+- Next: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT); optional
+  lint gate.
+
 # 1. OBJECTIVE
 
 Upgrade the app (currently branded "OmniAgent", to be renamed "Jarvis") from a
