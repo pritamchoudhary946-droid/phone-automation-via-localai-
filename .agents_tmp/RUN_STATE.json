@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 38,
+  "sessions_done": 39,
   "session_cap": 48,
-  "current_milestone": "Capability: create_note (NoteController seam + AgentAction.Note(title?, content?). Dispatches the documented Intent.ACTION_CREATE_NOTE with EXTRA_TITLE/EXTRA_TEXT; a new NoteController/AndroidNoteController seam reports NOTE_DISPATCHED only after the intent was delivered, and NOTE_UNAVAILABLE/NOTE_PERMISSION/INVALID_NOTE/NOTE_ERROR otherwise - never a fake success. Wired through all seven action-vocabulary seams and self-evidencing like the other service-free intent-dispatch primitives. Distinct from add_calendar_event/add_contact; opens the notes editor for the user and never claims the note was saved.)",
+  "current_milestone": "Capability: summarize_text (AgentAction.SummarizeText(text, maxChars) + the shared NanoSummarizer -> the configured cloud LLM engine). Condenses a block of text (often a value an earlier read_text/read_page_content captured) to a short digest, resolved before the a11y gate like speak/create_note. The digest is carried as ActionResult.readText so it flows into a later step as a {{name}} variable and self-evidences the NONE-verified step; honest SUMMARY_UNAVAILABLE/SUMMARY_FAILED/INVALID_SUMMARY_INPUT otherwise - never a fabricated summary. Wired through all seven action-vocabulary seams + OmniAgentApplication.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -179,22 +179,28 @@
     "capability 2026-10-12 (session 38): new com.example.agent.NoteController seam + AndroidNoteController (dispatches Intent.ACTION_CREATE_NOTE with EXTRA_TITLE/EXTRA_TEXT). Reports NOTE_DISPATCHED only after the intent was delivered to a notes handler; ActivityNotFoundException -> NOTE_UNAVAILABLE, SecurityException -> NOTE_PERMISSION, blank title+content -> INVALID_NOTE, else NOTE_ERROR - never a fake success. Injected via the AndroidDeviceAutomation constructor and wired in OmniAgentApplication (noteController = AndroidNoteController(this)). Validation bounds MAX_NOTE_TITLE_CHARS 200 / MAX_NOTE_CONTENT_CHARS 2000.",
     "capability 2026-10-12 (session 38): AndroidManifest <queries> gains a CREATE_NOTE intent so Android 11+ package visibility resolves the notes handler.",
     "validation 2026-10-12 (session 38, toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64, ANDROID_HOME=/workspace/tools/android-sdk): SKIP_APK=1 bash .github/scripts/verify.sh -> VERIFY OK, 449 tests 0 failures 0 errors (440 baseline + 9 new create_note tests). ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced. Both gates green.",
-    "AGENTS.md 2026-10-12 (session 38): documented the create_note service-free primitive and added it to the service-backed self-evidencing list + the delivered-intent list (NOTE_DISPATCHED only after the ACTION_CREATE_NOTE intent was delivered; NOTE_UNAVAILABLE otherwise)."
+    "AGENTS.md 2026-10-12 (session 38): documented the create_note service-free primitive and added it to the service-backed self-evidencing list + the delivered-intent list (NOTE_DISPATCHED only after the ACTION_CREATE_NOTE intent was delivered; NOTE_UNAVAILABLE otherwise).",
+    "capability 2026-10-13 (session 39): new AgentAction.SummarizeText(text, maxChars=DEFAULT_SUMMARY_CHARS) + tool summarize_text ('summarise this page/thread/result'). Fills a section 2.1 capability gap: a multi-app chain like 'read the last message from X and summarise it' (read_text/read_page_content -> summarize_text) had no vocabulary. Implemented across all action-vocabulary seams: AgentAction (+getDisplayName), ToolRegistry (const, ToolDefinition, validateAction with MAX_SUMMARIZE_INPUT_CHARS 8000 / MIN 40 / MAX 1200), TaskPlanParser.mapAction + parseSummaryChars, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, AndroidDeviceAutomation.execute -> resolved before the a11y gate, and TaskPlanSerializer (toParams/toVerificationTarget/toolNameFor).",
+    "capability 2026-10-13 (session 39): the digest is carried as ActionResult.readText, so TaskOrchestrator.verifyAction treats a NONE-verified SummarizeText as satisfied by its non-empty digest (empty -> failure) and selfEvidencingToolSatisfied(...) counts a completed one as goal evidence - the same rule the reads use. Failure is never masked: a failed SummarizeText fails the run.",
+    "fix/refactor 2026-10-13 (session 39): NanoSummarizer gains promptFor(text, maxChars) + SYSTEM_INSTRUCTION + MAX_INPUT_CHARS, and ApiNanoSummarizer.summarize(...) now uses them, so the loop's digest and the memory/lessons digest ask the model byte-identically (input bound unified 4000 -> 8000).",
+    "capability 2026-10-13 (session 39): OmniAgentApplication now builds ONE shared ApiNanoSummarizer and passes it both to the orchestrator (memory digest) and to AndroidDeviceAutomation (summarize_text), so a summarise in the loop and a memory digest use the same engine/readiness.",
+    "regression tests 2026-10-13 (session 39, CapabilityUpgradeTest): summarizeTextExecutesWithoutAnAccessibilityService, summarizeTextRefusesHonestlyWhenUnwired, summarizeTextReportsFailureHonestlyWhenTheDigestIsEmpty, summarizeTextRefusesBlankInput, summarizeTextParserMapsTextAndLength, summarizeTextParserDefaultsTheLengthWhenAbsent, validationRejectsBlankOversizedAndOutOfRangeSummarize, summarizeTextSkillKeepsItsTextAndLengthOnReplay, promptAdvertisesSummarizeText, summarizeTextIsFastPathedWithoutTheModel, summarizeTextStepCompletesFromItsOwnDigest, summarizeTextFailureIsNotMaskedByTheSelfEvidencingRule.",
+    "validation 2026-10-13 (session 39): ./gradlew --no-daemon :app:testDebugUnitTest --tests com.example.CapabilityUpgradeTest -> BUILD SUCCESSFUL, 208 tests 0 failures 0 errors (10 new summarizeText tests + the 2 loop tests all passed).",
+    "AGENTS.md 2026-10-13: recorded the summarize_text action paragraph, added it to the Phase 9 self-evidencing service-backed list, and the unified prompt helper note."
   ],
   "in_progress": [],
   "next_items": [
-    "Capability backlog continues (see AGENTS.md action-vocabulary checklist). Remaining investigated gap: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
-    "4.3/5.10 (medium confidence): StuckLoopDetector double-advances the ProgressBudget - reconcile the two counters (keep MAX_REPLANS=1/MAX_EXPLORES=2).",
-    "Consider a lint gate (:app:lintDebug) - AGENTS notes a @Volatile lint crash workaround; not yet run this session."
+    "File/document picking (Intent.ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT) - the last read-heavy cross-app gap.",
+    "A capture->summarise->act end-to-end benchmark test (read_text captures -> summarize_text -> reply), wiring PlanVariableStore substitution into summarize_text's text param."
   ],
   "branch": "auto/jarvis-autonomy-20261012-2231",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "auto/jarvis-autonomy-20261012-2231",
-  "last_updated": "2026-10-12T22:45:00Z",
+  "last_run_id": "auto/jarvis-autonomy-20261013-0031",
+  "last_updated": "2026-10-13T00:31:45Z",
   "carryover_milestone": null,
-  "milestone_attempts": 1,
+  "milestone_attempts": 0,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": {

@@ -127,6 +127,10 @@ object TaskPlanSerializer {
             if (!title.isNullOrBlank()) put("title", title)
             if (!content.isNullOrBlank()) put("content", content)
         }
+        is AgentAction.SummarizeText -> JSONObject().apply {
+            put("text", text)
+            put("maxChars", maxChars)
+        }
         is AgentAction.SetTorch -> JSONObject().put("on", on)
         is AgentAction.Speak -> JSONObject().put("text", text)
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
@@ -237,6 +241,7 @@ object TaskPlanSerializer {
         is AgentAction.OpenSettings -> com.example.agent.ToolRegistry.TOOL_OPEN_SETTINGS
         is AgentAction.OpenCalendar -> com.example.agent.ToolRegistry.TOOL_OPEN_CALENDAR
         is AgentAction.Note -> com.example.agent.ToolRegistry.TOOL_CREATE_NOTE
+        is AgentAction.SummarizeText -> com.example.agent.ToolRegistry.TOOL_SUMMARIZE_TEXT
         is AgentAction.SetTorch -> com.example.agent.ToolRegistry.TOOL_SET_TORCH
         is AgentAction.Speak -> com.example.agent.ToolRegistry.TOOL_SPEAK
         is AgentAction.PlayMedia -> com.example.agent.ToolRegistry.TOOL_PLAY_MEDIA

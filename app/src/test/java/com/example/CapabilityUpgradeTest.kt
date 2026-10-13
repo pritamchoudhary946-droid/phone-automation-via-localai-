@@ -53,6 +53,7 @@ import com.example.agent.HybridStepExecutor
 import com.example.agent.MediaControlResult
 import com.example.agent.MediaController
 import com.example.agent.MediaTransport
+import com.example.model.NanoSummarizer
 import com.example.agent.RingerMode
 import com.example.agent.RingerModeController
 import com.example.agent.RingerModeResult
@@ -2444,6 +2445,217 @@ class CapabilityUpgradeTest {
         assertTrue("a failed note dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- summarize_text: the "summarise this page/message/thread" primitive ---
+
+    @Test
+    fun summarizeTextExecutesWithoutAnAccessibilityService() {
+        // summarize_text drives the configured summarizer, not the accessibility tree,
+        // so like speak/read_notifications it must resolve before the a11y gate.
+        val summarizer = RecordingSummarizer(digest = "The gist of the page.")
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            nanoSummarizer = summarizer
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SummarizeText("long text ".repeat(50), maxChars = 120))
+        }
+        assertTrue("a summary must be produced without a bound a11y service: $result", result.success)
+        assertEquals("SUMMARY_OK", result.method)
+        assertEquals("the digest must be the step's captured text", "The gist of the page.", result.readText)
+        assertEquals("the summarizer must be asked exactly once", 1, summarizer.calls.size)
+        assertEquals(120, summarizer.calls[0].second)
+    }
+
+    @Test
+    fun summarizeTextRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            nanoSummarizer = com.example.model.UnavailableNanoSummarizer
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SummarizeText("hello"))
+        }
+        assertFalse("an unwired summarizer must not fabricate a summary", result.success)
+        assertEquals("SUMMARY_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun summarizeTextReportsFailureHonestlyWhenTheDigestIsEmpty() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            nanoSummarizer = RecordingSummarizer(digest = "   ")
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SummarizeText("hello"))
+        }
+        assertFalse("a blank digest must not be reported as success", result.success)
+        assertEquals("SUMMARY_FAILED", result.method)
+    }
+
+    @Test
+    fun summarizeTextRefusesBlankInput() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            nanoSummarizer = RecordingSummarizer(digest = "x")
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SummarizeText("   "))
+        }
+        assertFalse("blank input must not reach the summarizer", result.success)
+        assertEquals("INVALID_SUMMARY_INPUT", result.method)
+    }
+
+    @Test
+    fun summarizeTextParserMapsTextAndLength() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Summarise the page","action":"summarize_text","params":{"text":"the whole page","maxChars":150},"verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "summarise this page")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val action = (result as PlanParseResult.Success).plan.steps[0].action
+        assertEquals(AgentAction.SummarizeText("the whole page", 150), action)
+    }
+
+    @Test
+    fun summarizeTextParserDefaultsTheLengthWhenAbsent() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Summarise","action":"summarize_text","params":{"text":"body"},"verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "summarise that")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val action = (result as PlanParseResult.Success).plan.steps[0].action
+        assertEquals(AgentAction.SummarizeText("body", AgentAction.SummarizeText.DEFAULT_SUMMARY_CHARS), action)
+    }
+
+    @Test
+    fun validationRejectsBlankOversizedAndOutOfRangeSummarize() {
+        val registry = ToolRegistry()
+        assertTrue(
+            "blank text must be rejected",
+            registry.validateAction(AgentAction.SummarizeText(" ")) is ToolValidationResult.Invalid
+        )
+        assertTrue(
+            "an over-long input must be rejected",
+            registry.validateAction(
+                AgentAction.SummarizeText("x".repeat(ToolRegistry.MAX_SUMMARIZE_INPUT_CHARS + 1))
+            ) is ToolValidationResult.Invalid
+        )
+        assertTrue(
+            "an out-of-range summary length must be rejected",
+            registry.validateAction(AgentAction.SummarizeText("ok", maxChars = 5)) is ToolValidationResult.Invalid
+        )
+        assertTrue(
+            "a reasonable request is valid",
+            registry.validateAction(AgentAction.SummarizeText("ok", maxChars = 300)) is ToolValidationResult.Valid
+        )
+    }
+
+    @Test
+    fun summarizeTextSkillKeepsItsTextAndLengthOnReplay() {
+        val action = AgentAction.SummarizeText("the captured message", maxChars = 220)
+        val params = com.example.planning.TaskPlanSerializer.toJson(
+            com.example.planning.TaskPlan(
+                goal = "summarise", fromModel = true,
+                steps = listOf(
+                    com.example.planning.PlanStep(
+                        id = 1, sequence = 1, description = "summarise",
+                        action = action, rawActionName = "summarize_text",
+                        expectedPostcondition = "summary", verification = com.example.planning.VerificationMethod.NONE
+                    )
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(params, goalOverride = "summarise")
+        assertTrue("a saved summarize skill must be replayable", restored != null)
+        assertEquals(
+            "text and maxChars must survive a skill round-trip (toParams)",
+            action, restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun promptAdvertisesSummarizeText() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_SUMMARIZE_TEXT}",
+            actions.contains(ToolRegistry.TOOL_SUMMARIZE_TEXT)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "summarise this page",
+                desiredOutcome = "a short digest",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing summarize_text", prompt.contains("summarize_text"))
+    }
+
+    @Test
+    fun summarizeTextIsFastPathedWithoutTheModel() {
+        val executor = HybridStepExecutor(AppDirectory(context))
+        val obs = observation("com.android.settings", "Settings list", 5)
+        val step = planStep(1, AgentAction.SummarizeText("some text"), "summarize_text")
+        val decision = executor.decide(listOf(step), 0, obs, nudgeUsed = false)
+        assertTrue("summarize_text must be deterministic, got $decision", decision is FastPathDecision.Execute)
+    }
+
+    @Test
+    fun summarizeTextStepCompletesFromItsOwnDigest() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SummarizeText ->
+                        ActionResult(true, "SUMMARY_OK", "The gist of it.", readText = "The gist of it.")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Summarise","action":"summarize_text","params":{"text":"long text"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("summarise that", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("summarize_text must complete from its own digest, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.SummarizeText })
+    }
+
+    @Test
+    fun summarizeTextFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SummarizeText -> ActionResult(false, "SUMMARY_UNAVAILABLE", "No summarizer is configured")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Summarise","action":"summarize_text","params":{"text":"long text"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("summarise that", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed summarise must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- set_torch: the "turn on the flashlight" primitive ---
 
     @Test
@@ -4164,6 +4376,19 @@ class CapabilityUpgradeTest {
             calls += title to content
             return result ?: NoteResult(true, "NOTE_DISPATCHED", "Opening notes to create the note")
         }
+    }
+
+    private class RecordingSummarizer(
+        private val digest: String? = "summary",
+        private val available: Boolean = true
+    ) : NanoSummarizer {
+        val calls = mutableListOf<Pair<String, Int>>()
+        override fun isAvailable(): Boolean = available
+        override suspend fun summarize(text: String, maxChars: Int): String? {
+            calls += text to maxChars
+            return digest
+        }
+        override val backendLabel: String = "TEST_SUMMARY"
     }
 
     private class RecordingSpeakController(

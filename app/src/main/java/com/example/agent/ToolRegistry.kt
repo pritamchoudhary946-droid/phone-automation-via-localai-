@@ -61,6 +61,7 @@ open class ToolRegistry {
         const val TOOL_OPEN_SETTINGS = "open_settings"
         const val TOOL_OPEN_CALENDAR = "open_calendar"
         const val TOOL_CREATE_NOTE = "create_note"
+        const val TOOL_SUMMARIZE_TEXT = "summarize_text"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
@@ -80,6 +81,11 @@ open class ToolRegistry {
         /** Upper bound on a note title/body so a runaway model value cannot flood the notes editor. */
         const val MAX_NOTE_TITLE_CHARS = 200
         const val MAX_NOTE_CONTENT_CHARS = 2000
+        /** Longest text a single summarize_text step may condense, to bound summarizer work. */
+        const val MAX_SUMMARIZE_INPUT_CHARS = 8000
+        /** Bounds on the requested summary length so a runaway value cannot distort the digest. */
+        const val MIN_SUMMARY_CHARS = 40
+        const val MAX_SUMMARY_CHARS = 1200
         /** Longest forward day offset a calendar event may be scheduled for. */
         const val MAX_EVENT_DAY_OFFSET = 30
 
@@ -315,6 +321,12 @@ open class ToolRegistry {
             description = "Opens the notes app to create a note. Use for 'make a note that the wifi password is 1234', 'note down to call Sam tomorrow', 'create a note titled Shopping'. Provide a title and/or the note text. No screen read or tap can create a note reliably",
             requiredParameters = emptyList(),
             optionalParameters = listOf("title", "content", "text", "body", "message", "name")
+        ),
+        TOOL_SUMMARIZE_TEXT to ToolDefinition(
+            name = TOOL_SUMMARIZE_TEXT,
+            description = "Condenses a block of text to a short digest. Use for 'summarise this page', 'give me the gist of this thread', 'summarise that message'. Provide the text to condense (often the value captured by an earlier read_text/read_page_content step) and optionally a maxChars length. It returns the summary as the step's result and never fabricates one when the summarizer is unavailable",
+            requiredParameters = listOf("text"),
+            optionalParameters = listOf("maxChars", "max_chars", "length", "chars", "content", "value")
         ),
         TOOL_READ_NOTIFICATIONS to ToolDefinition(
             name = TOOL_READ_NOTIFICATIONS,
@@ -667,6 +679,19 @@ open class ToolRegistry {
                         ToolValidationResult.Invalid("create_note title is too long (max $MAX_NOTE_TITLE_CHARS chars)")
                     (action.content?.length ?: 0) > MAX_NOTE_CONTENT_CHARS ->
                         ToolValidationResult.Invalid("create_note content is too long (max $MAX_NOTE_CONTENT_CHARS chars)")
+                    else -> ToolValidationResult.Valid
+                }
+            }
+            is AgentAction.SummarizeText -> {
+                when {
+                    action.text.isBlank() ->
+                        ToolValidationResult.Invalid("summarize_text requires non-blank text")
+                    action.text.length > MAX_SUMMARIZE_INPUT_CHARS ->
+                        ToolValidationResult.Invalid("summarize_text input is too long (max $MAX_SUMMARIZE_INPUT_CHARS chars)")
+                    action.maxChars < MIN_SUMMARY_CHARS || action.maxChars > MAX_SUMMARY_CHARS ->
+                        ToolValidationResult.Invalid(
+                            "summarize_text maxChars must be between $MIN_SUMMARY_CHARS and $MAX_SUMMARY_CHARS"
+                        )
                     else -> ToolValidationResult.Valid
                 }
             }

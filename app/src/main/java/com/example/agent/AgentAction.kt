@@ -313,6 +313,23 @@ sealed class AgentAction {
      * (section 3.5).
      */
     data class Note(val title: String? = null, val content: String? = null) : AgentAction()
+    /**
+     * Condenses [text] to a short [maxChars]-bounded digest through the configured
+     * cloud summarizer (the same engine used for the planning memory/lessons digests).
+     * This is the "summarise this page/thread/result" primitive: a multi-app chain
+     * like "read the last message from X and summarise it" reads the screen with
+     * [ReadText]/[ReadPageContent], then feeds the captured text here and receives a
+     * short digest back in the loop - no screen reflects a summarisation, so it is
+     * resolved before the accessibility-service gate like the other service-backed
+     * actions. The digest is carried as [ActionResult.readText] and is the step's own
+     * evidence. When the summarizer is unavailable (engine not ready) it returns an
+     * honest failure rather than fabricating a summary.
+     */
+    data class SummarizeText(val text: String, val maxChars: Int = DEFAULT_SUMMARY_CHARS) : AgentAction() {
+        companion object {
+            const val DEFAULT_SUMMARY_CHARS = 400
+        }
+    }
     object ReadNotifications : AgentAction()
     /**
      * Reads the device's own status (battery level/charging, screen on/off, ringer
@@ -394,6 +411,7 @@ sealed class AgentAction {
             is OpenSettings -> "Open ${panel} settings"
             is OpenCalendar -> "Open the calendar"
             is Note -> title?.takeIf { it.isNotBlank() }?.let { "Create note '$it'" } ?: "Create a note"
+            is SummarizeText -> "Summarise ${text.length} chars of text"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"
             is OpenNotifications -> "Open notification shade"

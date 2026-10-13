@@ -324,6 +324,10 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
                 title = str(params, "title", "name", "subject").ifBlank { null },
                 content = str(params, "content", "text", "body", "message", "note").ifBlank { null }
             )
+            ToolRegistry.TOOL_SUMMARIZE_TEXT -> AgentAction.SummarizeText(
+                text = str(params, "text", "content", "value", "body", "message"),
+                maxChars = parseSummaryChars(params)
+            )
             ToolRegistry.TOOL_READ_NOTIFICATIONS -> AgentAction.ReadNotifications
             ToolRegistry.TOOL_READ_DEVICE_STATUS -> AgentAction.ReadDeviceStatus
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
@@ -500,6 +504,20 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             }
         }
         return true
+    }
+
+    /**
+     * Resolves a summarize_text requested digest length. Accepts `maxChars` (or
+     * `max_chars`/`length`/`chars`); a missing value falls back to the action default.
+     * The tool boundary still clamps/rejects an out-of-range value, so a bad number
+     * cannot reach the summarizer.
+     */
+    private fun parseSummaryChars(params: JSONObject): Int {
+        for (key in listOf("maxChars", "max_chars", "length", "chars")) {
+            val value = params.optInt(key, Int.MIN_VALUE)
+            if (value != Int.MIN_VALUE) return value
+        }
+        return AgentAction.SummarizeText.DEFAULT_SUMMARY_CHARS
     }
 
     private fun parseEventStartMinute(params: JSONObject): Int {

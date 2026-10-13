@@ -16,6 +16,23 @@ interface NanoSummarizer {
     suspend fun summarize(text: String, maxChars: Int = 280): String?
 
     val backendLabel: String
+
+    companion object {
+        /** Largest input handed to a summarizer, so a huge page cannot swamp the request. */
+        const val MAX_INPUT_CHARS = 8000
+
+        /**
+         * The one summarisation prompt both the real [ApiNanoSummarizer] and the offline
+         * `summarize_text` executor (which drives the engine directly) use, so a digest
+         * produced in the agent loop matches a digest produced by [summarize] exactly.
+         */
+        fun promptFor(text: String, maxChars: Int): String =
+            "Summarize the following in at most ${maxChars.coerceAtLeast(40)} characters, " +
+                "one plain sentence, no preamble:\n${text.take(MAX_INPUT_CHARS)}"
+
+        /** The system instruction the summarisation request carries. */
+        const val SYSTEM_INSTRUCTION = "You are a terse summarizer."
+    }
 }
 
 /**
@@ -46,12 +63,10 @@ class ApiNanoSummarizer(
     override suspend fun summarize(text: String, maxChars: Int): String? {
         if (!ready()) return null
         if (text.isBlank()) return null
-        val bounded = text.take(4000)
         val out = try {
             generate(
-                "Summarize the following in at most ${maxChars.coerceAtLeast(40)} characters, " +
-                    "one plain sentence, no preamble:\n$bounded",
-                "You are a terse summarizer.",
+                NanoSummarizer.promptFor(text, maxChars),
+                NanoSummarizer.SYSTEM_INSTRUCTION,
                 160
             )?.trim()
         } catch (e: Exception) {

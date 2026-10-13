@@ -119,6 +119,14 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
         completionNotifier = com.example.notifications.CompletionNotifier(this)
         planner.fallbackExplicit = settings.basicFallbackExplicit
 
+        // One summarizer shared by the agent loop's summarize_text action and the
+        // memory/lessons digest, both delegating to the configured LLM engine. A single
+        // instance keeps the two paths identical.
+        val nanoSummarizer = com.example.model.ApiNanoSummarizer(
+            generate = { prompt, system, max -> inferenceEngine.generate(prompt, system, max) },
+            ready = { inferenceEngine.isReady() }
+        )
+
         // The gateway is exposed to the loop as an explicit web tool (web_search /
         // read_url); the configured LLM API remains the primary planner.
         orchestrator = TaskOrchestrator(
@@ -210,7 +218,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // like the contact/calendar inserts (no UI tap creates a note reliably on
                 // an arbitrary screen). It opens the notes editor for the user and never
                 // claims the note was saved.
-                noteController = com.example.agent.AndroidNoteController(this)
+                noteController = com.example.agent.AndroidNoteController(this),
+                // Text-summarisation primitive: condenses a captured block of text through
+                // the shared configured summarizer, service-free like the speak/read
+                // primitives (no screen reflects a summarisation). An unconfigured engine
+                // is an honest SUMMARY_UNAVAILABLE, never a fabricated digest.
+                nanoSummarizer = nanoSummarizer
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
@@ -220,10 +233,7 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             completionNotifier = completionNotifier,
             // A clean, fully-verified run is saved as a re-runnable local skill.
             autoSaveSkills = true,
-            nanoSummarizer = com.example.model.ApiNanoSummarizer(
-                generate = { prompt, system, max -> inferenceEngine.generate(prompt, system, max) },
-                ready = { inferenceEngine.isReady() }
-            ),
+            nanoSummarizer = nanoSummarizer,
             speechOutput = speechOutput,
             // 9.9: keep the advertised catalogue in step with the executor gate.
             notificationTriageEnabled = { settings.notificationTriageEnabled },

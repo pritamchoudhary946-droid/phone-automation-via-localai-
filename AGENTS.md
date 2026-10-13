@@ -300,6 +300,29 @@ and never claims the note was created (`NOTE_UNAVAILABLE` / `NOTE_PERMISSION` /
 `INVALID_NOTE` / `NOTE_ERROR` otherwise). The prompt must never let the model claim a
 note was saved.
 
+`summarize_text` (`AgentAction.SummarizeText(text, maxChars)` + the shared
+`NanoSummarizer` -> the configured cloud LLM engine, the same one behind the
+planning memory/lessons digest) follows the same rule: a summarisation is computed
+by a remote model, not reflected by any screen, so it is resolved before the a11y
+gate and condenses a block of text (often the value an earlier
+`read_text`/`read_page_content` step captured) to a short digest. It carries `text`
+(bounded by `ToolRegistry.MAX_SUMMARIZE_INPUT_CHARS` 8000) and `maxChars`
+(bounded `MIN_SUMMARY_CHARS` 40 / `MAX_SUMMARY_CHARS` 1200; the parser's
+`parseSummaryChars(...)` accepts `maxChars`/`max_chars`/`length`/`chars` and
+defaults to `DEFAULT_SUMMARY_CHARS` 400). The digest is carried as
+`ActionResult.readText`, so it flows into a later step as a `{{name}}` variable
+(cross-app data passing) and is the step's own evidence - `verifyAction` treats a
+NONE-verified `SummarizeText` as satisfied by its non-empty digest (empty ->
+failure) and `selfEvidencingToolSatisfied(...)` counts a completed one as goal
+evidence, exactly like the reads. It is honest about failure: blank input is
+`INVALID_SUMMARY_INPUT` (validation rejects it too), an unconfigured engine
+(`isAvailable()` false / `UnavailableNanoSummarizer`) is `SUMMARY_UNAVAILABLE`, and
+a blank generation is `SUMMARY_FAILED` - it never fabricates a summary. It is
+injectable via the `AndroidDeviceAutomation` constructor and wired in
+`OmniAgentApplication`. `NanoSummarizer.promptFor(...)`/`SYSTEM_INSTRUCTION` keep the
+loop's digest and `ApiNanoSummarizer.summarize(...)` byte-identical in what they ask
+the model. The prompt must never let the model claim a summary it did not receive.
+
 `set_torch` (`AgentAction.SetTorch` + `TorchController` -> `CameraManager.setTorchMode`
 on the back camera with a flash unit) follows the same rule: the torch is a
 camera-hardware setting no accessibility-tree read or UI tap toggles reliably on an
@@ -572,7 +595,7 @@ output is off, read live per call by `AgentPlanner`.
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
   `open_app_info`, `open_settings`, `set_torch`,
-  `speak`, `open_calendar`, `create_note` and
+  `speak`, `open_calendar`, `create_note`, `summarize_text` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
@@ -617,7 +640,10 @@ output is off, read live per call by `AgentPlanner`.
   `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
   confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the
-  utterance (`TTS_UNAVAILABLE` / `SPEAK_DISABLED` otherwise). Never widen
+  utterance (`TTS_UNAVAILABLE` / `SPEAK_DISABLED` otherwise), and `summarize_text`
+  reports `SUMMARY_OK` only with a non-blank digest from the configured summarizer
+  (`SUMMARY_UNAVAILABLE` when the engine is not ready, `SUMMARY_FAILED` on a blank
+  generation, `INVALID_SUMMARY_INPUT` on blank input). Never widen
   this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is
