@@ -1,5 +1,48 @@
 ---
 
+## SESSION 51 (2026-10-13) - milestone: Do-Not-Disturb device control (`set_device_control` control=dnd)
+
+Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261013-1931`).
+
+New capability: a scheduled/condition automation (or a direct instruction) can now put the
+phone into a named Do-Not-Disturb state - a real system setting Jarvis could not previously
+change. It generalises the existing `set_device_control` primitive (controls: torch,
+ringer_mode, **dnd**) rather than adding a bespoke action, exactly as the architecture rule
+requires: a new control is a mapping, not a new tool.
+
+- New `DndController` + `AndroidDndController` over the documented
+  `NotificationManager.setInterruptionFilter(...)`. `DndMode` is a *closed* enum mapping
+  each name (off/priority/alarms/none) to its real `INTERRUPTION_FILTER_*` constant, so an
+  invalid mode can never index the platform incorrectly. `DndMode.fromKey(...)` accepts the
+  natural aliases ("silent"/"total silence" -> none, "priority_only", "alarms_only", ...).
+- Wired into `DeviceControl.resolve(...)` as `DeviceControlOp.Dnd` (the single truth for the
+  accepted vocabulary) and into the executor's `SetDeviceControl` dispatch. Resolved
+  *before* the a11y-service gate (system-service backed, like torch/ringer). Injectable via
+  the `AndroidDeviceAutomation` constructor; wired in `OmniAgentApplication`.
+- Honest verification (never a fake success): the controller checks
+  `isNotificationPolicyAccessGranted` first (clear `DND_PERMISSION` instead of a bare
+  SecurityException), reads `currentInterruptionFilter` back, and reports `DND_MODE` only on
+  a confirmed change, `DND_UNCHANGED` when the device ignored the request, `DND_UNAVAILABLE`
+  when the notification service is absent. A `DND_UNCHANGED`/`DND_PERMISSION` result fails
+  the step (self-evidencing rule accepts only a *successful* result).
+- No new action class, so no `AgentAction`/`TaskPlanParser`/`PlannerPromptBuilder`
+  `ACTION_CATALOG` tool-schema change was needed beyond documenting `dnd` as an accepted
+  `control` value; `ToolRegistry` validation already rejects any (control,value) pair
+  `DeviceControl.resolve` returns null for.
+
+Validation (toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64,
+ANDROID_HOME=/opt/android-sdk): targeted `CapabilityUpgradeTest` -> 277 tests 0 failures
+(7 DND tests pass: resolver aliases, reaches-controller, unwired-refuses-honestly,
+unchanged-is-failure, permission-is-honest, skill-replay-keeps-control, validation).
+Full pre-merge gate `bash .github/scripts/verify.sh` -> VERIFY OK, 530 tests 0 failures 0
+errors 0 skipped, `app-debug.apk` produced (66 MB).
+
+Remaining: further DeviceControl-backed controls as mapping-only additions (airplane-mode);
+no blockers.
+
+---
+
+
 ## SESSION 49 (2026-10-13) - milestone: power-menu capability (`power_dialog`) + honest power-state verification
 
 Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261013-1531`).
