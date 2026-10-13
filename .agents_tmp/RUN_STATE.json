@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 39,
+  "sessions_done": 40,
   "session_cap": 48,
-  "current_milestone": "Capability: open_calendar dayOffset. AgentAction.OpenCalendar(dayOffset) + CalendarViewer.openCalendar(nowMillis, dayOffset) so 'show my calendar for tomorrow' opens the chosen day, not always today. Offset resolved by the existing parseEventDayOffset, bounded by ToolRegistry validation (+/-MAX_EVENT_DAY_OFFSET), carried through parser/serializer(toParams)/prompt catalogue, and rendered by AndroidCalendarViewer.dayStart (pure). Honest delivery reporting unchanged (CALENDAR_OPENED only after the time-URI intent was delivered; CALENDAR_UNAVAILABLE/CALENDAR_PERMISSION otherwise).",
+  "current_milestone": "Capability: open_calendar dayOffset (MERGED #75). open_calendar can now open the calendar at a chosen day: 0=today, 1=tomorrow, negative=past. AgentAction.OpenCalendar is a data class (dayOffset); CalendarViewer.openCalendar(nowMillis, dayOffset); AndroidCalendarViewer.dayStart(nowMillis, zone, dayOffset) is a pure resolver to the chosen local midnight; parseEventDayOffset reused; ToolRegistry bounds it to +/-MAX_EVENT_DAY_OFFSET; parser/serializer(toParams)/prompt catalogue carry it; honest delivery reporting unchanged.",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -195,34 +195,34 @@
   "next_items": [
     "File/document picking (Intent.ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT) - the last read-heavy cross-app gap.",
     "A capture->summarise->act end-to-end benchmark test (read_text captures -> summarize_text -> reply), wiring PlanVariableStore substitution into summarize_text's text param.",
-    "Continue capability backlog (see AGENTS.md action-vocabulary checklist). Remaining investigated gap: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT). Consider a lint gate (:app:lintDebug)."
+    "Consider a lint gate (:app:lintDebug)."
   ],
-  "branch": "auto/jarvis-autonomy-20261013-0144",
+  "branch": "auto/jarvis-autonomy-20261013-0152",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "auto/jarvis-autonomy-20261013-0144",
-  "last_updated": "2026-10-13T01:45:00Z",
+  "last_run_id": "auto/jarvis-autonomy-20261013-0152",
+  "last_updated": "2026-10-13T01:55:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": {
-    "summary": "Enhanced open_calendar with a dayOffset so Jarvis can open the calendar at a chosen day (0=today, 1=tomorrow, negative=past), not just today. AgentAction.OpenCalendar(dayOffset), CalendarViewer.openCalendar(nowMillis, dayOffset), a pure AndroidCalendarViewer.dayStart resolver, parser/serializer/prompt/validation wiring, and 5 new tests.",
-    "evidence_reviewed": "RUN_STATE.json (create_note done, merged as PR #73); AGENTS.md open_calendar + self-evidencing invariants; AgentAction.OpenCalendar object; CalendarViewer/AndroidCalendarViewer; DeviceAutomation service-free OpenCalendar branch; TaskPlanParser.parseEventDayOffset + mapAction; TaskPlanSerializer toParams; PlannerPromptBuilder ACTION_CATALOG; ToolRegistry validateAction; CapabilityUpgradeTest calendar + skill-replay cases.",
-    "findings": "Section 2.2 flexibility gap: open_calendar ignored the day, so 'show my calendar for tomorrow' opened today. The day-resolution machinery (parseEventDayOffset) already existed for add_calendar_event; reusing it is the smallest complete generalisation and closes the gap without a bespoke rule.",
-    "milestone_implemented": "open_calendar dayOffset: data-class action + viewer signature + pure dayStart + seven-seam wiring (action, registry validation, parser, serializer, prompt catalogue, executor, viewer) and getDisplayName.",
-    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 466 tests 0 failures 0 errors on the rebased tree (create_note + summarize_text + 5 new). APK build pending as a final gate.",
-    "remaining_work": "File/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
-    "honesty": "dayStart is pure and unit-tested; the parser/validation/serializer paths are unit-tested. Real-device validation that the calendar app opens on the chosen day was NOT performed (unit gate only). CALENDAR_OPENED still means only that the time-URI intent was delivered - never that the day was rendered. dayStart uses TimeZone.getDefault() at dispatch; the unit test uses UTC for determinism."
+    "summary": "Continuation run: finished the carried-over open_calendar dayOffset milestone. main had advanced (create_note #73, summarize_text #74), so the open_calendar branch was rebased onto origin/main, the .agents_tmp/RUN_STATE.json conflict was resolved by layering the open_calendar milestone onto main's summarize_text/carry-over state, and the full unit suite was re-run on the combined tree (466 tests, 0 failures). Force-pushed the rebased branch, merged PR #75 (squash) and deleted the branch. This small follow-up PR records the run completion + next items on main.",
+    "evidence_reviewed": "origin/main db7d01d -> 086c7a3 (summarize_text #74); RUN_STATE.json conflict markers; the merged #75 diff (AgentAction/CalendarViewer/DeviceAutomation/ToolRegistry/TaskPlanParser/TaskPlanSerializer/PlannerPromptBuilder/AGENTS.md/CapabilityUpgradeTest.kt); the Gradle unit-test XML results.",
+    "findings": "The open_calendar dayOffset capability (section 2.1: calendar day navigation) was fully implemented and tested but blocked by a rebase conflict, not by a defect. No new capability gap surfaced this run beyond the existing backlog (file/document picking; capture->summarise->act benchmark).",
+    "milestone_implemented": "Carry-over completion of open_calendar dayOffset: rebased onto main, resolved state conflict, validated the combined tree, merged #75.",
+    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 466 tests 0 failures 0 errors on the rebased tree (create_note + summarize_text + 5 open_calendar dayOffset tests). The debug-APK build (assembleDebug) had succeeded earlier in this milestone's original run.",
+    "remaining_work": "Next milestones: file/document picking (ACTION_GET_CONTENT/ACTION_OPEN_DOCUMENT); a capture->summarise->act benchmark test; a lint gate.",
+    "honesty": "Unit tests were actually executed and reported 466/0/0. The open_calendar dayOffset APK build was verified before the rebase; the post-rebase APK build was NOT re-run (unit suite only). Real-device validation of opening the calendar at a chosen day was not performed in this sandbox."
   },
   "report": {
-    "summary": "Enhanced open_calendar with a dayOffset so Jarvis can open the calendar at a chosen day (0=today, 1=tomorrow, negative=past), not just today. AgentAction.OpenCalendar(dayOffset), CalendarViewer.openCalendar(nowMillis, dayOffset), a pure AndroidCalendarViewer.dayStart resolver, parser/serializer/prompt/validation wiring, and 5 new tests.",
-    "evidence_reviewed": "RUN_STATE.json (create_note done, merged as PR #73); AGENTS.md open_calendar + self-evidencing invariants; AgentAction.OpenCalendar object; CalendarViewer/AndroidCalendarViewer; DeviceAutomation service-free OpenCalendar branch; TaskPlanParser.parseEventDayOffset + mapAction; TaskPlanSerializer toParams; PlannerPromptBuilder ACTION_CATALOG; ToolRegistry validateAction; CapabilityUpgradeTest calendar + skill-replay cases.",
-    "findings": "Section 2.2 flexibility gap: open_calendar ignored the day, so 'show my calendar for tomorrow' opened today. The day-resolution machinery (parseEventDayOffset) already existed for add_calendar_event; reusing it is the smallest complete generalisation and closes the gap without a bespoke rule.",
-    "milestone_implemented": "open_calendar dayOffset: data-class action + viewer signature + pure dayStart + seven-seam wiring (action, registry validation, parser, serializer, prompt catalogue, executor, viewer) and getDisplayName.",
-    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 466 tests 0 failures 0 errors on the rebased tree (create_note + summarize_text + 5 new). APK build pending as a final gate.",
-    "remaining_work": "File/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
-    "honesty": "dayStart is pure and unit-tested; the parser/validation/serializer paths are unit-tested. Real-device validation that the calendar app opens on the chosen day was NOT performed (unit gate only). CALENDAR_OPENED still means only that the time-URI intent was delivered - never that the day was rendered. dayStart uses TimeZone.getDefault() at dispatch; the unit test uses UTC for determinism."
+    "summary": "Continuation run: finished the carried-over open_calendar dayOffset milestone. main had advanced (create_note #73, summarize_text #74), so the open_calendar branch was rebased onto origin/main, the .agents_tmp/RUN_STATE.json conflict was resolved by layering the open_calendar milestone onto main's summarize_text/carry-over state, and the full unit suite was re-run on the combined tree (466 tests, 0 failures). Force-pushed the rebased branch, merged PR #75 (squash) and deleted the branch. This small follow-up PR records the run completion + next items on main.",
+    "evidence_reviewed": "origin/main db7d01d -> 086c7a3 (summarize_text #74); RUN_STATE.json conflict markers; the merged #75 diff (AgentAction/CalendarViewer/DeviceAutomation/ToolRegistry/TaskPlanParser/TaskPlanSerializer/PlannerPromptBuilder/AGENTS.md/CapabilityUpgradeTest.kt); the Gradle unit-test XML results.",
+    "findings": "The open_calendar dayOffset capability (section 2.1: calendar day navigation) was fully implemented and tested but blocked by a rebase conflict, not by a defect. No new capability gap surfaced this run beyond the existing backlog (file/document picking; capture->summarise->act benchmark).",
+    "milestone_implemented": "Carry-over completion of open_calendar dayOffset: rebased onto main, resolved state conflict, validated the combined tree, merged #75.",
+    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 466 tests 0 failures 0 errors on the rebased tree (create_note + summarize_text + 5 open_calendar dayOffset tests). The debug-APK build (assembleDebug) had succeeded earlier in this milestone's original run.",
+    "remaining_work": "Next milestones: file/document picking (ACTION_GET_CONTENT/ACTION_OPEN_DOCUMENT); a capture->summarise->act benchmark test; a lint gate.",
+    "honesty": "Unit tests were actually executed and reported 466/0/0. The open_calendar dayOffset APK build was verified before the rebase; the post-rebase APK build was NOT re-run (unit suite only). Real-device validation of opening the calendar at a chosen day was not performed in this sandbox."
   }
 }
