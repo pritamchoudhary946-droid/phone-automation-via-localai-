@@ -41,6 +41,17 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
 
+      - name: Configure Firebase (optional)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            echo "Firebase config loaded from GitHub Actions secret."
+          else
+            echo "GOOGLE_SERVICES_JSON is not set; Google sign-in will show setup guidance."
+          fi
+
       # --no-daemon keeps the run clean: the Gradle daemon's KSP/IntelliJ helper
       # thread can emit a harmless "ApplicationManager.getApplication() is null"
       # warning after the build; no daemon means it exits instead of lingering.
@@ -63,6 +74,15 @@ jobs:
           fi
           echo "APK successfully found at app/build/outputs/apk/debug/app-debug.apk"
           ls -lh app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Report APK signing certificate (for Firebase SHA-1 setup)
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "apksigner not found in Android SDK build-tools."
+            exit 1
+          fi
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v6
