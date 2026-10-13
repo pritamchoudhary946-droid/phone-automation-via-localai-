@@ -60,6 +60,8 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+        GoogleAccountCard()
+
         ToggleRow(
             title = "Voice output",
             subtitle = "Speak task status aloud in your language",
