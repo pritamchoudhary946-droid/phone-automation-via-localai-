@@ -1,8 +1,8 @@
 {
   "project_done": false,
-  "sessions_done": 46,
+  "sessions_done": 47,
   "session_cap": 48,
-  "current_milestone": "Capability: ringer_mode as a second backed device control. DeviceControl generalised to a typed DeviceControlOp (Torch/RingerMode); set_device_control now backs ringer_mode (silent/vibrate/normal) via the existing RingerModeController read-back, resolved before the a11y gate, honestly (RINGER_UNAVAILABLE when unwired, UNSUPPORTED_DEVICE_CONTROL for an unknown control).",
+  "current_milestone": "Capability: dictate_note - the \"take a voice note\" primitive. AgentAction.DictateNote(title?) + tool dictate_note dispatches Intent.ACTION_CREATE_NOTE with only the optional EXTRA_TITLE (no body) so the notes app opens ready for the user to speak; resolved before the a11y gate, honest delivery-only result NOTE_DICTATION_OPENED (NOTE_UNAVAILABLE/NOTE_PERMISSION/NOTE_ERROR otherwise), self-evidencing like create_note. Wired across AgentAction, ToolRegistry, TaskPlanParser, HybridStepExecutor, PlannerPromptBuilder, AndroidDeviceAutomation, TaskPlanSerializer, PlanVariables, TaskOrchestrator.verifyAction.",
   "milestone_status": "done",
   "done_items": [
     "capability 2026-10-13 (session 43): scheduled automations are now a reachable, end-to-end surface. TaskOrchestrator.scheduleAutomation(skillName, intervalMinutes, enabled) requires a matching saved skill (null otherwise, so no dead automation persists), clamps the interval via AutomationGate.intervalMinutes, persists an AutomationEntity and re-syncs the worker; cancelAutomation(id) removes it and re-syncs; deleteSkill(name) removes the skill AND every automation scheduled against it (no orphans); automationIsArmed(id) is the run-time gate (master switch AND the row still enabled AND still persisted); skillExists(name) guard.",
@@ -221,20 +221,25 @@
     "AGENTS.md 2026-10-13 (session 45): documented set_device_control as a pre-a11y-gate, registry-driven device-control primitive (DeviceControl resolver, torch backed control, UNSUPPORTED_DEVICE_CONTROL) and added it to the Phase 9 self-evidencing tool list.",
     "capability 2026-10-13 (session 46): DeviceControl generalised from a Boolean resolver to a typed DeviceControlOp (Torch/RingerMode). set_device_control now backs ringer_mode (silent/vibrate/normal) in addition to torch, dispatching to the existing RingerModeController read-back; the resolver returns null for an unknown control or a value invalid for that control, so it is refused honestly (UNSUPPORTED_DEVICE_CONTROL at execute, Invalid at validation). AndroidDeviceAutomation dispatches by op variant before the a11y gate (RINGER_UNAVAILABLE when unwired); the prompt catalogue advertises both controls.",
     "regression tests 2026-10-13 (session 46, CapabilityUpgradeTest): deviceControlResolvesTorchOnAndOffAliases (typed-op), deviceControlResolvesRingerModeAliases, setDeviceControlRingerModeReachesTheRingerController, setDeviceControlRingerModeRefusesHonestlyWhenUnwired, setDeviceControlRingerModeUnchangedIsReportedAsFailure, plus extended parser/validation/prompt assertions.",
-    "validation 2026-10-13 (session 46, toolchain present): bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 2m24s, 'VERIFY OK'; :app:testDebugUnitTest -> 504 tests 0 failures 0 errors 0 skipped (500 baseline + 4 new); :app:assembleDebug -> BUILD SUCCESSFUL, app-debug.apk (66 MB)."
+    "validation 2026-10-13 (session 46, toolchain present): bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 2m24s, 'VERIFY OK'; :app:testDebugUnitTest -> 504 tests 0 failures 0 errors 0 skipped (500 baseline + 4 new); :app:assembleDebug -> BUILD SUCCESSFUL, app-debug.apk (66 MB).",
+    "capability 2026-10-13 (session 47): dictate_note - the \"take a voice note\" primitive. New AgentAction.DictateNote(title?) + tool dictate_note; dispatches the documented Intent.ACTION_CREATE_NOTE with only the optional EXTRA_TITLE and NO body, so the notes app opens its editor ready for the user to speak. Sibling of create_note. NoteController.dictateNote + AndroidNoteController report NOTE_DICTATION_OPENED only after the intent was delivered (NOTE_UNAVAILABLE / NOTE_PERMISSION / NOTE_ERROR otherwise); never claims the note was dictated or saved.",
+    "capability 2026-10-13 (session 47): dictate_note wired across every action-vocabulary seam - AgentAction (+getDisplayName), ToolRegistry (TOOL_DICTATE_NOTE const/definition/MAX_NOTE_TITLE_CHARS validation; blank title valid), TaskPlanParser (branch + title aliases), HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, AndroidDeviceAutomation.execute, TaskPlanSerializer (toParams/toolNameFor), PlanVariables.substitute, TaskOrchestrator.verifyAction self-evidencing rule.",
+    "regression tests 2026-10-13 (session 47, CapabilityUpgradeTest, 9 new): dictateNoteExecutesWithoutAnAccessibilityService, dictateNoteRefusesHonestlyWhenUnwired, dictateNoteReportsFailureHonestlyWhenNoNotesAppExists, dictateNoteParserMapsTheToolNameWithAnOptionalTitle, dictateNoteValidationAcceptsAnOptionalTitleButRejectsAnOversizedOne, dictateNoteSkillKeepsItsTitleOnReplay, promptAdvertisesDictateNote, dictateNoteStepCompletesFromItsOwnHonestResult, dictateNoteFailureIsNotMaskedByTheSelfEvidencingRule.",
+    "validation 2026-10-13 (session 47, toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64, ANDROID_HOME=/workspace/tools/android-sdk): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL in 2m46s, 513 tests 0 failures 0 errors 0 skipped (504 baseline + 9 new)."
   ],
   "in_progress": [],
   "next_items": [
-    "Optional: surface LOCATION_ARRIVE with a permissioned opt-in region provider (currently honestly null, so it never matches).",
-    "Optional: an explicit per-automation 'last fired' timestamp shown in the Automations tab.",
-    "Optional hardening: run the Android Lint gate (:app:lintDebug) and fix any real findings."
+    "Optional: a per-automation last-fired timestamp on the Automations tab.",
+    "Optional: LOCATION_ARRIVE with a permissioned opt-in region provider (needs a foreground location opt-in).",
+    "Optional: further DeviceControl-backed controls as mapping-only additions (e.g. airplane-mode, dnd).",
+    "Optional: an :app:lintDebug gate in verify.sh."
   ],
   "branch": "auto/jarvis-autonomy-20261013-1131",
   "open_pr": 81,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "auto/jarvis-autonomy-20261013-1131",
-  "last_updated": "2026-10-13T11:55:00Z",
+  "last_run_id": "auto/jarvis-autonomy-20261013-1231",
+  "last_updated": "2026-10-13T12:47:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
