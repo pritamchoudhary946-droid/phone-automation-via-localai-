@@ -1,5 +1,49 @@
 ---
 
+## SESSION 53 (2026-10-13) - milestone: `read_clipboard` capability (IN PROGRESS)
+
+Where reached: implementation + targeted tests green; full gate pending.
+
+New capability: the read half of the clipboard trio - read the device clipboard's
+current text (the "read the code I just copied" / "what did I just copy" intent). A
+read primitive like `read_device_status`/`read_notifications`: the clipboard lives on
+the system `ClipboardManager`, not the accessibility tree, so no screen read or UI tap
+can answer it.
+
+- `ClipboardReader` + `AndroidClipboardReader` over the system `ClipboardManager`,
+  service-free and resolved *before* the a11y gate (like the notification/device-status
+  reads). Its described text is carried as `ActionResult.readText`, so a NONE-verified
+  step self-satisfies from the digest (empty/non-text clip -> failure, never a blank
+  success), and `selfEvidencingToolSatisfied(ReadClipboard)` counts it as goal evidence.
+- Opt-in (the clipboard can hold another app's secret): a live `clipboardReadEnabled:
+  () -> Boolean` gates the executor (`CLIPBOARD_READ_DISABLED` when off, never touching
+  the clipboard) AND the prompt (`PlannerPromptBuilder.availableActions` /
+  `ACTION_CATALOG` withhold the tool; `AgentPlanner` and `TaskOrchestrator` read the
+  flag per call, default `{ false }`). Wired through `CapabilitySettings`, the Settings
+  toggle, and `OmniAgentApplication`.
+- Carried through the action-vocabulary checklist: `AgentAction.ReadClipboard` (+
+  `getDisplayName`), `ToolRegistry` (const, definition, `validateAction`),
+  `TaskPlanParser` (tool name -> action), `HybridStepExecutor.decide` (deterministic fast
+  path), `PlannerPromptBuilder.ACTION_CATALOG`, `AndroidDeviceAutomation.execute` (+ the
+  `ClipboardReader` seam), and `TaskPlanSerializer` (`toParams`/`toVerificationTarget`).
+
+Fix-forward: `main` HEAD (#93, brightness) did not compile - `OmniAgentApplication`
+passed `clipboardReadEnabled` to `TaskOrchestrator`, which did not declare the parameter
+(`OmniAgentApplication.kt:271 No parameter with name 'clipboardReadEnabled' found`). This
+run adds the parameter (and the gate wiring it drives), so `main` compiles and the new
+capability is fully wired.
+
+Validation (toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64,
+ANDROID_HOME=/opt/android-sdk): targeted `CapabilityUpgradeTest` -> BUILD SUCCESSFUL, 6
+read_clipboard tests pass (executes-without-a11y-service, withheld-from-prompt-until-
+opted-in, refuses-when-opt-out, refuses-when-unwired, skill-replay-keeps-tool-name,
+step-completes-from-its-own-digest). Full pre-merge gate pending.
+
+Remaining: run `bash .github/scripts/verify.sh`; then merge per section 18.
+
+---
+
+
 ## SESSION 52 (2026-10-13) - milestone: screen-brightness device control (`set_device_control` control=brightness)
 
 Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261013-2031`).
