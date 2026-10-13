@@ -141,6 +141,9 @@ interface AutomationDao {
     @Query("SELECT * FROM automations WHERE skillName = :skillName")
     suspend fun getAutomationsForSkill(skillName: String): List<AutomationEntity>
 
+    @Query("UPDATE automations SET enabled = :enabled WHERE id = :id")
+    suspend fun setAutomationEnabled(id: Long, enabled: Boolean)
+
     @Query("DELETE FROM automations WHERE id = :id")
     suspend fun deleteAutomation(id: Long)
 }
