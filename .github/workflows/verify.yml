@@ -43,33 +43,6 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      - name: Configure stable debug signing key (optional)
-        env:
-          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-            printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
-            keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null
-            echo "Stable debug keystore loaded."
-          else
-            echo "::warning::DEBUG_KEYSTORE_BASE64 is not set. GitHub may generate a different debug SHA-1 on each clean runner."
-          fi
-
-      - name: Configure Firebase (optional)
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-            printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
-            if ! jq -e 'any(.client[]?; .client_info.android_client_info.package_name == "com.aistudio.omniagent.kjqvlm" and any(.oauth_client[]?; .client_type == 3))' app/google-services.json >/dev/null; then
-              echo "::error::GOOGLE_SERVICES_JSON must match package com.aistudio.omniagent.kjqvlm and contain a Web OAuth client (client_type 3)."
-              exit 1
-            fi
-            echo "Validated Firebase config for this app."
-          else
-            echo "::warning::GOOGLE_SERVICES_JSON is not set; Google sign-in will show setup guidance."
-          fi
-
       - name: Make the verify script executable
         run: chmod +x .github/scripts/verify.sh
 
