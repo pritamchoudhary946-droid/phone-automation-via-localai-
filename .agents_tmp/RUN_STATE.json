@@ -17,14 +17,15 @@
     "Optional: LOCATION_ARRIVE with a permissioned opt-in region provider.",
     "Optional: an :app:lintDebug gate in verify.sh."
   ],
-  "branch": "auto/jarvis-autonomy-20261013-1931",
+  "branch": "auto/jarvis-autonomy-20261013-1931 (merged as ae6eb7c)",
   "open_pr": null,
   "risky_actions_done": [
-    "2026-10-13 (session 50): merged PR #89 (squash) into main (eab1909) - CI hardening, auto-merge per section 18; branch auto/jarvis-autonomy-20261013-1631 deleted."
+    "2026-10-13 (session 50): merged PR #89 (squash) into main (eab1909) - CI hardening, auto-merge per section 18; branch auto/jarvis-autonomy-20261013-1631 deleted.",
+    "2026-10-13 (session 51): merged PR #91 (squash) into main (ae6eb7c) - dnd device control, auto-merge per section 18; branch auto/jarvis-autonomy-20261013-1931 deleted."
   ],
   "blockers": "Session cap reached (sessions_done 51 >= session_cap 48) without project_done; human review requested to raise session_cap before further capability work. No technical blockers in this run.",
   "last_run_id": "jarvis-20261013-1931",
-  "last_updated": "2026-10-13T20:05:00Z",
+  "last_updated": "2026-10-13T20:09:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
