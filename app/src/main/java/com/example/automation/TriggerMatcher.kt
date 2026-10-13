@@ -3,6 +3,19 @@ package com.example.automation
 import com.example.perception.BatteryGuard
 
 /**
+ * The outcome of evaluating one automation at run time (plan 7.8/9.2). [armed] means the
+ * master switch is on, the automation row still exists, is enabled, and its skill is
+ * present; [fired] means the trigger condition is actually satisfied right now. A run is
+ * allowed only when armed AND fired, so an event trigger never replays a skill until its
+ * condition holds.
+ */
+data class TriggerDecision(
+    val armed: Boolean,
+    val fired: Boolean,
+    val reason: String
+)
+
+/**
  * Pure evaluation of automation triggers (plan 9.2). Extends the clock/interval and
  * Wi-Fi triggers with battery level, charging, network type, app-foreground, and
  * notification-from-app. Location arrive/leave is evaluated by the caller (it needs

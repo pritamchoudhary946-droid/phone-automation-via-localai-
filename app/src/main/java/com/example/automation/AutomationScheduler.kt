@@ -34,10 +34,15 @@ class AutomationWorker(
         return try {
             val app = applicationContext as OmniAgentApplication
             // Re-check at run time: a scheduled job whose automation was disabled/deleted
-            // (or whose skill was removed) must never drive the orchestrator.
-            if (automationId > 0L && !kotlinx.coroutines.runBlocking { app.orchestrator.automationIsArmed(automationId) }) {
-                Log.i(TAG, "Automation $automationId is no longer armed; skipping")
-                return Result.success()
+            // (or whose skill was removed) must never drive the orchestrator. For an event
+            // trigger, the condition must also actually hold right now, so an always-on
+            // poll never replays the skill until its trigger genuinely fires (plan 9.2).
+            if (automationId > 0L) {
+                val decision = kotlinx.coroutines.runBlocking { app.orchestrator.evaluateCondition(automationId) }
+                if (!decision.armed || !decision.fired) {
+                    Log.i(TAG, "Automation $automationId not running: ${decision.reason}")
+                    return Result.success()
+                }
             }
             val skill = kotlinx.coroutines.runBlocking { app.database.skillDao().getSkill(skillName) }
             if (skill == null) {
@@ -80,9 +85,15 @@ object AutomationScheduler {
             cancel(context, automation.id)
             return
         }
-        val minutes = AutomationGate.intervalMinutes(
-            automation.triggerValue.toIntOrNull() ?: 60
-        )
+        // An INTERVAL automation fires on its own cadence. An event automation (plan 9.2) is
+        // polled at the floor cadence; the worker re-checks battery/screen/Wi-Fi/foreground
+        // at run time and only replays the skill when the condition genuinely holds, so the
+        // poll itself does nothing when the trigger is not met.
+        val minutes = if (automation.triggerType == AutomationTrigger.INTERVAL) {
+            AutomationGate.intervalMinutes(automation.triggerValue.toIntOrNull() ?: 60)
+        } else {
+            AutomationGate.MIN_INTERVAL_MINUTES.toLong()
+        }
         val request = PeriodicWorkRequestBuilder<AutomationWorker>(minutes, TimeUnit.MINUTES)
             .setInputData(
                 androidx.work.workDataOf(

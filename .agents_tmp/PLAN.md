@@ -1,6 +1,32 @@
 
 ---
 
+## SESSION 44 (2026-10-13) - milestone: event-driven automations (plan 9.2)
+
+Where reached: DONE and validated. Phase 9.2 event triggers are now a reachable,
+honestly-gated surface:
+- `TriggerDecision(armed, fired, reason)`; `TriggerMatcher.shouldFire` adds the
+  master+row gate and vetoes an event trigger under `BatteryGuard` (9.14).
+- `TaskOrchestrator.evaluateCondition(id)` = armed (master + row enabled + skill
+  exists) && fired (live condition holds); INTERVAL returns fired=true. Injectable
+  `conditionsProvider`/`batteryGuard` suppliers (default real device samplers).
+- `scheduleTriggeredAutomation` validates/normalises the trigger value and rejects a
+  blank required value (no always-true dead automation).
+- `AutomationWorker` runs the skill only when armed && fired; event automations poll
+  at the 15-minute floor. `setAutomationEnabled` pauses/resumes.
+- `TriggerLabel` (device-free presentation) + `AutomationConditions` (device sampler);
+  `LibraryScreen` schedule dialog trigger picker + value field, Automations tab
+  pause/resume toggle.
+
+Validation (toolchain present): `./gradlew :app:testDebugUnitTest --no-daemon` ->
+BUILD SUCCESSFUL, 489 tests 0 failures (485 baseline + 4 new). `./gradlew
+:app:assembleDebug --no-daemon` -> BUILD SUCCESSFUL, app-debug.apk (66 MB).
+
+Remaining: LOCATION_ARRIVE needs a permissioned opt-in region provider; a per-automation
+last-fired timestamp; optional lint gate. No blockers.
+
+---
+
 ## SESSION 43 (2026-10-13) - milestone: scheduled-automation reachable capability (Automations surface + per-automation armed gate)
 
 Status: IN PROGRESS -> DONE.

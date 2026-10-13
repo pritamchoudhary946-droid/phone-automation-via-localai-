@@ -3,6 +3,7 @@ package com.example.agent
 import android.content.Context
 import android.util.Log
 import com.example.data.local.AgentDatabase
+import com.example.automation.TriggerDecision
 import com.example.data.local.AutomationEntity
 import com.example.data.local.CheckpointEntity
 import com.example.data.local.EpisodeEntity
@@ -103,7 +104,11 @@ class TaskOrchestrator(
     /** Live opt-in gate for the notification-triage capability (plan 9.9). */
     private val notificationTriageEnabled: () -> Boolean = { false },
     /** Live opt-in gate for on-device speech output (the `speak` capability). */
-    private val voiceOutputEnabled: () -> Boolean = { false }
+    private val voiceOutputEnabled: () -> Boolean = { false },
+    /** Injectable live-condition sampler for event triggers (plan 9.2); test seam. */
+    private val conditionsProvider: (() -> com.example.automation.TriggerMatcher.Conditions)? = null,
+    /** Injectable battery-guard decision for event triggers (plan 9.14); test seam. */
+    private val batteryGuard: (() -> com.example.perception.BatteryGuard.Decision)? = null
 ) {
     private val TAG = "TaskOrchestrator"
     private val database = AgentDatabase.getInstance(context)
@@ -339,12 +344,42 @@ class TaskOrchestrator(
      * is off unless the master switch is on; without a matching saved skill there is
      * nothing to schedule, so this returns null rather than persisting a dead automation.
      */
-    suspend fun scheduleAutomation(skillName: String, intervalMinutes: Int, enabled: Boolean = true): Long? {
+    suspend fun scheduleAutomation(skillName: String, intervalMinutes: Int, enabled: Boolean = true): Long? =
+        persistAutomation(
+            skillName = skillName,
+            triggerType = com.example.automation.AutomationTrigger.INTERVAL,
+            triggerValue = com.example.automation.AutomationGate.intervalMinutes(intervalMinutes).toString(),
+            enabled = enabled
+        )
+
+    /**
+     * Schedules a saved skill against a Phase 9.2 event trigger (battery/charging/network/
+     * app-foreground/notification/location). The trigger is evaluated at poll time by
+     * [evaluateCondition]; a blank value that the trigger requires is rejected so an
+     * always-true dead automation is never persisted. Returns null without a saved skill.
+     */
+    suspend fun scheduleTriggeredAutomation(
+        skillName: String,
+        triggerType: String,
+        triggerValue: String,
+        enabled: Boolean = true
+    ): Long? {
+        val normalized = com.example.automation.TriggerLabel.normalizeValue(triggerType, triggerValue)
+        if (com.example.automation.TriggerLabel.requiresValue(triggerType) && normalized.isBlank()) return null
+        return persistAutomation(skillName, triggerType, normalized, enabled)
+    }
+
+    private suspend fun persistAutomation(
+        skillName: String,
+        triggerType: String,
+        triggerValue: String,
+        enabled: Boolean
+    ): Long? {
         val skill = runCatching { database.skillDao().getSkill(skillName) }.getOrNull() ?: return null
         val automation = AutomationEntity(
             skillName = skill.name,
-            triggerType = com.example.automation.AutomationTrigger.INTERVAL,
-            triggerValue = com.example.automation.AutomationGate.intervalMinutes(intervalMinutes).toString(),
+            triggerType = triggerType,
+            triggerValue = triggerValue,
             enabled = enabled
         )
         val id = withContext(Dispatchers.IO) {
@@ -352,6 +387,47 @@ class TaskOrchestrator(
         }
         resyncAutomations()
         return id
+    }
+
+    /** Enables or disables one scheduled automation and re-arms (or cancels) its work (plan 7.8). */
+    suspend fun setAutomationEnabled(automationId: Long, enabled: Boolean) {
+        withContext(Dispatchers.IO) { database.automationDao().setAutomationEnabled(automationId, enabled) }
+        resyncAutomations()
+    }
+
+    /**
+     * Whether a scheduled automation should drive its skill right now (plan 9.2/7.8).
+     * [armed] is the master-switch + row + skill gate (a disabled/deleted automation or a
+     * vanished skill is never armed); [fired] additionally requires the trigger condition
+     * to hold for event triggers, and is true for an INTERVAL automation whose worker was
+     * already released on its interval. The worker consults this at run time, so an
+     * always-on event trigger never replays the skill until its condition is genuinely met.
+     */
+    suspend fun evaluateCondition(automationId: Long): TriggerDecision {
+        if (!com.example.settings.CapabilitySettings(context).automationsEnabled) {
+            return TriggerDecision(armed = false, fired = false, reason = "Automations are off")
+        }
+        val row = withContext(Dispatchers.IO) { database.automationDao().getAutomationById(automationId) }
+            ?: return TriggerDecision(armed = false, fired = false, reason = "Automation no longer exists")
+        if (!row.enabled) return TriggerDecision(armed = false, fired = false, reason = "Automation is disabled")
+        if (!skillExists(row.skillName)) {
+            return TriggerDecision(armed = false, fired = false, reason = "Its skill no longer exists")
+        }
+        if (row.triggerType == com.example.automation.AutomationTrigger.INTERVAL) {
+            return TriggerDecision(armed = true, fired = true, reason = "Interval due")
+        }
+        val conditions = (conditionsProvider ?: { com.example.automation.AutomationConditions.sample(context) }).invoke()
+        val battery = (batteryGuard ?: { com.example.perception.BatteryGuard.check(context) }).invoke()
+        val fired = com.example.automation.TriggerMatcher.shouldFire(
+            masterEnabled = true,
+            automationEnabled = true,
+            triggerType = row.triggerType,
+            triggerValue = row.triggerValue,
+            intervalMinutes = 0L,
+            conditions = conditions,
+            battery = battery
+        )
+        return TriggerDecision(armed = true, fired = fired, reason = if (fired) "Condition met" else "Waiting for condition")
     }
 
     /** Stops a scheduled automation and cancels its work (plan 7.8). */

@@ -525,6 +525,22 @@ output is off, read live per call by `AgentPlanner`.
 - Automations: `automation/AutomationScheduler` runs via WorkManager and must
   honour `AutomationGate` (master switch AND per-item) and the 15-minute minimum.
   `OmniAgentApplication.syncAutomations()` re-arms/cancels after a toggle change.
+- Event triggers (9.2) are reachable and honestly gated. `TriggerMatcher.matches`
+  is the pure condition evaluation for every `AutomationTrigger` (INTERVAL, WIFI,
+  battery below/above, charging, network type, app-foreground, notification-from-app,
+  location); `TriggerMatcher.shouldFire` adds the master+enabled gate and vetoes an
+  event trigger under `BatteryGuard` (9.14). An event automation is polled at the
+  15-minute floor and re-checks the condition at run time via
+  `TaskOrchestrator.evaluateCondition(id)` (`TriggerDecision(armed, fired, reason)`);
+  the `AutomationWorker` runs the skill only when `armed && fired`, so an always-on
+  poll never replays a skill until the condition genuinely holds. `armed` is the
+  master-switch + row-enabled + skill-exists gate (never a stale job). INTERVAL
+  automations return `fired = true` (their periodic worker already released on the
+  cadence). `TriggerLabel` is the device-free presentation (describe/shortName/
+  valueHint/requiresValue/normalizeValue) shared by the Library Automations tab and
+  the schedule trigger picker, so both render the same honest wording. `TaskOrchestrator`
+  takes `conditionsProvider`/`batteryGuard` suppliers (live, default real device
+  samplers) so the evaluation is unit-testable without a device.
 - Vision: ML Kit OCR (`MlKitOcrReader`) + `OcrVisionGrounder`. On a tree-miss the
   agent sends a bounded JPEG to the multimodal model; grounding refuses (null)
   when a label is absent rather than blind-tapping.

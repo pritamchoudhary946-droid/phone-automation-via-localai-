@@ -76,6 +76,9 @@ import com.example.planning.TaskPlanSerializer
 import com.example.planning.VerificationMethod
 import com.example.automation.AutomationGate
 import com.example.automation.AutomationTrigger
+import com.example.automation.TriggerLabel
+import com.example.automation.TriggerMatcher
+import com.example.perception.BatteryGuard
 import com.example.data.local.AgentDatabase
 import com.example.data.local.SavedSkillEntity
 import com.example.settings.CapabilitySettings
@@ -4901,6 +4904,107 @@ class CapabilityUpgradeTest {
         assertFalse(runBlocking { orchestrator.skillExists("here") })
     }
 
+    @Test
+    fun triggeredAutomationRequiresAValueWhereTheTriggerNeedsOne() {
+        val engine = modelEngine(emptyPlanJson())
+        val orchestrator = newOrchestrator(engine, FakeDeviceAutomation())
+        val skillDao = AgentDatabase.getInstance(context).skillDao()
+        runBlocking { skillDao.upsertSkill(SavedSkillEntity(name = "wifi_task", goal = "g", planJson = emptyPlanJson())) }
+
+        // A value-requiring trigger with a blank value must not persist an always-true automation.
+        assertNull(
+            runBlocking { orchestrator.scheduleTriggeredAutomation("wifi_task", AutomationTrigger.BATTERY_BELOW, "") }
+        )
+        // A value-less trigger (charging) accepts a blank value.
+        assertTrue(
+            runBlocking { orchestrator.scheduleTriggeredAutomation("wifi_task", AutomationTrigger.CHARGING_STARTED, "") } != null
+        )
+        // A real value persists and is normalised (battery digits kept).
+        val id = runBlocking { orchestrator.scheduleTriggeredAutomation("wifi_task", AutomationTrigger.BATTERY_BELOW, " 20% ") }!!
+        val row = runBlocking { AgentDatabase.getInstance(context).automationDao().getAutomationById(id) }
+        assertEquals(AutomationTrigger.BATTERY_BELOW, row?.triggerType)
+        assertEquals("20", row?.triggerValue)
+        runBlocking { orchestrator.deleteSkill("wifi_task") }
+    }
+
+    @Test
+    fun evaluateConditionGatesEventTriggersOnLiveConditions() {
+        val settings = CapabilitySettings(context)
+        settings.automationsEnabled = true
+        val engine = modelEngine(emptyPlanJson())
+        var conditions = TriggerMatcher.Conditions(batteryPercent = 90, networkType = "WIFI", wifiConnected = true)
+        val orchestrator = newOrchestrator(
+            engine, FakeDeviceAutomation(),
+            conditionsProvider = { conditions },
+            batteryGuard = { BatteryGuard.Decision.OK }
+        )
+        val skillDao = AgentDatabase.getInstance(context).skillDao()
+        runBlocking { skillDao.upsertSkill(SavedSkillEntity(name = "lowbat", goal = "g", planJson = emptyPlanJson())) }
+        val id = runBlocking { orchestrator.scheduleTriggeredAutomation("lowbat", AutomationTrigger.BATTERY_BELOW, "20") }!!
+
+        // Armed but the condition (battery <= 20) is not met: must not fire.
+        val waiting = runBlocking { orchestrator.evaluateCondition(id) }
+        assertTrue("an enabled event automation stays armed", waiting.armed)
+        assertFalse("battery 90 is not below 20, so it must not fire", waiting.fired)
+
+        // Battery drops: now the condition holds and the run is allowed.
+        conditions = conditions.copy(batteryPercent = 15)
+        val fired = runBlocking { orchestrator.evaluateCondition(id) }
+        assertTrue(fired.armed)
+        assertTrue("battery 15 <= 20 must fire", fired.fired)
+
+        // The battery guard can veto an event trigger even when the condition holds.
+        val guarded = newOrchestrator(
+            engine, FakeDeviceAutomation(),
+            conditionsProvider = { conditions },
+            batteryGuard = { BatteryGuard.Decision(false, "BatteryGuard: low battery") }
+        )
+        val vetoed = runBlocking { guarded.evaluateCondition(id) }
+        assertTrue(vetoed.armed)
+        assertFalse("the battery guard must veto an event trigger", vetoed.fired)
+
+        // Master switch off disarms everything.
+        settings.automationsEnabled = false
+        assertFalse(runBlocking { orchestrator.evaluateCondition(id) }.armed)
+        runBlocking { orchestrator.deleteSkill("lowbat") }
+    }
+
+    @Test
+    fun evaluateConditionAlwaysFiresIntervalAutomations() {
+        val settings = CapabilitySettings(context)
+        settings.automationsEnabled = true
+        val engine = modelEngine(emptyPlanJson())
+        // A conditions sampler that would veto every event trigger; an INTERVAL automation
+        // must ignore it, because its worker already released on the interval.
+        val orchestrator = newOrchestrator(
+            engine, FakeDeviceAutomation(),
+            conditionsProvider = { TriggerMatcher.Conditions(networkType = "NONE") },
+            batteryGuard = { BatteryGuard.Decision(false, "never") }
+        )
+        val skillDao = AgentDatabase.getInstance(context).skillDao()
+        runBlocking { skillDao.upsertSkill(SavedSkillEntity(name = "interval_task", goal = "g", planJson = emptyPlanJson())) }
+        val id = runBlocking { orchestrator.scheduleAutomation("interval_task", 60) }!!
+
+        val decision = runBlocking { orchestrator.evaluateCondition(id) }
+        assertTrue(decision.armed)
+        assertTrue("an INTERVAL automation fires when its interval is due", decision.fired)
+        settings.automationsEnabled = false
+        runBlocking { orchestrator.deleteSkill("interval_task") }
+    }
+
+    @Test
+    fun triggerLabelsDescribeAndNormalizeEveryTrigger() {
+        for (type in TriggerMatcher.allTriggers) {
+            assertTrue("every trigger needs a chip label", TriggerLabel.shortName(type).isNotBlank())
+            assertTrue("every trigger needs a value hint", TriggerLabel.valueHint(type).isNotBlank())
+            assertTrue("every trigger needs a human description", TriggerLabel.describe(type, "").isNotBlank())
+        }
+        assertEquals("20", TriggerLabel.normalizeValue(AutomationTrigger.BATTERY_BELOW, " 20% "))
+        assertEquals("map_ssid", TriggerLabel.normalizeValue(AutomationTrigger.WIFI_CONNECTED, " map_ssid "))
+        assertFalse(TriggerLabel.requiresValue(AutomationTrigger.WIFI_CONNECTED))
+        assertTrue(TriggerLabel.requiresValue(AutomationTrigger.APP_FOREGROUND))
+    }
+
     private fun emptyPlanJson(): String = "{\"steps\":[]}"
 
     private fun planStep(id: Int, action: AgentAction, rawName: String) = com.example.planning.PlanStep(
@@ -4928,7 +5032,12 @@ class CapabilityUpgradeTest {
     private fun AgentEngine.initializeBlocking(): Boolean =
         kotlinx.coroutines.runBlocking { initialize() }
 
-    private fun newOrchestrator(engine: AgentEngine, automation: FakeDeviceAutomation): TaskOrchestrator {
+    private fun newOrchestrator(
+        engine: AgentEngine,
+        automation: FakeDeviceAutomation,
+        conditionsProvider: (() -> TriggerMatcher.Conditions)? = null,
+        batteryGuard: (() -> BatteryGuard.Decision)? = null
+    ): TaskOrchestrator {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         return TaskOrchestrator(
             context = context,
@@ -4936,7 +5045,9 @@ class CapabilityUpgradeTest {
             appDirectory = AppDirectory(context),
             deviceAutomation = automation,
             scope = scope,
-            toolRegistry = ToolRegistry()
+            toolRegistry = ToolRegistry(),
+            conditionsProvider = conditionsProvider,
+            batteryGuard = batteryGuard
         )
     }
 
