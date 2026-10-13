@@ -1,9 +1,9 @@
 {
   "project_done": false,
-  "sessions_done": 44,
+  "sessions_done": 45,
   "session_cap": 48,
-  "current_milestone": "Capability: event-driven automations (plan 9.2). TriggerMatcher/TriggerDecision evaluate live conditions (battery/charging/network/foreground/notification) with a BatteryGuard veto; TaskOrchestrator.evaluateCondition(id) returns armed+fired, AutomationWorker runs only when both; scheduleTriggeredAutomation validates+perseists a trigger; TriggerLabel is device-free presentation; LibraryScreen schedule dialog gains a trigger picker and the Automations tab a pause/resume.",
-  "milestone_status": "done",
+  "current_milestone": "Capability: set_device_control end-to-end. A single registry-driven device-control primitive (control,value) that resolves before the a11y gate; the torch control is the first backed control (torch on/off), device-free DeviceControl resolver, parser/serializer/executor/prompt wiring, self-evidencing honest result.",
+  "milestone_status": "in_progress",
   "done_items": [
     "capability 2026-10-13 (session 43): scheduled automations are now a reachable, end-to-end surface. TaskOrchestrator.scheduleAutomation(skillName, intervalMinutes, enabled) requires a matching saved skill (null otherwise, so no dead automation persists), clamps the interval via AutomationGate.intervalMinutes, persists an AutomationEntity and re-syncs the worker; cancelAutomation(id) removes it and re-syncs; deleteSkill(name) removes the skill AND every automation scheduled against it (no orphans); automationIsArmed(id) is the run-time gate (master switch AND the row still enabled AND still persisted); skillExists(name) guard.",
     "capability 2026-10-13 (session 43): AgentDao.AutomationDao gains getAutomationsForSkill(skillName) and getAutomationById(id); upsertAutomation now returns the inserted row id so scheduleAutomation can report it. AutomationGate exposes MIN_INTERVAL_MINUTES (15) used by both the clamp and the UI floor.",
@@ -212,22 +212,30 @@
     "capability 2026-10-13 (session 44): new com.example.automation.TriggerLabel (device-free describe/shortName/valueHint/requiresValue/normalizeValue) shared by the Library Automations tab and the schedule dialog; LibraryScreen schedule dialog gains a trigger picker (FilterChips) + a value field, and the Automations tab gains a pause/resume toggle via setAutomationEnabled. New com.example.automation.AutomationConditions.sample(context) is the thin device adapter (foreground package, notification bus, connectivity, battery; location stays null honestly).",
     "regression tests 2026-10-13 (session 44, CapabilityUpgradeTest): triggeredAutomationRequiresAValueWhereTheTriggerNeedsOne, evaluateConditionGatesEventTriggersOnLiveConditions, evaluateConditionAlwaysFiresIntervalAutomations, triggerLabelsDescribeAndNormalizeEveryTrigger.",
     "validation 2026-10-13 (session 44, toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64, ANDROID_HOME=/workspace/tools/android-sdk): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 489 tests 0 failures 0 errors 0 skipped (485 baseline + 4 new event-trigger tests). ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced (66 MB). Both gates green.",
-    "AGENTS.md 2026-10-13 (session 44): documented the 9.2 event-trigger surface (TriggerMatcher/TriggerDecision/evaluateCondition/TriggerLabel/AutomationConditions)."
+    "AGENTS.md 2026-10-13 (session 44): documented the 9.2 event-trigger surface (TriggerMatcher/TriggerDecision/evaluateCondition/TriggerLabel/AutomationConditions).",
+    "capability 2026-10-13 (session 45): new AgentAction.SetDeviceControl(control, value) + tool set_device_control ('apply a device-control setting such as the flashlight'), the registry-driven device-control primitive for scheduled/condition automations. Implemented across every action-vocabulary seam: AgentAction (+getDisplayName), ToolRegistry (const TOOL_SET_DEVICE_CONTROL, ToolDefinition, validateAction via the pure DeviceControl resolver), TaskPlanParser.mapAction + control/value aliases, HybridStepExecutor.decide (deterministic fast path), PlannerPromptBuilder.ACTION_CATALOG, AndroidDeviceAutomation.execute (resolved before the a11y gate, like set_torch) and TaskPlanSerializer (toParams/toolNameFor).",
+    "capability 2026-10-13 (session 45): pure com.example.agent.DeviceControl translates a (control,value) pair into a typed op, accepting on/off aliases (on/off/enable/disable/yes/no/true/false/1/0) case-insensitively; the first backed control is torch, dispatched to the existing TorchController (read-back TORCH_ON/TORCH_OFF, TORCH_UNCHANGED on an ignored request). An unknown control is refused honestly (UNSUPPORTED_DEVICE_CONTROL at execute, Invalid at validation) and never dispatched.",
+    "regression tests 2026-10-13 (session 45, CapabilityUpgradeTest): deviceControlResolvesTorchOnAndOffAliases, setDeviceControlExecutesWithoutAnAccessibilityService, setDeviceControlOffReachesTheController, setDeviceControlRefusesAnUnknownControlHonestly, setDeviceControlParserMapsControlAndValue, validationRejectsUnknownDeviceControl, setDeviceControlSkillKeepsItsControlAndValueOnReplay, promptAdvertisesSetDeviceControl, setDeviceControlIsFastPathedWithoutTheModel, setDeviceControlStepCompletesFromItsOwnHonestResult, setDeviceControlFailureIsNotMaskedByTheSelfEvidencingRule.",
+    "validation 2026-10-13 (session 45, toolchain present): ./gradlew :app:testDebugUnitTest --no-daemon --tests com.example.CapabilityUpgradeTest -> BUILD SUCCESSFUL, 247 tests 0 failures 0 errors 0 skipped (11 new device-control tests all pass)."
   ],
-  "in_progress": [],
+  "in_progress": [
+    "set_device_control capability wired end-to-end (AgentAction.SetDeviceControl + DeviceControl resolver + ToolRegistry + parser + serializer + HybridStepExecutor fast path + PlannerPromptBuilder catalogue + AndroidDeviceAutomation dispatch).",
+    "11 tests added to CapabilityUpgradeTest; focused suite green (247 tests 0 failures).",
+    "Pending: full :app:testDebugUnitTest run + :app:assembleDebug, docs (AGENTS.md), merge PR #81."
+  ],
   "next_items": [
     "Optional: surface LOCATION_ARRIVE with a permissioned opt-in region provider (currently honestly null, so it never matches).",
     "Optional: an explicit per-automation 'last fired' timestamp shown in the Automations tab.",
     "Optional hardening: run the Android Lint gate (:app:lintDebug) and fix any real findings."
   ],
-  "branch": "auto/jarvis-autonomy-20261013-0847",
-  "open_pr": null,
+  "branch": "auto/jarvis-autonomy-20261013-0941",
+  "open_pr": 81,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "auto/jarvis-autonomy-20261013-0847",
-  "last_updated": "2026-10-13T08:55:00Z",
-  "carryover_milestone": null,
-  "milestone_attempts": 1,
+  "last_run_id": "auto/jarvis-autonomy-20261013-0941",
+  "last_updated": "2026-10-13T09:45:00Z",
+  "carryover_milestone": "Capability: set_device_control end-to-end. A single registry-driven device-control primitive (control,value) that resolves before the a11y gate; the torch control is the first backed control (torch on/off), device-free DeviceControl resolver, parser/serializer/executor/prompt wiring, self-evidencing honest result.",
+  "milestone_attempts": 2,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": "event-driven automation capability (plan 9.2) landed and validated: 489 tests 0 failures, debug APK built",
