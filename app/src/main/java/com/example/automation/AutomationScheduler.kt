@@ -29,21 +29,28 @@ class AutomationWorker(
 ) : Worker(appContext, params) {
 
     override fun doWork(): Result {
-        val settings = CapabilitySettings(applicationContext)
-        if (!settings.automationsEnabled) {
-            Log.i(TAG, "Automations disabled; skipping scheduled run")
-            return Result.success()
-        }
         val skillName = inputData.getString(KEY_SKILL) ?: return Result.failure()
+        val automationId = inputData.getLong(KEY_AUTOMATION_ID, 0L)
         return try {
             val app = applicationContext as OmniAgentApplication
+            // Re-check at run time: a scheduled job whose automation was disabled/deleted
+            // (or whose skill was removed) must never drive the orchestrator.
+            if (automationId > 0L && !kotlinx.coroutines.runBlocking { app.orchestrator.automationIsArmed(automationId) }) {
+                Log.i(TAG, "Automation $automationId is no longer armed; skipping")
+                return Result.success()
+            }
             val skill = kotlinx.coroutines.runBlocking { app.database.skillDao().getSkill(skillName) }
             if (skill == null) {
                 Log.w(TAG, "Automation skill '$skillName' no longer exists")
                 Result.failure()
             } else {
-                app.orchestrator.runSkill(skill)
-                Result.success()
+                if (!kotlinx.coroutines.runBlocking { app.orchestrator.skillExists(skillName) }) {
+                    Log.w(TAG, "Skill '$skillName' vanished before run")
+                    Result.success()
+                } else {
+                    app.orchestrator.runSkill(skill)
+                    Result.success()
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Automation run failed: ${e.message}")
@@ -54,6 +61,7 @@ class AutomationWorker(
     companion object {
         private const val TAG = "AutomationWorker"
         const val KEY_SKILL = "skill_name"
+        const val KEY_AUTOMATION_ID = "automation_id"
     }
 }
 
@@ -76,7 +84,12 @@ object AutomationScheduler {
             automation.triggerValue.toIntOrNull() ?: 60
         )
         val request = PeriodicWorkRequestBuilder<AutomationWorker>(minutes, TimeUnit.MINUTES)
-            .setInputData(androidx.work.workDataOf(AutomationWorker.KEY_SKILL to automation.skillName))
+            .setInputData(
+                androidx.work.workDataOf(
+                    AutomationWorker.KEY_SKILL to automation.skillName,
+                    AutomationWorker.KEY_AUTOMATION_ID to automation.id
+                )
+            )
             .addTag(AUTOMATION_WORK_TAG)
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(

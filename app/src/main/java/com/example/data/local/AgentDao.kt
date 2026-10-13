@@ -127,13 +127,19 @@ interface KnowledgeDao {
 @Dao
 interface AutomationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAutomation(automation: AutomationEntity)
+    suspend fun upsertAutomation(automation: AutomationEntity): Long
 
     @Query("SELECT * FROM automations ORDER BY createdAt DESC")
     fun getAllAutomations(): Flow<List<AutomationEntity>>
 
     @Query("SELECT * FROM automations WHERE enabled = 1")
     suspend fun getEnabledAutomations(): List<AutomationEntity>
+
+    @Query("SELECT * FROM automations WHERE id = :id")
+    suspend fun getAutomationById(id: Long): AutomationEntity?
+
+    @Query("SELECT * FROM automations WHERE skillName = :skillName")
+    suspend fun getAutomationsForSkill(skillName: String): List<AutomationEntity>
 
     @Query("DELETE FROM automations WHERE id = :id")
     suspend fun deleteAutomation(id: Long)
