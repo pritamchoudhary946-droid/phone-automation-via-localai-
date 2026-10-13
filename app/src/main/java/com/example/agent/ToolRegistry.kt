@@ -668,9 +668,17 @@ open class ToolRegistry {
                     ToolValidationResult.Valid
                 }
             }
-            // open_calendar carries no parameter (it always opens the current day), so
-            // there is no blank/unsafe value to reject; it is always a valid request.
-            is AgentAction.OpenCalendar -> ToolValidationResult.Valid
+            // open_calendar's only parameter is a day offset; reject an absurd offset so
+            // a malformed plan cannot fling the calendar years away from today.
+            is AgentAction.OpenCalendar -> {
+                if (action.dayOffset !in -MAX_EVENT_DAY_OFFSET..MAX_EVENT_DAY_OFFSET) {
+                    ToolValidationResult.Invalid(
+                        "open_calendar dayOffset must be between -$MAX_EVENT_DAY_OFFSET and $MAX_EVENT_DAY_OFFSET: ${action.dayOffset}"
+                    )
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
             is AgentAction.Note -> {
                 when {
                     action.title.isNullOrBlank() && action.content.isNullOrBlank() ->

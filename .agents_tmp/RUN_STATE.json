@@ -2,7 +2,7 @@
   "project_done": false,
   "sessions_done": 39,
   "session_cap": 48,
-  "current_milestone": "Capability: summarize_text (AgentAction.SummarizeText(text, maxChars) + the shared NanoSummarizer -> the configured cloud LLM engine). Condenses a block of text (often a value an earlier read_text/read_page_content captured) to a short digest, resolved before the a11y gate like speak/create_note. The digest is carried as ActionResult.readText so it flows into a later step as a {{name}} variable and self-evidences the NONE-verified step; honest SUMMARY_UNAVAILABLE/SUMMARY_FAILED/INVALID_SUMMARY_INPUT otherwise - never a fabricated summary. Wired through all seven action-vocabulary seams + OmniAgentApplication.",
+  "current_milestone": "Capability: open_calendar dayOffset. AgentAction.OpenCalendar(dayOffset) + CalendarViewer.openCalendar(nowMillis, dayOffset) so 'show my calendar for tomorrow' opens the chosen day, not always today. Offset resolved by the existing parseEventDayOffset, bounded by ToolRegistry validation (+/-MAX_EVENT_DAY_OFFSET), carried through parser/serializer(toParams)/prompt catalogue, and rendered by AndroidCalendarViewer.dayStart (pure). Honest delivery reporting unchanged (CALENDAR_OPENED only after the time-URI intent was delivered; CALENDAR_UNAVAILABLE/CALENDAR_PERMISSION otherwise).",
   "milestone_status": "done",
   "done_items": [
     "item 4.13 re-run bug fix: runSkill replays persisted planJson via TaskPlanSerializer.fromJson",
@@ -186,39 +186,43 @@
     "capability 2026-10-13 (session 39): OmniAgentApplication now builds ONE shared ApiNanoSummarizer and passes it both to the orchestrator (memory digest) and to AndroidDeviceAutomation (summarize_text), so a summarise in the loop and a memory digest use the same engine/readiness.",
     "regression tests 2026-10-13 (session 39, CapabilityUpgradeTest): summarizeTextExecutesWithoutAnAccessibilityService, summarizeTextRefusesHonestlyWhenUnwired, summarizeTextReportsFailureHonestlyWhenTheDigestIsEmpty, summarizeTextRefusesBlankInput, summarizeTextParserMapsTextAndLength, summarizeTextParserDefaultsTheLengthWhenAbsent, validationRejectsBlankOversizedAndOutOfRangeSummarize, summarizeTextSkillKeepsItsTextAndLengthOnReplay, promptAdvertisesSummarizeText, summarizeTextIsFastPathedWithoutTheModel, summarizeTextStepCompletesFromItsOwnDigest, summarizeTextFailureIsNotMaskedByTheSelfEvidencingRule.",
     "validation 2026-10-13 (session 39): ./gradlew --no-daemon :app:testDebugUnitTest --tests com.example.CapabilityUpgradeTest -> BUILD SUCCESSFUL, 208 tests 0 failures 0 errors (10 new summarizeText tests + the 2 loop tests all passed).",
-    "AGENTS.md 2026-10-13: recorded the summarize_text action paragraph, added it to the Phase 9 self-evidencing service-backed list, and the unified prompt helper note."
+    "AGENTS.md 2026-10-13: recorded the summarize_text action paragraph, added it to the Phase 9 self-evidencing service-backed list, and the unified prompt helper note.",
+    "capability 2026-10-13 (session 39): open_calendar grew a dayOffset (0=today, 1=tomorrow, negative=past). AgentAction.OpenCalendar is now a data class (dayOffset); CalendarViewer.openCalendar(nowMillis, dayOffset); AndroidCalendarViewer.dayStart(nowMillis, zone, dayOffset) is a pure resolver to the chosen day's local midnight (used to build the CalendarContract time URI); TaskPlanParser reuses parseEventDayOffset (dayOffset/daysFromNow/day name); TaskPlanSerializer.toParams carries dayOffset so a learned skill replays the right day; PlannerPromptBuilder ACTION_CATALOG advertises the param; ToolRegistry bounds it to +/-MAX_EVENT_DAY_OFFSET; getDisplayName says 'tomorrow'/'yesterday'/'in N days'.",
+    "validation 2026-10-13 (session 39, toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64, ANDROID_HOME=/workspace/tools/android-sdk): ./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 454 tests 0 failures 0 errors (449 baseline + 5 new open_calendar dayOffset tests).",
+    "AGENTS.md 2026-10-13 (session 39): documented open_calendar dayOffset (data class, dayStart resolver, +/-MAX_EVENT_DAY_OFFSET bound, serializer toParams)."
   ],
   "in_progress": [],
   "next_items": [
     "File/document picking (Intent.ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT) - the last read-heavy cross-app gap.",
-    "A capture->summarise->act end-to-end benchmark test (read_text captures -> summarize_text -> reply), wiring PlanVariableStore substitution into summarize_text's text param."
+    "A capture->summarise->act end-to-end benchmark test (read_text captures -> summarize_text -> reply), wiring PlanVariableStore substitution into summarize_text's text param.",
+    "Continue capability backlog (see AGENTS.md action-vocabulary checklist). Remaining investigated gap: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT). Consider a lint gate (:app:lintDebug)."
   ],
-  "branch": "auto/jarvis-autonomy-20261012-2231",
+  "branch": "auto/jarvis-autonomy-20261013-0144",
   "open_pr": null,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "auto/jarvis-autonomy-20261013-0031",
-  "last_updated": "2026-10-13T00:31:45Z",
+  "last_run_id": "auto/jarvis-autonomy-20261013-0144",
+  "last_updated": "2026-10-13T01:45:00Z",
   "carryover_milestone": null,
-  "milestone_attempts": 0,
+  "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": {
-    "summary": "Added create_note: a service-free primitive that opens the notes app to create a note pre-filled with a title and/or text. A new NoteController/AndroidNoteController seam dispatches the documented Intent.ACTION_CREATE_NOTE intent and reports NOTE_DISPATCHED only after the intent was delivered. Wired through all seven action-vocabulary seams and self-evidencing like the other intent-dispatch primitives.",
-    "evidence_reviewed": "main@0335310 (open_calendar PR #72 done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + self-evidencing invariants; DeviceAutomation.execute branch ordering (service-free primitives before the a11y gate); TaskOrchestrator.verifyAction/selfEvidencingToolSatisfied lists; TaskPlanSerializer.toParams/toolNameFor; the existing add_contact/app_info/settings intent-dispatch pattern and the toolchain (.github/scripts/verify.sh, /workspace/tools/android-sdk).",
-    "findings": "A section 2.1 capability gap: 'note down that ...' had no vocabulary. No accessibility read/tap creates a note reliably on an arbitrary screen (and driving a specific notes app's UI would be app-specific); the add_contact service-free + honest-delivery pattern is the exact template. The toolchain is present in this sandbox, so the pre-merge gate could actually run.",
-    "milestone_implemented": "AgentAction.Note(title?, content?) + NoteController/AndroidNoteController (Intent.ACTION_CREATE_NOTE), resolved before the a11y gate.",
-    "validation": "SKIP_APK=1 bash .github/scripts/verify.sh -> VERIFY OK, 449 tests 0 failures 0 errors (440 baseline + 9 new create_note tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced. Both gates green.",
-    "remaining_work": "Continue capability backlog: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
-    "honesty": "NOTE_DISPATCHED is reported only after the ACTION_CREATE_NOTE intent was delivered to a notes handler; a missing handler is NOTE_UNAVAILABLE, a denied dispatch NOTE_PERMISSION, a blank title+content INVALID_NOTE, and an unwired controller NOTE_UNAVAILABLE - never a fake success. The primitive never saves the note. Real-device validation of the notes editor opening was not performed in this sandbox (unit + build gate only)."
+    "summary": "Enhanced open_calendar with a dayOffset so Jarvis can open the calendar at a chosen day (0=today, 1=tomorrow, negative=past), not just today. AgentAction.OpenCalendar(dayOffset), CalendarViewer.openCalendar(nowMillis, dayOffset), a pure AndroidCalendarViewer.dayStart resolver, parser/serializer/prompt/validation wiring, and 5 new tests.",
+    "evidence_reviewed": "RUN_STATE.json (create_note done, merged as PR #73); AGENTS.md open_calendar + self-evidencing invariants; AgentAction.OpenCalendar object; CalendarViewer/AndroidCalendarViewer; DeviceAutomation service-free OpenCalendar branch; TaskPlanParser.parseEventDayOffset + mapAction; TaskPlanSerializer toParams; PlannerPromptBuilder ACTION_CATALOG; ToolRegistry validateAction; CapabilityUpgradeTest calendar + skill-replay cases.",
+    "findings": "Section 2.2 flexibility gap: open_calendar ignored the day, so 'show my calendar for tomorrow' opened today. The day-resolution machinery (parseEventDayOffset) already existed for add_calendar_event; reusing it is the smallest complete generalisation and closes the gap without a bespoke rule.",
+    "milestone_implemented": "open_calendar dayOffset: data-class action + viewer signature + pure dayStart + seven-seam wiring (action, registry validation, parser, serializer, prompt catalogue, executor, viewer) and getDisplayName.",
+    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 454 tests 0 failures 0 errors (449 baseline + 5 new). APK build pending as a final gate.",
+    "remaining_work": "File/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
+    "honesty": "dayStart is pure and unit-tested; the parser/validation/serializer paths are unit-tested. Real-device validation that the calendar app opens on the chosen day was NOT performed (unit gate only). CALENDAR_OPENED still means only that the time-URI intent was delivered - never that the day was rendered. dayStart uses TimeZone.getDefault() at dispatch; the unit test uses UTC for determinism."
   },
   "report": {
-    "summary": "Added create_note: a service-free primitive that opens the notes app to create a note pre-filled with a title and/or text. A new NoteController/AndroidNoteController seam dispatches the documented Intent.ACTION_CREATE_NOTE intent and reports NOTE_DISPATCHED only after the intent was delivered. Wired through all seven action-vocabulary seams and self-evidencing like the other intent-dispatch primitives.",
-    "evidence_reviewed": "main@0335310 (open_calendar PR #72 done); RUN_STATE.json; AGENTS.md action-vocabulary checklist + self-evidencing invariants; DeviceAutomation.execute branch ordering (service-free primitives before the a11y gate); TaskOrchestrator.verifyAction/selfEvidencingToolSatisfied lists; TaskPlanSerializer.toParams/toolNameFor; the existing add_contact/app_info/settings intent-dispatch pattern and the toolchain (.github/scripts/verify.sh, /workspace/tools/android-sdk).",
-    "findings": "A section 2.1 capability gap: 'note down that ...' had no vocabulary. No accessibility read/tap creates a note reliably on an arbitrary screen (and driving a specific notes app's UI would be app-specific); the add_contact service-free + honest-delivery pattern is the exact template. The toolchain is present in this sandbox, so the pre-merge gate could actually run.",
-    "milestone_implemented": "AgentAction.Note(title?, content?) + NoteController/AndroidNoteController (Intent.ACTION_CREATE_NOTE), resolved before the a11y gate.",
-    "validation": "SKIP_APK=1 bash .github/scripts/verify.sh -> VERIFY OK, 449 tests 0 failures 0 errors (440 baseline + 9 new create_note tests); ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced. Both gates green.",
-    "remaining_work": "Continue capability backlog: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
-    "honesty": "NOTE_DISPATCHED is reported only after the ACTION_CREATE_NOTE intent was delivered to a notes handler; a missing handler is NOTE_UNAVAILABLE, a denied dispatch NOTE_PERMISSION, a blank title+content INVALID_NOTE, and an unwired controller NOTE_UNAVAILABLE - never a fake success. The primitive never saves the note. Real-device validation of the notes editor opening was not performed in this sandbox (unit + build gate only)."
+    "summary": "Enhanced open_calendar with a dayOffset so Jarvis can open the calendar at a chosen day (0=today, 1=tomorrow, negative=past), not just today. AgentAction.OpenCalendar(dayOffset), CalendarViewer.openCalendar(nowMillis, dayOffset), a pure AndroidCalendarViewer.dayStart resolver, parser/serializer/prompt/validation wiring, and 5 new tests.",
+    "evidence_reviewed": "RUN_STATE.json (create_note done, merged as PR #73); AGENTS.md open_calendar + self-evidencing invariants; AgentAction.OpenCalendar object; CalendarViewer/AndroidCalendarViewer; DeviceAutomation service-free OpenCalendar branch; TaskPlanParser.parseEventDayOffset + mapAction; TaskPlanSerializer toParams; PlannerPromptBuilder ACTION_CATALOG; ToolRegistry validateAction; CapabilityUpgradeTest calendar + skill-replay cases.",
+    "findings": "Section 2.2 flexibility gap: open_calendar ignored the day, so 'show my calendar for tomorrow' opened today. The day-resolution machinery (parseEventDayOffset) already existed for add_calendar_event; reusing it is the smallest complete generalisation and closes the gap without a bespoke rule.",
+    "milestone_implemented": "open_calendar dayOffset: data-class action + viewer signature + pure dayStart + seven-seam wiring (action, registry validation, parser, serializer, prompt catalogue, executor, viewer) and getDisplayName.",
+    "validation": "./gradlew :app:testDebugUnitTest --no-daemon -> BUILD SUCCESSFUL, 454 tests 0 failures 0 errors (449 baseline + 5 new). APK build pending as a final gate.",
+    "remaining_work": "File/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT).",
+    "honesty": "dayStart is pure and unit-tested; the parser/validation/serializer paths are unit-tested. Real-device validation that the calendar app opens on the chosen day was NOT performed (unit gate only). CALENDAR_OPENED still means only that the time-URI intent was delivered - never that the day was rendered. dayStart uses TimeZone.getDefault() at dispatch; the unit test uses UTC for determinism."
   }
 }

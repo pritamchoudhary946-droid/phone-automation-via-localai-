@@ -270,17 +270,23 @@ back that the panel was shown, so it reports only that the intent was *delivered
 `SETTINGS_PERMISSION` / `INVALID_SETTINGS_PANEL` otherwise). The prompt must never let the
 model claim a setting was changed.
 
-`open_calendar` (`AgentAction.OpenCalendar` + `CalendarViewer` ->
+`open_calendar` (`AgentAction.OpenCalendar(dayOffset)` + `CalendarViewer` ->
 `Intent.ACTION_VIEW` with the documented `CalendarContract.CONTENT_URI` `time/`
-URI of today's midnight) follows the same rule: no accessibility-tree read or UI tap
-opens the calendar app at a chosen day reliably on an arbitrary screen (and the calendar
-app's own UI is app/device-specific), so it is resolved before the a11y gate and shows
-the user their day. It is distinct from `add_calendar_event` (which opens the calendar
+URI of the chosen day's midnight) follows the same rule: no accessibility-tree read or UI
+tap opens the calendar app at a chosen day reliably on an arbitrary screen (and the
+calendar app's own UI is app/device-specific), so it is resolved before the a11y gate and
+shows the user their day. It carries a `dayOffset` (0 = today, 1 = tomorrow, negative =
+a past day; bounded to +/-`MAX_EVENT_DAY_OFFSET` by `ToolRegistry` validation) resolved
+from a relative day like "tomorrow" by `parseEventDayOffset`, so "show my calendar for
+tomorrow" opens tomorrow rather than always today; the offset is carried through the
+parser, the `TaskPlanSerializer` `toParams` (skill replay) and the prompt catalogue. It
+is distinct from `add_calendar_event` (which opens the calendar
 *editor* pre-filled to create an event) - `open_calendar` only *views* the calendar.
 Because the calendar app is a separate process the app cannot read back that the day was
 shown, so it reports only that the intent was *delivered* (`CALENDAR_OPENED`) and never
 claims an event was created or read (`CALENDAR_UNAVAILABLE` / `CALENDAR_PERMISSION`
-otherwise). `AndroidCalendarViewer.openCalendar(nowMillis)` resolves today's midnight; an
+otherwise). `AndroidCalendarViewer.openCalendar(nowMillis, dayOffset)` resolves the
+chosen day's midnight via the pure `AndroidCalendarViewer.dayStart(...)`; an
 unwired viewer returns `CALENDAR_UNAVAILABLE`, never a fabricated success. It is
 injectable via the `AndroidDeviceAutomation` constructor and wired in
 `OmniAgentApplication`.

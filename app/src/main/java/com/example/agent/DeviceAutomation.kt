@@ -599,7 +599,7 @@ class AndroidDeviceAutomation(
         if (action is AgentAction.OpenCalendar) {
             val viewer = calendarViewer
                 ?: return@withContext ActionResult(false, "CALENDAR_UNAVAILABLE", "Calendar dispatch is not available")
-            val result = viewer.openCalendar(System.currentTimeMillis())
+            val result = viewer.openCalendar(System.currentTimeMillis(), action.dayOffset)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         // create_note is an intent-dispatch primitive like add_contact/add_calendar_event:

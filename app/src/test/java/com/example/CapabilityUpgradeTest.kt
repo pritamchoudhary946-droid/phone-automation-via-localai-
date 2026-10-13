@@ -17,6 +17,7 @@ import com.example.agent.AudioController
 import com.example.agent.AudioStream
 import com.example.agent.CalendarController
 import com.example.agent.CalendarResult
+import com.example.agent.AndroidCalendarViewer
 import com.example.agent.CalendarViewer
 import com.example.agent.CalendarViewResult
 import com.example.agent.ContactController
@@ -2122,7 +2123,7 @@ class CapabilityUpgradeTest {
             calendarViewer = recorder
         )
         val result = kotlinx.coroutines.runBlocking {
-            automation.execute(AgentAction.OpenCalendar)
+            automation.execute(AgentAction.OpenCalendar())
         }
         assertTrue("the calendar must open without a bound a11y service: $result", result.success)
         assertEquals("CALENDAR_OPENED", result.method)
@@ -2137,7 +2138,7 @@ class CapabilityUpgradeTest {
             calendarViewer = null
         )
         val result = kotlinx.coroutines.runBlocking {
-            automation.execute(AgentAction.OpenCalendar)
+            automation.execute(AgentAction.OpenCalendar())
         }
         assertFalse("no viewer must not be a fake success", result.success)
         assertEquals("CALENDAR_UNAVAILABLE", result.method)
@@ -2154,7 +2155,7 @@ class CapabilityUpgradeTest {
             calendarViewer = recorder
         )
         val result = kotlinx.coroutines.runBlocking {
-            automation.execute(AgentAction.OpenCalendar)
+            automation.execute(AgentAction.OpenCalendar())
         }
         assertFalse("a missing calendar app must not be reported as success", result.success)
         assertEquals("CALENDAR_UNAVAILABLE", result.method)
@@ -2170,7 +2171,7 @@ class CapabilityUpgradeTest {
         val result = TaskPlanParser().parse(json, "open my calendar")
         assertTrue("parse failed: $result", result is PlanParseResult.Success)
         val steps = (result as PlanParseResult.Success).plan.steps
-        assertEquals(AgentAction.OpenCalendar, steps[0].action)
+        assertEquals(AgentAction.OpenCalendar(), steps[0].action)
     }
 
     @Test
@@ -2178,7 +2179,7 @@ class CapabilityUpgradeTest {
         val registry = ToolRegistry()
         assertTrue(
             "open_calendar carries no parameter and is always a valid request",
-            registry.validateAction(AgentAction.OpenCalendar) is ToolValidationResult.Valid
+            registry.validateAction(AgentAction.OpenCalendar()) is ToolValidationResult.Valid
         )
     }
 
@@ -2190,7 +2191,7 @@ class CapabilityUpgradeTest {
             steps = listOf(
                 com.example.planning.PlanStep(
                     id = 1, sequence = 1, description = "open calendar",
-                    action = AgentAction.OpenCalendar,
+                    action = AgentAction.OpenCalendar(),
                     rawActionName = "open_calendar", expectedPostcondition = "calendar open",
                     verification = com.example.planning.VerificationMethod.NONE
                 )
@@ -2201,7 +2202,7 @@ class CapabilityUpgradeTest {
             goalOverride = plan.goal
         )
         assertTrue("a saved calendar skill must be replayable", restored != null)
-        assertEquals(AgentAction.OpenCalendar, restored!!.steps[0].action)
+        assertEquals(AgentAction.OpenCalendar(), restored!!.steps[0].action)
     }
 
     @Test
@@ -2267,6 +2268,89 @@ class CapabilityUpgradeTest {
 
         val terminal = awaitTerminal(orchestrator)
         assertTrue("a failed calendar dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
+    @Test
+    fun openCalendarCarriesTheDayOffsetToTheViewer() {
+        val recorder = RecordingCalendarViewer()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            calendarViewer = recorder
+        )
+        kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.OpenCalendar(dayOffset = 1))
+        }
+        assertEquals("the chosen day must reach the viewer", listOf(1), recorder.dayOffsets)
+    }
+
+    @Test
+    fun openCalendarParserDefaultsToTodayWithNoParams() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Open the calendar","action":"open_calendar","params":{},"verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "open my calendar")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val action = (result as PlanParseResult.Success).plan.steps[0].action
+        assertEquals(AgentAction.OpenCalendar(dayOffset = 0), action)
+    }
+
+    @Test
+    fun openCalendarParserResolvesTomorrowToDayOffsetOne() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Show tomorrow","action":"open_calendar","params":{"day":"tomorrow"},"verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "show my calendar for tomorrow")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val action = (result as PlanParseResult.Success).plan.steps[0].action
+        assertEquals(AgentAction.OpenCalendar(dayOffset = 1), action)
+    }
+
+    @Test
+    fun openCalendarSkillKeepsDayOffsetOnReplay() {
+        val plan = com.example.planning.TaskPlan(
+            goal = "show my calendar for tomorrow",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "open calendar tomorrow",
+                    action = AgentAction.OpenCalendar(dayOffset = 1),
+                    rawActionName = "open_calendar", expectedPostcondition = "calendar open",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved calendar skill must be replayable", restored != null)
+        assertEquals(
+            "the day offset must survive skill replay, not silently default to today",
+            AgentAction.OpenCalendar(dayOffset = 1),
+            restored!!.steps[0].action
+        )
+    }
+
+    @Test
+    fun dayStartResolvesTheChosenDayMidnight() {
+        val zone = java.util.TimeZone.getTimeZone("UTC")
+        // 2026-10-13T15:30:00Z
+        val now = java.util.Calendar.getInstance(zone).apply {
+            set(2026, java.util.Calendar.OCTOBER, 13, 15, 30, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val todayMidnight = AndroidCalendarViewer.dayStart(now, zone, 0)
+        val tomorrowMidnight = AndroidCalendarViewer.dayStart(now, zone, 1)
+        assertEquals("today's midnight must be same-day 00:00", 24 * 60 * 60 * 1000L, tomorrowMidnight - todayMidnight)
+        val cal = java.util.Calendar.getInstance(zone).apply { timeInMillis = tomorrowMidnight }
+        assertEquals(14, cal.get(java.util.Calendar.DAY_OF_MONTH))
+        assertEquals(0, cal.get(java.util.Calendar.HOUR_OF_DAY))
+        assertEquals(0, cal.get(java.util.Calendar.MINUTE))
     }
 
     // --- create_note: the "note down that ..." primitive ---
@@ -4352,8 +4436,10 @@ class CapabilityUpgradeTest {
         private val result: CalendarViewResult? = null
     ) : CalendarViewer {
         var calls = 0
-        override fun openCalendar(nowMillis: Long): CalendarViewResult {
+        val dayOffsets = mutableListOf<Int>()
+        override fun openCalendar(nowMillis: Long, dayOffset: Int): CalendarViewResult {
             calls++
+            dayOffsets += dayOffset
             return result ?: CalendarViewResult(true, "CALENDAR_OPENED", "Opening the calendar")
         }
     }
