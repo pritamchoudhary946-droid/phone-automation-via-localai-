@@ -21,6 +21,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import com.example.OmniAgentApplication
 import com.example.automation.AutomationGate
+import com.example.automation.AutomationTrigger
+import com.example.automation.TriggerLabel
+import com.example.automation.TriggerMatcher
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.filled.Pause
 import com.example.data.local.AutomationEntity
 import com.example.data.local.SavedSkillEntity
 import com.example.data.local.UserMemoryEntity
@@ -69,7 +75,6 @@ private fun SkillsTab(app: OmniAgentApplication?) {
     var renameTarget by remember { mutableStateOf<SavedSkillEntity?>(null) }
     var renameText by remember { mutableStateOf("") }
     var scheduleTarget by remember { mutableStateOf<SavedSkillEntity?>(null) }
-    var scheduleMinutes by remember { mutableStateOf("60") }
     val orchestrator = app?.orchestrator
     val context = LocalContext.current
     val appSettings = app?.settings
@@ -105,7 +110,7 @@ private fun SkillsTab(app: OmniAgentApplication?) {
                         modifier = Modifier.testTag("skill_replay_${skill.name}")
                     ) { Icon(Icons.Default.PlayArrow, contentDescription = "Replay") }
                     IconButton(
-                        onClick = { scheduleTarget = skill; scheduleMinutes = "60" },
+                        onClick = { scheduleTarget = skill },
                         modifier = Modifier.testTag("skill_schedule_${skill.name}")
                     ) { Icon(Icons.Default.Add, contentDescription = "Schedule") }
                     IconButton(
@@ -151,24 +156,56 @@ private fun SkillsTab(app: OmniAgentApplication?) {
         val lastScheduled by produceState(initialValue = 0, skill.name) {
             value = app?.database?.automationDao()?.getAutomationsForSkill(skill.name)?.size ?: 0
         }
+        var triggerType by remember(skill.name) { mutableStateOf(AutomationTrigger.INTERVAL) }
+        var triggerValue by remember(skill.name) { mutableStateOf(TriggerLabel.defaultIntervalMinutes()) }
         AlertDialog(
             onDismissRequest = { scheduleTarget = null },
             title = { Text("Schedule \"${skill.name}\"") },
             text = {
                 Column {
                     Text(
-                        "Jarvis will replay this routine on a repeating interval while scheduled " +
-                            "automations are enabled.",
+                        "Jarvis will replay this routine by itself while scheduled automations are " +
+                            "enabled. Choose when it should run.",
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = scheduleMinutes,
-                        onValueChange = { scheduleMinutes = it.filter { c -> c.isDigit() }.take(5) },
-                        singleLine = true,
-                        label = { Text("Every how many minutes?") },
-                        modifier = Modifier.testTag("automation_interval_field")
-                    )
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        TriggerMatcher.allTriggers.forEach { type ->
+                            FilterChip(
+                                selected = triggerType == type,
+                                onClick = {
+                                    triggerType = type
+                                    triggerValue = when (type) {
+                                        AutomationTrigger.INTERVAL -> TriggerLabel.defaultIntervalMinutes()
+                                        AutomationTrigger.BATTERY_BELOW -> "20"
+                                        AutomationTrigger.BATTERY_ABOVE -> "80"
+                                        AutomationTrigger.NETWORK_TYPE -> "WIFI"
+                                        else -> ""
+                                    }
+                                },
+                                label = { Text(TriggerLabel.shortName(type), fontSize = 11.sp) },
+                                modifier = Modifier.testTag("automation_trigger_chip_$type")
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (triggerType != AutomationTrigger.CHARGING_STARTED) {
+                        val numeric = triggerType == AutomationTrigger.INTERVAL ||
+                            triggerType == AutomationTrigger.BATTERY_BELOW ||
+                            triggerType == AutomationTrigger.BATTERY_ABOVE
+                        OutlinedTextField(
+                            value = triggerValue,
+                            onValueChange = { raw ->
+                                triggerValue = if (numeric) raw.filter { c -> c.isDigit() }.take(5) else raw
+                            },
+                            singleLine = true,
+                            label = { Text(TriggerLabel.valueHint(triggerType)) },
+                            modifier = Modifier.testTag("automation_interval_field")
+                        )
+                    }
                     if (lastScheduled > 0) {
                         Spacer(Modifier.height(6.dp))
                         Text(
@@ -180,21 +217,36 @@ private fun SkillsTab(app: OmniAgentApplication?) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val minutes = scheduleMinutes.toIntOrNull() ?: 0
-                    if (minutes >= AutomationGate.MIN_INTERVAL_MINUTES) {
-                        scope.launch { orchestrator?.scheduleAutomation(skill.name, minutes) }
-                        android.widget.Toast.makeText(
-                            context,
-                            "Scheduled every ${AutomationGate.intervalMinutes(minutes)}m",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                        scheduleTarget = null
-                    } else {
-                        android.widget.Toast.makeText(
+                    val trimmed = triggerValue.trim()
+                    val invalidInterval = triggerType == AutomationTrigger.INTERVAL &&
+                        (trimmed.toIntOrNull() ?: 0) < AutomationGate.MIN_INTERVAL_MINUTES
+                    val missingValue = TriggerLabel.requiresValue(triggerType) && trimmed.isEmpty()
+                    when {
+                        invalidInterval -> android.widget.Toast.makeText(
                             context,
                             "Minimum interval is ${AutomationGate.MIN_INTERVAL_MINUTES} minutes",
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
+                        missingValue -> android.widget.Toast.makeText(
+                            context,
+                            "Enter a value for this trigger",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        else -> {
+                            scope.launch {
+                                if (triggerType == AutomationTrigger.INTERVAL) {
+                                    orchestrator?.scheduleAutomation(skill.name, trimmed.toIntOrNull() ?: 0)
+                                } else {
+                                    orchestrator?.scheduleTriggeredAutomation(skill.name, triggerType, trimmed)
+                                }
+                            }
+                            android.widget.Toast.makeText(
+                                context,
+                                "Scheduled: ${TriggerLabel.describe(triggerType, trimmed)}",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                            scheduleTarget = null
+                        }
                     }
                 }) { Text("Schedule") }
             },
@@ -232,16 +284,24 @@ private fun AutomationsTab(app: OmniAgentApplication?) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(a.skillName, fontWeight = FontWeight.SemiBold)
-                                val interval = a.triggerValue.toIntOrNull()
-                                    ?.let { AutomationGate.intervalMinutes(it) }
                                 Text(
-                                    if (a.triggerType == com.example.automation.AutomationTrigger.INTERVAL && interval != null)
-                                        "Every $interval minutes" else a.triggerType,
+                                    TriggerLabel.describe(a.triggerType, a.triggerValue),
                                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    if (a.enabled) "Enabled" else "Disabled",
+                                    if (a.enabled) "Enabled" else "Paused",
                                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    scope.launch { orchestrator(app)?.setAutomationEnabled(a.id, !a.enabled) }
+                                },
+                                modifier = Modifier.testTag("automation_toggle_${a.id}")
+                            ) {
+                                Icon(
+                                    if (a.enabled) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (a.enabled) "Pause" else "Resume"
                                 )
                             }
                             IconButton(
