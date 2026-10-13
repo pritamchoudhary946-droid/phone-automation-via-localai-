@@ -17,7 +17,7 @@ import androidx.room.RoomDatabase
         AutomationEntity::class,
         EpisodeEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AgentDatabase : RoomDatabase() {

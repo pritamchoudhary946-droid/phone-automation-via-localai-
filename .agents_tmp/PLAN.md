@@ -1,3 +1,38 @@
+---
+
+## SESSION 48 (2026-10-13) - milestone: scheduled-automation run observability (7.8) + run-now
+
+Where reached: DONE and validated. This run finished the two items left open by the
+scheduled-automation capability (sessions 43-45), on a base rebased onto current `main`.
+
+- `AutomationEntity.lastRunAtMs` (new field, DB v4 -> v5, `fallbackToDestructiveMigration`)
+  is honest read-only observability for each scheduled automation.
+- `AutomationDao.markAutomationRun(id, timestamp)` stamps it.
+- `TaskOrchestrator.runAutomation(skill, automationId)` runs a saved skill *attributed* to an
+  automation. `activeAutomationId` is threaded through `startTask` and stamped in the terminal
+  handler (`complete`/`fail`) only once the run genuinely finishes. A user-initiated start passes
+  `0`, so a later terminal state never stamps an unrelated automation. A blank goal returns
+  `false`; an unreconstructable plan is re-planned from its goal - never a fake success.
+- `AutomationWorker` runs via `runAutomation` and returns `Result.failure()` when the skill could
+  not actually start (previously `Result.success()` unconditionally - a success that never ran).
+- `LibraryScreen` Automations tab: an honest "Last run ..." line (pure, unit-tested
+  `formatLastRun`: Never run / Nm / Nh / Nd ago / date) and a per-automation Run-now button
+  (`testTag automation_run_<id>`) that enqueues `AutomationScheduler.runOnce(context, skillName, id)`.
+
+Rebase note: the branch was originally based on `badfe33`. It carried a one-line compile fix for
+PR #83's invalid `androidx.compose.runtime.onDispose` import. The owner's revert (PR #84 ->
+`64e303b`) superseded that fix and deleted `GoogleAccountCard.kt`, so the moot fix commit was
+dropped and the branch replayed cleanly on the new `main` (no force-push: pushed as
+`auto/jarvis-autonomy-20261013-1330`).
+
+Validation (toolchain present): `./gradlew :app:testDebugUnitTest --no-daemon` -> BUILD
+SUCCESSFUL, 516 tests 0 failures 0 errors 0 skipped (full suite on the rebased base).
+`./gradlew :app:assembleDebug --no-daemon` -> BUILD SUCCESSFUL, app-debug.apk produced.
+
+Remaining: optional further controls behind `DeviceControl` (dnd / airplane-mode); a
+per-automation "next fire" hint; optional lint gate. Session cap reached (48/48) - human review
+requested before further capability work.
+
 
 ---
 

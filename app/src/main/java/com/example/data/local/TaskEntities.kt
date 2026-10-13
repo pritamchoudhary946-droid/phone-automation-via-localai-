@@ -106,7 +106,9 @@ data class AutomationEntity(
     val triggerType: String, // INTERVAL, WIFI_CONNECTED
     val triggerValue: String, // interval minutes, or an SSID (blank = any wifi)
     val enabled: Boolean = true,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /** When this automation last drove its skill (0 = never). Read-only observability. */
+    val lastRunAtMs: Long = 0L
 )
 
 /**

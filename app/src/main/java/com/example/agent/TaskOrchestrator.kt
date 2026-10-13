@@ -204,6 +204,14 @@ class TaskOrchestrator(
     /** An action the user just approved: skip re-prompting when the loop reconsiders it. */
     private var userConfirmedAction: AgentAction? = null
 
+    /**
+     * The scheduled automation driving the current run (0 = a user-initiated task), so the
+     * terminal handler can stamp that automation's [AutomationEntity.lastRunAtMs] once the
+     * run genuinely finishes. Passed through [startTask]; every user-initiated start uses the
+     * default 0, so a later terminal state never stamps an unrelated automation.
+     */
+    private var activeAutomationId: Long = 0L
+
     val stepTimeoutMs: Long = 15_000L
     var defaultMaxSteps: Int = 25
 
@@ -280,8 +288,11 @@ class TaskOrchestrator(
         return hit?.value?.let { "You told me: $it" } ?: "I don't have anything stored about that yet."
     }
 
-    fun startTask(goal: String, maxSteps: Int = defaultMaxSteps, resumePlan: TaskPlan? = null) {
+    fun startTask(goal: String, maxSteps: Int = defaultMaxSteps, resumePlan: TaskPlan? = null, automationId: Long = 0L) {
         if (executionJob?.isActive == true) cancelCurrentTask()
+        // Attribution: a scheduled automation passes its id so the run's terminal state
+        // stamps it; every user-initiated start uses the default 0 and stamps nothing.
+        activeAutomationId = automationId
         // 9.3: expand a follow-up ("and send it") into a self-contained goal before it
         // is persisted, so the plan and the history both read correctly.
         val effectiveGoal = when (val r = conversationMemory.resolve(goal)) {
@@ -335,6 +346,25 @@ class TaskOrchestrator(
         } else {
             startTask(skill.goal, resumePlan = plan)
         }
+    }
+
+    /**
+     * Runs a saved skill because a scheduled automation fired (plan 7.8). Unlike [runSkill],
+     * this attributes the run to [automationId] so the automation's `lastRunAtMs` is stamped
+     * when the run genuinely reaches a terminal state, and it reports honestly whether a run
+     * actually started: a skill with no stored plan is re-planned from its goal rather than
+     * silently dropped, and a blank goal can never start, so this returns false instead of
+     * leaving the worker to report a success that never happened.
+     */
+    fun runAutomation(skill: SavedSkillEntity, automationId: Long): Boolean {
+        val goal = skill.goal.ifBlank { return false }
+        scope.launch { runCatching { database.skillDao().markSkillRun(skill.name, System.currentTimeMillis()) } }
+        val plan = if (skill.planJson.isBlank()) null else TaskPlanSerializer.fromJson(skill.planJson, goalOverride = goal)
+        if (plan == null) {
+            Log.w(TAG, "Automation ${skill.name}: no reconstructable plan; re-planning from its goal")
+        }
+        startTask(goal, resumePlan = plan, automationId = automationId)
+        return true
     }
 
     // --- 7.8 scheduled automations: create / list / remove ----------------------
@@ -1570,6 +1600,7 @@ class TaskOrchestrator(
         notifyFinished("Task complete", finalSummary)
         // Only an optionally-enabled, clean run is auto-saved as a reusable skill (4.13).
         maybeAutoSaveSkill(task, finalSummary, completedCount)
+        markActiveAutomationRun()
         stopExecutionService()
     }
 
@@ -1605,6 +1636,7 @@ class TaskOrchestrator(
         } else {
             notifyFinished("Task failed", reason)
         }
+        markActiveAutomationRun()
         stopExecutionService()
     }
 
@@ -1612,6 +1644,17 @@ class TaskOrchestrator(
     private fun notifyFinished(title: String, summary: String) {
         val notifier = completionNotifier ?: return
         runCatching { notifier.notifyFinished(title, summary) }
+    }
+
+    /**
+     * Stamps the driving automation's `lastRunAtMs` once its run genuinely finished (plan 7.8),
+     * so the Library can show an honest "last ran" time. Best-effort and never fails the task;
+     * a user-initiated run ([activeAutomationId] == 0) records nothing.
+     */
+    private suspend fun markActiveAutomationRun() {
+        val id = activeAutomationId
+        if (id <= 0L) return
+        runCatching { database.automationDao().markAutomationRun(id, System.currentTimeMillis()) }
     }
 
     /**

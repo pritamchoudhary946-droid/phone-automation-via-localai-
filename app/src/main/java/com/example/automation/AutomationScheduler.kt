@@ -48,13 +48,20 @@ class AutomationWorker(
             if (skill == null) {
                 Log.w(TAG, "Automation skill '$skillName' no longer exists")
                 Result.failure()
+            } else if (!kotlinx.coroutines.runBlocking { app.orchestrator.skillExists(skillName) }) {
+                Log.w(TAG, "Skill '$skillName' vanished before run")
+                Result.success()
             } else {
-                if (!kotlinx.coroutines.runBlocking { app.orchestrator.skillExists(skillName) }) {
-                    Log.w(TAG, "Skill '$skillName' vanished before run")
+                // Run through the automation path so the run is attributed to this
+                // automation (its lastRunAtMs is stamped when the run finishes) and a
+                // skill that cannot actually start is reported as a failure, never a
+                // success that never ran.
+                val started = app.orchestrator.runAutomation(skill, automationId)
+                if (started) {
                     Result.success()
                 } else {
-                    app.orchestrator.runSkill(skill)
-                    Result.success()
+                    Log.w(TAG, "Automation $automationId could not start skill '$skillName'")
+                    Result.failure()
                 }
             }
         } catch (e: Exception) {
@@ -112,9 +119,14 @@ object AutomationScheduler {
     }
 
     /** One-off run used by the in-app self-check and by "run now". */
-    fun runOnce(context: Context, skillName: String) {
+    fun runOnce(context: Context, skillName: String, automationId: Long = 0L) {
         val request = OneTimeWorkRequestBuilder<AutomationWorker>()
-            .setInputData(androidx.work.workDataOf(AutomationWorker.KEY_SKILL to skillName))
+            .setInputData(
+                androidx.work.workDataOf(
+                    AutomationWorker.KEY_SKILL to skillName,
+                    AutomationWorker.KEY_AUTOMATION_ID to automationId
+                )
+            )
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.NOT_REQUIRED).build())
             .addTag(AUTOMATION_WORK_TAG)
             .build()

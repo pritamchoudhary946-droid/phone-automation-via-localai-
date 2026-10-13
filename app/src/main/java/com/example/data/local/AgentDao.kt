@@ -144,6 +144,9 @@ interface AutomationDao {
     @Query("UPDATE automations SET enabled = :enabled WHERE id = :id")
     suspend fun setAutomationEnabled(id: Long, enabled: Boolean)
 
+    @Query("UPDATE automations SET lastRunAtMs = :timestamp WHERE id = :id")
+    suspend fun markAutomationRun(id: Long, timestamp: Long)
+
     @Query("DELETE FROM automations WHERE id = :id")
     suspend fun deleteAutomation(id: Long)
 }

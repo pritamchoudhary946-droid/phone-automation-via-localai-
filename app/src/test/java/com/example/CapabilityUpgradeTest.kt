@@ -5467,6 +5467,70 @@ class CapabilityUpgradeTest {
         assertTrue(TriggerLabel.requiresValue(AutomationTrigger.APP_FOREGROUND))
     }
 
+    // --- 7.8 automation run observability: honest last-fired stamp + start result ---
+
+    @Test
+    fun automationRunStampsLastRunAtMsOnCompletion() = runBlocking {
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.OpenApp -> {
+                        defaultObservation = observation("com.google.android.youtube", "YouTube home", 2)
+                        ActionResult(true, "LAUNCH_VERIFIED", "verified")
+                    }
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine("""{"steps":[]}""")
+        val orchestrator = newOrchestrator(engine, automation)
+        val dao = AgentDatabase.getInstance(context).automationDao()
+        val skillDao = AgentDatabase.getInstance(context).skillDao()
+
+        val planJson = TaskPlanSerializer.toJson(
+            TaskPlan(
+                goal = "Open YouTube", fromModel = true,
+                steps = listOf(
+                    planStep(1, AgentAction.OpenApp("youtube", "com.google.android.youtube"), "launch_app")
+                )
+            )
+        )
+        skillDao.upsertSkill(SavedSkillEntity(name = "youtube_skill", goal = "Open YouTube", planJson = planJson))
+        val id = orchestrator.scheduleAutomation("youtube_skill", 60)!!
+        assertEquals("a fresh automation has never run", 0L, dao.getAutomationById(id)?.lastRunAtMs)
+
+        val started = orchestrator.runAutomation(skillDao.getSkill("youtube_skill")!!, id)
+        assertTrue("runAutomation must report that it started a run", started)
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("the skill run must complete, got $terminal", terminal is OrchestratorState.Completed)
+
+        val stamped = dao.getAutomationById(id)?.lastRunAtMs ?: 0L
+        assertTrue("a completed automation run must stamp lastRunAtMs", stamped > 0L)
+
+        runBlocking { orchestrator.cancelAutomation(id) }
+    }
+
+    @Test
+    fun runAutomationRefusesABlankGoalInsteadOfClaimingSuccess() = runBlocking {
+        val engine = modelEngine(emptyPlanJson())
+        val orchestrator = newOrchestrator(engine, FakeDeviceAutomation())
+        val skillDao = AgentDatabase.getInstance(context).skillDao()
+        skillDao.upsertSkill(SavedSkillEntity(name = "empty_goal", goal = "", planJson = emptyPlanJson()))
+        val started = orchestrator.runAutomation(skillDao.getSkill("empty_goal")!!, 42L)
+        assertFalse("a skill with no goal can never start, so runAutomation must report false", started)
+    }
+
+    @Test
+    fun formatLastRunDescribesAgeHonestly() {
+        val now = 1_700_000_000_000L
+        assertEquals("Never run", com.example.ui.formatLastRun(0L, now))
+        assertEquals("Last run just now", com.example.ui.formatLastRun(now - 5_000L, now))
+        assertEquals("Last run 2m ago", com.example.ui.formatLastRun(now - 2 * 60_000L, now))
+        assertEquals("Last run 3h ago", com.example.ui.formatLastRun(now - 3 * 3_600_000L, now))
+        assertEquals("Last run 2d ago", com.example.ui.formatLastRun(now - 2 * 86_400_000L, now))
+    }
+
     private fun emptyPlanJson(): String = "{\"steps\":[]}"
 
     private fun planStep(id: Int, action: AgentAction, rawName: String) = com.example.planning.PlanStep(

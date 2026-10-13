@@ -21,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import com.example.OmniAgentApplication
 import com.example.automation.AutomationGate
+import com.example.automation.AutomationScheduler
 import com.example.automation.AutomationTrigger
 import com.example.automation.TriggerLabel
 import com.example.automation.TriggerMatcher
@@ -292,7 +293,21 @@ private fun AutomationsTab(app: OmniAgentApplication?) {
                                     if (a.enabled) "Enabled" else "Paused",
                                     fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                Text(
+                                    formatLastRun(a.lastRunAtMs),
+                                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
+                            IconButton(
+                                onClick = {
+                                    AutomationScheduler.runOnce(context, a.skillName, a.id)
+                                    android.widget.Toast.makeText(
+                                        context, "Running \"${a.skillName}\" now",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                },
+                                modifier = Modifier.testTag("automation_run_${a.id}")
+                            ) { Icon(Icons.Default.PlayArrow, contentDescription = "Run now") }
                             IconButton(
                                 onClick = {
                                     scope.launch { orchestrator(app)?.setAutomationEnabled(a.id, !a.enabled) }
@@ -324,6 +339,21 @@ private fun AutomationsTab(app: OmniAgentApplication?) {
 }
 
 private fun orchestrator(app: OmniAgentApplication?) = app?.orchestrator
+
+/** Honest "last ran" line: never run / a relative age for the last few days / a date beyond that. */
+internal fun formatLastRun(lastRunAtMs: Long, now: Long = System.currentTimeMillis()): String {
+    if (lastRunAtMs <= 0L) return "Never run"
+    val age = now - lastRunAtMs
+    return when {
+        age < 0 -> "Last run just now"
+        age < 60_000L -> "Last run just now"
+        age < 3_600_000L -> "Last run ${age / 60_000L}m ago"
+        age < 86_400_000L -> "Last run ${age / 3_600_000L}h ago"
+        age < 604_800_000L -> "Last run ${age / 86_400_000L}d ago"
+        else -> "Last run " + java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date(lastRunAtMs))
+    }
+}
 
 @Composable
 private fun MemoryTab(app: OmniAgentApplication?) {
