@@ -168,9 +168,14 @@ fun GoogleAccountCard(modifier: Modifier = Modifier) {
                                                 errorMessage = explainGoogleSignInFailure(task.exception)
                                             }
                                         }
-                                } catch (_: GetCredentialCancellationException) {
+                                } catch (e: GetCredentialCancellationException) {
                                     isBusy = false
-                                    successMessage = "Sign-in cancelled."
+                                    val detail = e.message.orEmpty()
+                                    errorMessage = if (detail.contains("cancel", ignoreCase = true)) {
+                                        "Google sign-in was cancelled or authorization did not finish. If this appeared after selecting an account, update Google Play services and verify the Firebase OAuth configuration."
+                                    } else {
+                                        explainGoogleSignInFailure(e)
+                                    }
                                 } catch (e: Exception) {
                                     isBusy = false
                                     errorMessage = explainGoogleSignInFailure(e)
