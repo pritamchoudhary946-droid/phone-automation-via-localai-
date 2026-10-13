@@ -969,6 +969,10 @@ class TaskOrchestrator(
             is AgentAction.SendEmail, is AgentAction.NavigateTo,
             is AgentAction.OpenAppInfo, is AgentAction.OpenSettings, is AgentAction.OpenCalendar, is AgentAction.SetTorch,
             is AgentAction.Note,
+            // pick_file opens the platform document picker (a system service no screen
+            // reflects); a delivered picker intent is its own evidence, exactly like the
+            // note/contact/calendar dispatches above.
+            is AgentAction.PickFile,
             // Speech output acts on the platform TTS engine (no screen reflects it), and
             // the executor reports SPOKEN only once the engine accepted the utterance.
             is AgentAction.Speak,
@@ -1171,6 +1175,7 @@ class TaskOrchestrator(
                 action is AgentAction.OpenSettings ||
                 action is AgentAction.OpenCalendar ||
                 action is AgentAction.Note ||
+                action is AgentAction.PickFile ||
                 action is AgentAction.SetTorch ||
                 action is AgentAction.Speak ||
                 action is AgentAction.ReadNotifications)

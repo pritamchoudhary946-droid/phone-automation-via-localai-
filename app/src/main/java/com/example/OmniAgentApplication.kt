@@ -219,6 +219,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // an arbitrary screen). It opens the notes editor for the user and never
                 // claims the note was saved.
                 noteController = com.example.agent.AndroidNoteController(this),
+                // File/document picking primitive: dispatches the platform's documented
+                // ACTION_OPEN_DOCUMENT picker, service-free like the note/contact/calendar
+                // primitives (no screen read or tap opens the picker reliably on an arbitrary
+                // screen). It opens the picker for the user to choose; it reads and deletes
+                // nothing and never claims a file was selected.
+                filePickerController = com.example.agent.AndroidFilePickerController(this),
                 // Text-summarisation primitive: condenses a captured block of text through
                 // the shared configured summarizer, service-free like the speak/read
                 // primitives (no screen reflects a summarisation). An unconfigured engine

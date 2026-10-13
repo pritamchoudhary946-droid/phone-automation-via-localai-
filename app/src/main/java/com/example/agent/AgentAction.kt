@@ -319,6 +319,21 @@ sealed class AgentAction {
      */
     data class Note(val title: String? = null, val content: String? = null) : AgentAction()
     /**
+     * Opens the system file/document picker so the user can choose a file - the
+     * "pick a file" / "choose a photo to attach" / "select a document" primitive. The
+     * picker is a separate process no accessibility-tree read or UI tap can open
+     * reliably on an arbitrary screen (and driving a specific file-manager UI would be
+     * app-specific), so like [Note] the platform's documented
+     * [android.content.Intent.ACTION_GET_CONTENT] intent is dispatched and resolved
+     * before the accessibility-service gate. [mimeType] filters the picker (e.g.
+     * `image/*`, `application/pdf`; null/blank means any file) and [allowMultiple] lets
+     * the user pick more than one. It only *opens* the picker for the user to choose;
+     * it never reads, deletes or uploads anything itself, so the selection stays under
+     * the user's control (section 3.5), and the app cannot read back which file was
+     * chosen (the picker is a separate process).
+     */
+    data class PickFile(val mimeType: String? = null, val allowMultiple: Boolean = false) : AgentAction()
+    /**
      * Condenses [text] to a short [maxChars]-bounded digest through the configured
      * cloud summarizer (the same engine used for the planning memory/lessons digests).
      * This is the "summarise this page/thread/result" primitive: a multi-app chain
@@ -422,6 +437,11 @@ sealed class AgentAction {
                 else -> "Open the calendar ${-dayOffset} days ago"
             }
             is Note -> title?.takeIf { it.isNotBlank() }?.let { "Create note '$it'" } ?: "Create a note"
+            is PickFile -> buildString {
+                append("Open the file picker")
+                mimeType?.takeIf { it.isNotBlank() }?.let { append(" for $it") }
+                if (allowMultiple) append(" (multiple)")
+            }
             is SummarizeText -> "Summarise ${text.length} chars of text"
             is ReadNotifications -> "Read notifications"
             is ReadDeviceStatus -> "Read device status"

@@ -116,6 +116,7 @@ class PlanVariableStore {
             title = action.title?.let(::substitute),
             content = action.content?.let(::substitute)
         )
+        is AgentAction.PickFile -> action.copy(mimeType = action.mimeType?.let(::substitute))
         is AgentAction.Speak -> action.copy(text = substitute(action.text))
         // The text summarised can be a value captured earlier in the run, so the same
         // cross-app passing that feeds enter_text/share/email must feed summarize_text
