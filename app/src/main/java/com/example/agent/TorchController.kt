@@ -16,6 +16,46 @@ data class TorchResult(
 )
 
 /**
+ * Pure, device-free resolver for [AgentAction.SetDeviceControl]. A scheduled automation
+ * stores one trigger action as `control` + `value` strings; this maps the supported
+ * `control` ("torch") and its on/off value to the boolean the executor dispatches, so
+ * the parsing is unit-testable without a device and the executor/prompt/serializer all
+ * agree on the accepted vocabulary.
+ */
+object DeviceControl {
+    const val TORCH = "torch"
+
+    /** The controls `set_device_control` understands. */
+    fun keys(): List<String> = listOf(TORCH)
+
+    /**
+     * Resolves the boolean for a ([control], [value]) pair, or null when the control is
+     * unknown or the value is not an on/off alias. Null means "refuse honestly" - no tap
+     * or intent is built for an unrecognised request.
+     */
+    fun resolve(control: String, value: String): Boolean? {
+        val normalisedControl = control.trim().lowercase()
+        if (normalisedControl != TORCH) return null
+        return when (value.trim().lowercase()) {
+            "on", "true", "enable", "enabled", "1", "yes", "start" -> true
+            "off", "false", "disable", "disabled", "0", "no", "stop" -> false
+            else -> null
+        }
+    }
+
+    /** True when [control] is a control the executor understands. */
+    fun isKnown(control: String): Boolean = resolve(control, "on") != null
+
+    /** Canonical display value for a (control, value) pair, for honest UI wording. */
+    fun describeValue(control: String, value: String): String =
+        when (resolve(control, value)) {
+            true -> "on"
+            false -> "off"
+            null -> value.trim()
+        }
+}
+
+/**
  * The torch/flashlight boundary for [AgentAction.SetTorch]. This is the "turn on the
  * flashlight" / "switch the torch off" primitive: the torch is a camera-hardware
  * setting, not an accessibility-tree control, so no screen read or UI tap can toggle

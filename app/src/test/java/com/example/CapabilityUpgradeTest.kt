@@ -46,6 +46,7 @@ import com.example.agent.AppInfoController
 import com.example.agent.AppInfoResult
 import com.example.agent.TorchController
 import com.example.agent.TorchResult
+import com.example.agent.DeviceControl
 import com.example.agent.SpeakController
 import com.example.agent.SpeakResult
 import com.example.agent.SettingsController
@@ -3150,6 +3151,207 @@ class CapabilityUpgradeTest {
 
         val terminal = awaitTerminal(orchestrator)
         assertTrue("a failed torch toggle must fail the run, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
+    // --- set_device_control: the scheduled-automation device-control primitive ---
+
+    @Test
+    fun deviceControlResolvesTorchOnAndOffAliases() {
+        // The resolver is the single truth for the accepted (control, value) vocabulary
+        // shared by the parser, the executor and the prompt catalogue.
+        assertEquals(true, DeviceControl.resolve("torch", "on"))
+        assertEquals(true, DeviceControl.resolve("Torch", "ENABLE"))
+        assertEquals(true, DeviceControl.resolve(" torch ", "yes"))
+        assertEquals(false, DeviceControl.resolve("torch", "off"))
+        assertEquals(false, DeviceControl.resolve("torch", "disable"))
+        assertEquals(false, DeviceControl.resolve("torch", "0"))
+        // An unknown control or a non-on/off value must resolve to null (refuse honestly).
+        assertNull(DeviceControl.resolve("wifi", "on"))
+        assertNull(DeviceControl.resolve("torch", "maybe"))
+        assertNull(DeviceControl.resolve("", "on"))
+        assertEquals("on", DeviceControl.describeValue("torch", "enable"))
+        assertEquals("off", DeviceControl.describeValue("torch", "disabled"))
+    }
+
+    @Test
+    fun setDeviceControlExecutesWithoutAnAccessibilityService() {
+        // Like set_torch it drives the CameraManager, so it is service-free and must
+        // resolve before the a11y gate.
+        val recorder = RecordingTorchController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            torchController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("torch", "on"))
+        }
+        assertTrue("device control must run without a bound a11y service: $result", result.success)
+        assertEquals("TORCH_ON", result.method)
+        assertEquals(listOf(true), recorder.calls)
+    }
+
+    @Test
+    fun setDeviceControlOffReachesTheController() {
+        val recorder = RecordingTorchController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            torchController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("torch", "off"))
+        }
+        assertTrue(result.success)
+        assertEquals("TORCH_OFF", result.method)
+        assertEquals(listOf(false), recorder.calls)
+    }
+
+    @Test
+    fun setDeviceControlRefusesAnUnknownControlHonestly() {
+        // An unrecognised control/value must be refused before any dispatch, never a tap
+        // or a silent no-op.
+        val recorder = RecordingTorchController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            torchController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("wifi", "on"))
+        }
+        assertFalse("an unknown control must not be a fake success", result.success)
+        assertEquals("UNSUPPORTED_DEVICE_CONTROL", result.method)
+        assertTrue("no dispatch may happen for an unknown control", recorder.calls.isEmpty())
+    }
+
+    @Test
+    fun setDeviceControlParserMapsControlAndValue() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Torch on","action":"set_device_control","params":{"control":"torch","value":"on"},"expect":"light on","verify":"NONE"},
+          {"id":2,"seq":2,"desc":"Torch off","action":"set_device_control","params":{"setting":"Torch","state":"disable"},"expect":"light off","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "device control")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        val steps = (result as PlanParseResult.Success).plan.steps
+        assertEquals(AgentAction.SetDeviceControl("torch", "on"), steps[0].action)
+        assertEquals(AgentAction.SetDeviceControl("torch", "disable"), steps[1].action)
+    }
+
+    @Test
+    fun validationRejectsUnknownDeviceControl() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("torch", "on")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("torch", "off")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("wifi", "on")) is ToolValidationResult.Invalid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("torch", "maybe")) is ToolValidationResult.Invalid)
+    }
+
+    @Test
+    fun setDeviceControlSkillKeepsItsControlAndValueOnReplay() {
+        // A learned/scheduled "torch off" control must not replay turning the torch ON.
+        val plan = com.example.planning.TaskPlan(
+            goal = "turn off the flashlight",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "torch off",
+                    action = AgentAction.SetDeviceControl("torch", "off"),
+                    rawActionName = "set_device_control", expectedPostcondition = "light off",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved device-control skill must be replayable", restored != null)
+        assertEquals(AgentAction.SetDeviceControl("torch", "off"), restored!!.steps[0].action)
+    }
+
+    @Test
+    fun promptAdvertisesSetDeviceControl() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue(
+            "advertised actions are missing ${ToolRegistry.TOOL_SET_DEVICE_CONTROL}",
+            actions.contains(ToolRegistry.TOOL_SET_DEVICE_CONTROL)
+        )
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "turn the flashlight on when charging starts",
+                desiredOutcome = "torch on",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing set_device_control", prompt.contains("set_device_control"))
+    }
+
+    @Test
+    fun setDeviceControlIsFastPathedWithoutTheModel() {
+        val executor = HybridStepExecutor(AppDirectory(context))
+        val step = planStep(1, AgentAction.SetDeviceControl("torch", "on"), "set_device_control")
+        val decision = executor.decide(
+            listOf(step), 0,
+            observation("com.android.launcher", "Home", 1),
+            nudgeUsed = false
+        )
+        assertTrue("a device control must be fast-pathed, got $decision", decision is FastPathDecision.Execute)
+    }
+
+    @Test
+    fun setDeviceControlStepCompletesFromItsOwnHonestResult() = kotlinx.coroutines.runBlocking {
+        // A device control acts on the CameraManager, which no screen reflects, so the
+        // step's default NONE verification can never be satisfied from a fresh screen; the
+        // executor's honest, read-back-confirmed result is the step's evidence.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetDeviceControl -> ActionResult(true, "TORCH_ON", "Flashlight is on")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Torch on","action":"set_device_control","params":{"control":"torch","value":"on"},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("turn on the flashlight", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("set_device_control must complete from its own result, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.SetDeviceControl })
+    }
+
+    @Test
+    fun setDeviceControlFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule accepts only a genuinely successful result: a control the
+        // hardware ignored (TORCH_UNCHANGED) must fail the step, not be reported as success.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.SetDeviceControl -> ActionResult(false, "TORCH_UNCHANGED", "The flashlight did not turn on")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Torch on","action":"set_device_control","params":{"control":"torch","value":"on"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("turn on the flashlight", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a failed device control must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
     // --- speak: the "say good morning" on-device TTS primitive ---

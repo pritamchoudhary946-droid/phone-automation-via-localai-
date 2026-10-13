@@ -258,6 +258,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic torch control"
             )
 
+            is AgentAction.SetDeviceControl -> FastPathDecision.Execute(
+                action,
+                "deterministic device control"
+            )
+
             is AgentAction.Speak -> FastPathDecision.Execute(
                 action,
                 "deterministic on-device speech output"

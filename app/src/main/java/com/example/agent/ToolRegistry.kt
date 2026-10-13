@@ -57,6 +57,7 @@ open class ToolRegistry {
         const val TOOL_NAVIGATE_TO = "navigate_to"
         const val TOOL_OPEN_APP_INFO = "open_app_info"
         const val TOOL_SET_TORCH = "set_torch"
+        const val TOOL_SET_DEVICE_CONTROL = "set_device_control"
         const val TOOL_SPEAK = "speak"
         const val TOOL_OPEN_SETTINGS = "open_settings"
         const val TOOL_OPEN_CALENDAR = "open_calendar"
@@ -301,6 +302,12 @@ open class ToolRegistry {
             description = "Turns the device flashlight/torch on or off. Use for 'turn on the flashlight', 'switch the torch off', 'is the light on'. It reads the state back, so a toggle the hardware ignored is reported as a failure, never a fake success",
             requiredParameters = listOf("on"),
             optionalParameters = listOf("state", "enabled", "enable", "bool")
+        ),
+        TOOL_SET_DEVICE_CONTROL to ToolDefinition(
+            name = TOOL_SET_DEVICE_CONTROL,
+            description = "Sets a device control to an explicit on/off value. Use for a scheduled automation's action, e.g. 'turn the flashlight on when charging starts', 'turn the flashlight off when battery is low'. The only control is torch; the value is on or off. It reads the state back, so a change the hardware ignored is reported as a failure, never a fake success",
+            requiredParameters = listOf("control", "value"),
+            optionalParameters = listOf("setting", "target", "name", "state", "on")
         ),
         TOOL_SPEAK to ToolDefinition(
             name = TOOL_SPEAK,
@@ -659,6 +666,17 @@ open class ToolRegistry {
             // reject; it is always a valid request (the executor reports honestly when no
             // flash is available).
             is AgentAction.SetTorch -> ToolValidationResult.Valid
+            // set_device_control: reject an unknown control or a non-on/off value before any
+            // dispatch, so a malformed plan/automation cannot reach the executor.
+            is AgentAction.SetDeviceControl -> {
+                if (com.example.agent.DeviceControl.resolve(action.control, action.value) == null) {
+                    ToolValidationResult.Invalid(
+                        "set_device_control requires control=${com.example.agent.DeviceControl.keys().joinToString("/")} and value on/off: '${action.control}'='${action.value}'"
+                    )
+                } else {
+                    ToolValidationResult.Valid
+                }
+            }
             is AgentAction.Speak -> {
                 if (action.text.isBlank()) {
                     ToolValidationResult.Invalid("speak requires non-blank text")

@@ -362,6 +362,28 @@ a confirmed change, `TORCH_UNCHANGED` when the hardware ignored the request, and
 otherwise — never a fake success. It is injectable via the `AndroidDeviceAutomation`
 constructor and wired in `OmniAgentApplication`.
 
+`set_device_control` (`AgentAction.SetDeviceControl(control, value)`) is the
+registry-driven device-control primitive for scheduled/condition automations: it
+generalises "flip a hardware/system setting" into one voice (`control` + `value`)
+without inventing a bespoke action per setting, so a new control is a mapping, not a
+new tool. It is resolved *before* the a11y gate (device-backed, like `set_torch`).
+The pure, unit-tested `com.example.agent.DeviceControl.resolve(control, value)` is the
+single truth for the accepted vocabulary: it trims and lower-cases both fields and
+accepts the on/off aliases `on`/`off`/`enable`/`disable`/`yes`/`no`/`true`/`false`/`1`/`0`
+(case-insensitively), returning a typed op or **null** for an unknown control or value.
+Today the only backed control is `torch`, dispatched to the existing `TorchController`
+(read-back `TORCH_ON`/`TORCH_OFF`, `TORCH_UNCHANGED` on an ignored request). Because the
+resolver rejects anything it cannot run, an unknown control is refused honestly
+(`UNSUPPORTED_DEVICE_CONTROL` at execute, `Invalid` at validation) and never dispatched —
+so the prompt can never advertise a control the executor cannot execute. Carried through
+`ToolRegistry` (const `TOOL_SET_DEVICE_CONTROL`, definition, validation), `TaskPlanParser`
+(control/value aliases), `HybridStepExecutor.decide` (deterministic fast path),
+`PlannerPromptBuilder.ACTION_CATALOG`, and `TaskPlanSerializer` (`toParams` carries both
+fields so a scheduled/learned control replays correctly). A control acts on a system
+service no accessibility screen reflects, so `verifyAction` accepts a successful result
+as the step's evidence via the same self-evidencing rule as `set_torch`, and a
+`TORCH_UNCHANGED` result still fails the step (never masked).
+
 `speak` (`AgentAction.Speak(text)` + `SpeakController` -> the platform `TextToSpeech`
 engine) follows the same rule: speech output is a platform TTS service, not an
 accessibility-tree control, so no screen read or UI tap can produce speech on an
@@ -640,7 +662,7 @@ output is off, read live per call by `AgentPlanner`.
 - Service-backed actions are self-evidencing too. `adjust_volume`, `play_media`,
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
-  `open_app_info`, `open_settings`, `set_torch`,
+  `open_app_info`, `open_settings`, `set_torch`, `set_device_control`,
   `speak`, `open_calendar`, `create_note`, `pick_file`, `summarize_text` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
@@ -687,6 +709,8 @@ output is off, read live per call by `AgentPlanner`.
   picker intent was delivered (`FILE_PICKER_UNAVAILABLE` otherwise), and
   `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
   confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise), and
+  `set_device_control` reports the backed control's honest result (its `torch` control
+  reuses `set_torch`'s read-back; an unknown control is `UNSUPPORTED_DEVICE_CONTROL`), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the
   utterance (`TTS_UNAVAILABLE` / `SPEAK_DISABLED` otherwise), and `summarize_text`
   reports `SUMMARY_OK` only with a non-blank digest from the configured summarizer
