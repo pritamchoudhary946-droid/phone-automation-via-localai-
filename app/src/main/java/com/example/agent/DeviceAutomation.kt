@@ -623,7 +623,7 @@ class AndroidDeviceAutomation(
         // that the picker intent was delivered; it never reads or deletes a file.
         if (action is AgentAction.PickFile) {
             val picker = filePickerController
-                ?: return@withContext ActionResult(false, "FILE_PICK_UNAVAILABLE", "File picker dispatch is not available")
+                ?: return@withContext ActionResult(false, "FILE_PICKER_UNAVAILABLE", "File picker dispatch is not available")
             val result = picker.pickFile(action.mimeType, action.allowMultiple)
             return@withContext ActionResult(result.success, result.method, result.message)
         }

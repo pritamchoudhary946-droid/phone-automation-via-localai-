@@ -2563,7 +2563,7 @@ class CapabilityUpgradeTest {
             automation.execute(AgentAction.PickFile())
         }
         assertFalse("no controller must not be a fake success", result.success)
-        assertEquals("FILE_PICK_UNAVAILABLE", result.method)
+        assertEquals("FILE_PICKER_UNAVAILABLE", result.method)
     }
 
     @Test
@@ -2728,7 +2728,7 @@ class CapabilityUpgradeTest {
             defaultObservation = observation("com.android.launcher", "Home", 1)
             executeResult = { action ->
                 when (action) {
-                    is AgentAction.PickFile -> ActionResult(false, "FILE_PICK_UNAVAILABLE", "File picker dispatch is not available")
+                    is AgentAction.PickFile -> ActionResult(false, "FILE_PICKER_UNAVAILABLE", "File picker dispatch is not available")
                     else -> ActionResult(true, "OK", "ok")
                 }
             }

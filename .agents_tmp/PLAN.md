@@ -1,6 +1,40 @@
 
 ---
 
+## SESSION 42 (2026-10-13) - milestone: file/document picking (pick_file)
+
+Status: DONE. Jarvis can now open the system file/document picker.
+- New `AgentAction.PickFile(mimeType?, allowMultiple)` + tool `pick_file`. Opens the
+  system picker via `Intent.ACTION_GET_CONTENT` (+`CATEGORY_OPENABLE`, optional
+  `EXTRA_ALLOW_MULTIPLE`) for "attach a photo" / "choose a document" / "let me pick a PDF".
+- New `com.example.agent.FilePickerController` seam + `AndroidFilePickerController`
+  (`FilePickResult`). Resolved *before* the a11y-service gate, exactly like `create_note`:
+  the picker is a separate process and no screen read/tap opens it reliably.
+- It only *opens* the picker for the user to choose; it never reads/deletes/uploads the
+  file, and reports `FILE_PICKER_OPENED` only after the intent was delivered
+  (`FILE_PICKER_UNAVAILABLE` / `FILE_PICKER_PERMISSION` / `FILE_PICKER_ERROR` otherwise) -
+  never a claimed selection. Self-evidences a NONE-verified step from its honest result.
+- Implemented across every action-vocabulary seam: `AgentAction` (+`getDisplayName`),
+  `ToolRegistry` (const/definition/`MAX_MIME_TYPE_CHARS` validation), `TaskPlanParser`
+  (tool map + `parseAllowMultiple` alias resolver), `HybridStepExecutor.decide`
+  (deterministic fast path), `PlannerPromptBuilder.ACTION_CATALOG`, `PlanVariables`,
+  `AndroidDeviceAutomation.execute`, `TaskPlanSerializer` (`toParams`/`toolNameFor`),
+  `OmniAgentApplication` wiring.
+- Fixes: unified the unwired code to `FILE_PICKER_UNAVAILABLE` (was `FILE_PICK_UNAVAILABLE`);
+  KDoc `image/*` nested-comment syntax error fixed in `AgentAction.kt` / `FilePickerController.kt`.
+- Tests (CapabilityUpgradeTest, 11 new): `pickFileExecutesWithoutAnAccessibilityService`,
+  `pickFileRefusesHonestlyWhenUnwired`, `pickFileReportsFailureHonestlyWhenNoPickerExists`,
+  `pickFileParserMapsTheToolNameWithMimeAndMultiple`,
+  `pickFileParserAcceptsStringAliasesAndDefaultsToASinglePick`,
+  `validationRejectsAnAbsurdMimeTypeButAcceptsAnyFile`, `pickFileSkillKeepsMimeAndMultipleOnReplay`,
+  `fastPathPicksFileDeterministically`, `promptAdvertisesPickFile`,
+  `pickFileStepCompletesFromItsOwnHonestResult`, `pickFileFailureIsNotMaskedByTheSelfEvidencingRule`.
+- Validation: `./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon` ->
+  BUILD SUCCESSFUL in 4m32s, 480 tests, 0 failures, 0 errors; `app-debug.apk` produced (66 MB).
+- Next: optional lint gate (`:app:lintDebug`); optional `ACTION_OPEN_DOCUMENT` variant.
+
+---
+
 ## SESSION 41 (2026-10-13) - milestone: summarize_text capture support
 
 Status: DONE. `summarize_text` now participates in the 9.4 cross-app `{{name}}`

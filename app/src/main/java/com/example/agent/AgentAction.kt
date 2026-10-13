@@ -325,8 +325,8 @@ sealed class AgentAction {
      * reliably on an arbitrary screen (and driving a specific file-manager UI would be
      * app-specific), so like [Note] the platform's documented
      * [android.content.Intent.ACTION_GET_CONTENT] intent is dispatched and resolved
-     * before the accessibility-service gate. [mimeType] filters the picker (e.g.
-     * `image/*`, `application/pdf`; null/blank means any file) and [allowMultiple] lets
+     * before the accessibility-service gate. [mimeType] filters the picker (e.g. an
+     * image type, or `application/pdf`; null/blank means any file) and [allowMultiple] lets
      * the user pick more than one. It only *opens* the picker for the user to choose;
      * it never reads, deletes or uploads anything itself, so the selection stays under
      * the user's control (section 3.5), and the app cannot read back which file was

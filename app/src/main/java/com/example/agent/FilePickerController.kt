@@ -31,10 +31,10 @@ data class FilePickResult(
  */
 interface FilePickerController {
     /**
-     * Opens the system file picker filtered to [mimeType] (e.g. `image/*`, `application/pdf`;
-     * null/blank means "any file"). When [allowMultiple] is set the user may select more
-     * than one file. Implementations must report honestly: if no picker can handle the
-     * request the result is a failure, never a claimed success.
+     * Opens the system file picker filtered to [mimeType] (e.g. an image type, or
+     * `application/pdf`; null/blank means "any file"). When [allowMultiple] is set the user
+     * may select more than one file. Implementations must report honestly: if no picker can
+     * handle the request the result is a failure, never a claimed success.
      */
     fun pickFile(mimeType: String?, allowMultiple: Boolean): FilePickResult
 }
