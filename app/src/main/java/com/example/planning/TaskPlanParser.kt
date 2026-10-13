@@ -346,6 +346,7 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
             ToolRegistry.TOOL_OPEN_QUICK_SETTINGS -> AgentAction.OpenQuickSettings
             ToolRegistry.TOOL_OPEN_RECENTS -> AgentAction.PressRecents
+            ToolRegistry.TOOL_OPEN_POWER_DIALOG -> AgentAction.OpenPowerDialog
             ToolRegistry.TOOL_NAVIGATE_BACK -> AgentAction.Back
             ToolRegistry.TOOL_NAVIGATE_HOME -> AgentAction.Home
             ToolRegistry.TOOL_WAIT -> AgentAction.Wait(params.optLong("durationMs", 800L))

@@ -1,5 +1,42 @@
 ---
 
+## SESSION 49 (2026-10-13) - milestone: power-menu capability (`power_dialog`) + honest power-state verification
+
+Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261013-1531`).
+
+New capability: the agent can open the system power menu (power off / restart /
+emergency) - a real system surface it previously could not reach.
+
+- New `AgentAction.OpenPowerDialog` + tool `power_dialog`, dispatched through the
+  documented `AccessibilityService.performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)`
+  (`AndroidDeviceAutomation.pressPowerDialog`).
+- Wired across every action-vocabulary seam: `AgentAction` (+`getDisplayName`),
+  `ToolRegistry` (const/definition/validation), `TaskPlanParser` (`TOOL_OPEN_POWER_DIALOG`
+  branch), `HybridStepExecutor.decide` (deterministic fast path), `PlannerPromptBuilder`
+  `ACTION_CATALOG`, `TaskPlanSerializer.toolNameFor`. No parameters, so `toParams` needs
+  no branch.
+- Honest verification: the power menu is a distinct system surface, so the step is
+  verified from *fresh* screen evidence (`UiObservation.hasPowerMenu()` - the power
+  off/restart choices, optionally corroborated by the SystemUI package; never a stray
+  "power" glyph), **not** treated as its own evidence. It is deliberately kept out of
+  `selfEvidencingToolSatisfied` (unlike the intent-dispatch primitives), so a menu that
+  never opened fails the step instead of reporting a false success.
+- Safety (section 3.5): the primitive only opens the menu. Both `verifyAction` and the
+  goal gate (`verifyGoalPostcondition`) refuse a power-off/restart goal via the pure
+  `goalTargetsPowerState`, so the model can never claim the device was powered off or
+  restarted. `verifyAction` now threads the `plan` so it can see the goal.
+
+Validation (toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64,
+ANDROID_HOME=/opt/android-sdk): `./gradlew :app:testDebugUnitTest --no-daemon --tests
+"com.example.CapabilityUpgradeTest"` -> BUILD SUCCESSFUL; 7 new power tests present in
+the JUnit XML and passing. Full-suite gate + `:app:assembleDebug` recorded in RUN_STATE.
+
+Remaining: an optional `screenshot`/`OpenPowerDialog`-style "is the menu on screen"
+signal could later be shared with the vision fallback; no blockers.
+
+
+---
+
 ## SESSION 48 (2026-10-13) - milestone: scheduled-automation run observability (7.8) + run-now
 
 Where reached: DONE and validated. This run finished the two items left open by the

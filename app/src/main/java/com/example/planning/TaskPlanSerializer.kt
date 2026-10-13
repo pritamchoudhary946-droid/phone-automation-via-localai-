@@ -265,6 +265,7 @@ object TaskPlanSerializer {
         is AgentAction.OpenNotifications -> com.example.agent.ToolRegistry.TOOL_OPEN_NOTIFICATIONS
         is AgentAction.OpenQuickSettings -> com.example.agent.ToolRegistry.TOOL_OPEN_QUICK_SETTINGS
         is AgentAction.PressRecents -> com.example.agent.ToolRegistry.TOOL_OPEN_RECENTS
+        is AgentAction.OpenPowerDialog -> com.example.agent.ToolRegistry.TOOL_OPEN_POWER_DIALOG
         is AgentAction.Back -> com.example.agent.ToolRegistry.TOOL_NAVIGATE_BACK
         is AgentAction.Home -> com.example.agent.ToolRegistry.TOOL_NAVIGATE_HOME
         is AgentAction.Wait -> com.example.agent.ToolRegistry.TOOL_WAIT

@@ -92,7 +92,7 @@ object PlannerPromptBuilder {
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",
-        """- open_notifications: {}   open_quick_settings: {}   open_recents: {}""",
+        """- open_notifications: {}   open_quick_settings: {}   open_recents: {}   power_dialog: {}   (power_dialog opens the system power menu - power off / restart / emergency - for the user to choose an item; it only opens the menu and never selects power off itself, so never claim the device was powered off or restarted)""",
         """- navigate_back: {}   navigate_home: {}   wait: {"durationMs":<int>}""",
         """- read_screen: {}     screenshot: {}""",
         """- report_status: {"status":"success|failure","summary":"<short text>"}"""

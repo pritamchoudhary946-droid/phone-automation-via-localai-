@@ -82,6 +82,23 @@ data class UiObservation(
         }
 
     /**
+     * True when the fresh screen exposes the system power menu (power off / restart /
+     * emergency). A bare "power" glyph or a Settings page is not enough: the menu is
+     * recognised by its action choices, optionally corroborated by the SystemUI
+     * package. Used to verify an [com.example.agent.AgentAction.OpenPowerDialog] step
+     * honestly from real screen evidence rather than a synthetic success.
+     */
+    fun hasPowerMenu(): Boolean {
+        val haystack = nodes.joinToString(" ") {
+            listOfNotNull(it.text, it.contentDescription).joinToString(" ")
+        }.lowercase()
+        val powerOff = listOf("power off", "switch off", "turn off power").any { haystack.contains(it) }
+        val restart = listOf("restart", "reboot").any { haystack.contains(it) }
+        val systemSurface = nodes.any { it.packageName?.contains("systemui") == true }
+        return (powerOff && restart) || ((powerOff || restart) && systemSurface)
+    }
+
+    /**
      * Resolves [hint] to a single actionable target using [TargetResolver] (10.7).
      * Only a [TargetResolver.Outcome.UNIQUE] result is actionable; ambiguous or
      * unmatched hints return a non-actionable resolution the caller must report.
@@ -806,6 +823,7 @@ class AndroidDeviceAutomation(
             is AgentAction.OpenNotifications -> ActionResult(service.openNotifications(), "GLOBAL_NOTIFICATIONS", "Opened notification shade")
             is AgentAction.OpenQuickSettings -> ActionResult(service.openQuickSettings(), "GLOBAL_QUICK_SETTINGS", "Opened quick settings")
             is AgentAction.PressRecents -> ActionResult(service.pressRecents(), "GLOBAL_RECENTS", "Opened recents")
+            is AgentAction.OpenPowerDialog -> ActionResult(service.pressPowerDialog(), "GLOBAL_POWER_DIALOG", "Opened the power menu")
             is AgentAction.Back -> ActionResult(service.pressBack(), "GLOBAL_BACK", "Pressed Back")
             is AgentAction.Home -> ActionResult(service.pressHome(), "GLOBAL_HOME", "Pressed Home")
             is AgentAction.Wait -> {

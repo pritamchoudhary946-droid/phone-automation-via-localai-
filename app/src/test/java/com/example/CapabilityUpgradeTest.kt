@@ -2936,6 +2936,138 @@ class CapabilityUpgradeTest {
         assertTrue("a failed picker dispatch must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
+    // --- power_dialog: the "open the power menu" system global action ---
+
+    @Test
+    fun hasPowerMenuDetectsTheSystemPowerMenuHonestly() {
+        // The menu is recognised by its action choices, not by a stray "power" glyph.
+        val menu = observationText("com.android.systemui", "Power menu", 9,
+            listOf("Power off", "Restart"))
+        assertTrue("power off + restart must be recognised as the power menu", menu.hasPowerMenu())
+
+        val settings = observationText("com.android.settings", "Settings list", 10,
+            listOf("Battery", "Power saving mode"))
+        assertFalse("a Settings battery row is not the power menu", settings.hasPowerMenu())
+
+        val random = observationText("com.android.chrome", "A web page", 11,
+            listOf("Restart the download"))
+        assertFalse("a page mentioning 'restart' is not the power menu", random.hasPowerMenu())
+    }
+
+    @Test
+    fun powerDialogParserMapsTheToolName() {
+        val json = """
+        {"steps":[
+          {"id":1,"seq":1,"desc":"Power menu","action":"power_dialog","params":{},"expect":"menu","verify":"NONE"}
+        ]}
+        """.trimIndent()
+        val result = TaskPlanParser().parse(json, "open the power menu")
+        assertTrue("parse failed: $result", result is PlanParseResult.Success)
+        assertEquals(AgentAction.OpenPowerDialog, (result as PlanParseResult.Success).plan.steps[0].action)
+    }
+
+    @Test
+    fun powerDialogValidationAndFastPathAreDeterministic() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.OpenPowerDialog) is ToolValidationResult.Valid)
+
+        val executor = HybridStepExecutor(AppDirectory(context))
+        val obs = observation("com.android.settings", "Settings", 5)
+        val decision = executor.decide(
+            listOf(planStep(1, AgentAction.OpenPowerDialog, "power_dialog")),
+            0, obs, nudgeUsed = false
+        )
+        assertTrue("power_dialog must be a deterministic fast path, got $decision", decision is FastPathDecision.Execute)
+    }
+
+    @Test
+    fun promptAdvertisesPowerDialog() {
+        val actions = PlannerPromptBuilder.availableActions(ToolRegistry())
+        assertTrue("prompt is missing power_dialog", actions.contains(ToolRegistry.TOOL_OPEN_POWER_DIALOG))
+
+        val prompt = PlannerPromptBuilder.buildPlanningPrompt(
+            PlanningRequest(
+                userCommand = "open the power menu",
+                desiredOutcome = "menu",
+                foregroundPackage = "com.android.launcher",
+                screenSummary = "Home",
+                completedStepsSummary = "",
+                lastActionResult = null,
+                remainingStepBudget = 10,
+                availableActions = actions
+            )
+        )
+        assertTrue("prompt catalogue is missing power_dialog", prompt.contains("power_dialog"))
+    }
+
+    @Test
+    fun powerDialogStepCompletesFromFreshPowerMenuEvidence() = kotlinx.coroutines.runBlocking {
+        // The menu is a distinct system surface the fresh screen can prove. The executor
+        // reports an honest "opened", but only real on-screen evidence completes the step.
+        val menu = observationText("com.android.systemui", "Power menu", 3,
+            listOf("Power off", "Restart"))
+        val automation = PowerMenuAutomation().apply {
+            // initial plan observe (home) -> loop observe (home) -> post-step (menu) -> fresh goal (menu)
+            observationQueue.addLast(observation("com.android.launcher", "Home", 1))
+            observationQueue.addLast(observation("com.android.launcher", "Home", 2))
+            observationQueue.addLast(menu)
+            observationQueue.addLast(menu)
+            observationQueue.addLast(menu)
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the power menu","action":"power_dialog","params":{},"verify":"NONE"}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open the power menu", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("power_dialog must complete from fresh menu evidence, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.OpenPowerDialog })
+    }
+
+    @Test
+    fun powerDialogDoesNotCompleteWhenTheMenuDidNotOpen() = kotlinx.coroutines.runBlocking {
+        // A dispatched global action is not proof the menu appeared. If the fresh screen
+        // does not expose the menu, the step must fail honestly - never a false success.
+        val automation = PowerMenuAutomation().apply {
+            observationQueue.addLast(observation("com.android.launcher", "Home", 1))
+            observationQueue.addLast(observation("com.android.launcher", "Home", 2))
+            observationQueue.addLast(observation("com.android.launcher", "Home, unchanged", 3))
+            observationQueue.addLast(observation("com.android.launcher", "Home, unchanged", 3))
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the power menu","action":"power_dialog","params":{},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("open the power menu", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("a power menu that never opened must fail, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
+    @Test
+    fun powerDialogNeverClaimsTheDeviceWasPoweredOff() = kotlinx.coroutines.runBlocking {
+        // The primitive only opens the menu; the user chooses power off. Even when the
+        // menu is genuinely on screen, a goal to power the device off must not be
+        // reported as achieved.
+        val menu = observationText("com.android.systemui", "Power menu", 3,
+            listOf("Power off", "Restart"))
+        val automation = PowerMenuAutomation().apply {
+            observationQueue.addLast(observation("com.android.launcher", "Home", 1))
+            observationQueue.addLast(observation("com.android.launcher", "Home", 2))
+            observationQueue.addLast(menu)
+            observationQueue.addLast(menu)
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Open the power menu","action":"power_dialog","params":{},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("power off my phone", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("powering off is the user's choice - never a claimed success, got $terminal", terminal is OrchestratorState.Failed)
+    }
+
     // --- summarize_text: the "summarise this page/message/thread" primitive ---
 
     @Test
@@ -5560,7 +5692,7 @@ class CapabilityUpgradeTest {
 
     private fun newOrchestrator(
         engine: AgentEngine,
-        automation: FakeDeviceAutomation,
+        automation: com.example.agent.DeviceAutomation,
         conditionsProvider: (() -> TriggerMatcher.Conditions)? = null,
         batteryGuard: (() -> BatteryGuard.Decision)? = null
     ): TaskOrchestrator {
@@ -5575,6 +5707,31 @@ class CapabilityUpgradeTest {
             conditionsProvider = conditionsProvider,
             batteryGuard = batteryGuard
         )
+    }
+
+    /**
+     * A [DeviceAutomation] whose executed global-action results are honest, exposing
+     * its own observation queue so a test can script the exact pre/post screens the
+     * orchestrator sees for the power-menu verification.
+     */
+    private class PowerMenuAutomation : com.example.agent.DeviceAutomation {
+        val executed = mutableListOf<AgentAction>()
+        var observationQueue = ArrayDeque<com.example.agent.UiObservation>()
+        var defaultObservation = observation("com.android.launcher", "Home screen", 1)
+        override fun isReady(): Boolean = true
+        override fun unavailabilityReason(): String? = null
+        override suspend fun observe(): com.example.agent.UiObservation =
+            if (observationQueue.isNotEmpty()) observationQueue.removeFirst() else defaultObservation
+        override suspend fun execute(action: AgentAction): ActionResult {
+            executed.add(action)
+            return when {
+                action is AgentAction.OpenPowerDialog ->
+                    ActionResult(true, "GLOBAL_POWER_DIALOG", "Opened the power menu")
+                action is AgentAction.FinishTask ->
+                    ActionResult(true, "FINISH_TASK", "done")
+                else -> ActionResult(true, "OK", "ok")
+            }
+        }
     }
 
     private suspend fun awaitTerminal(

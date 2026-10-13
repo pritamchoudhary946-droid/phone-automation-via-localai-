@@ -385,6 +385,17 @@ sealed class AgentAction {
     object OpenQuickSettings : AgentAction()
     object PressRecents : AgentAction()
     /**
+     * Opens the system power menu (power off / restart / emergency) through the
+     * documented AccessibilityService global action [GLOBAL_ACTION_POWER_DIALOG].
+     *
+     * Like the other system-UI global actions (notification shade, quick settings,
+     * recents) no accessibility-tree read reflects the resulting overlay, so this is
+     * verified against the screen fingerprint moving (a model-visible screen change),
+     * never by a stale observation. It only *opens* the menu; choosing an item there is
+     * the user's explicit action (section 3.5) - the executor never selects power off.
+     */
+    object OpenPowerDialog : AgentAction()
+    /**
      * Opens an observed result item (e.g. a search result) by its visible label.
      * The executor reacquires the node from a fresh observation rather than reusing
      * a stale accessibility node.
@@ -472,6 +483,7 @@ sealed class AgentAction {
             is OpenNotifications -> "Open notification shade"
             is OpenQuickSettings -> "Open quick settings"
             is PressRecents -> "Open recents"
+            is OpenPowerDialog -> "Open the power menu"
             is OpenItem -> "Open Item: '$targetText'"
             is Back -> "Press Back"
             is Home -> "Press Home"
