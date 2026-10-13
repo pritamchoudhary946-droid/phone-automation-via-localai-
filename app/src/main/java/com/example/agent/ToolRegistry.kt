@@ -62,6 +62,7 @@ open class ToolRegistry {
         const val TOOL_OPEN_SETTINGS = "open_settings"
         const val TOOL_OPEN_CALENDAR = "open_calendar"
         const val TOOL_CREATE_NOTE = "create_note"
+        const val TOOL_DICTATE_NOTE = "dictate_note"
         const val TOOL_PICK_FILE = "pick_file"
         const val TOOL_SUMMARIZE_TEXT = "summarize_text"
         const val TOOL_READ_NOTIFICATIONS = "read_notifications"
@@ -337,6 +338,12 @@ open class ToolRegistry {
             description = "Opens the system file/document picker so the user can choose a file. Use for 'pick a file', 'choose a photo to attach', 'select a document', 'open the file picker'. Optionally filter by a mimeType such as image/*, video/*, audio/*, application/pdf or text/plain, and set allowMultiple to let the user pick more than one. It only opens the picker for the user to choose; it never reads, deletes or uploads anything",
             requiredParameters = emptyList(),
             optionalParameters = listOf("mimeType", "mime_type", "type", "fileType", "accept", "multiple", "allowMultiple", "many")
+        ),
+        TOOL_DICTATE_NOTE to ToolDefinition(
+            name = TOOL_DICTATE_NOTE,
+            description = "Opens the notes app to take a note by voice (dictation). Use for 'dictate a note', 'take a voice note', 'make a note by speaking', 'start a voice memo in notes'. Provide an optional title. It opens the notes app ready for the user to speak; it never claims the note was spoken or saved",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("title", "name", "label", "subject")
         ),
         TOOL_SUMMARIZE_TEXT to ToolDefinition(
             name = TOOL_SUMMARIZE_TEXT,
@@ -715,6 +722,18 @@ open class ToolRegistry {
                     (action.content?.length ?: 0) > MAX_NOTE_CONTENT_CHARS ->
                         ToolValidationResult.Invalid("create_note content is too long (max $MAX_NOTE_CONTENT_CHARS chars)")
                     else -> ToolValidationResult.Valid
+                }
+            }
+            // dictate_note's only parameter is an optional title; an over-long one is
+            // rejected so a malformed plan cannot hand the notes app nonsense. A blank
+            // title is fine (the app opens its voice-input mode) so it is never rejected.
+            is AgentAction.DictateNote -> {
+                if ((action.title?.length ?: 0) > MAX_NOTE_TITLE_CHARS) {
+                    ToolValidationResult.Invalid(
+                        "dictate_note title is too long (max $MAX_NOTE_TITLE_CHARS chars)"
+                    )
+                } else {
+                    ToolValidationResult.Valid
                 }
             }
             // pick_file's only parameter is an optional mime filter; reject an absurd one so

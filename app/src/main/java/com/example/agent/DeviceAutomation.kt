@@ -644,6 +644,16 @@ class AndroidDeviceAutomation(
             val result = creator.createNote(action.title, action.content)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
+        // dictate_note is the same intent-dispatch primitive as create_note (the notes app's
+        // own editor, a separate process), but it carries only an optional title and no body,
+        // so the notes app opens its editor ready for the user to speak. Resolved before the
+        // a11y-service gate; it reports only that the intent was delivered.
+        if (action is AgentAction.DictateNote) {
+            val creator = noteController
+                ?: return@withContext ActionResult(false, "NOTE_UNAVAILABLE", "Note dispatch is not available")
+            val result = creator.dictateNote(action.title)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
         // pick_file is an intent-dispatch primitive like create_note: the platform document
         // picker is a separate process and no screen read or tap opens it reliably on an
         // arbitrary screen, so it is resolved before the a11y-service gate. It reports only

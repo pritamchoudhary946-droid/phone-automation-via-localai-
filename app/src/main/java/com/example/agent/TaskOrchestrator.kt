@@ -1114,6 +1114,10 @@ class TaskOrchestrator(
             is AgentAction.OpenAppInfo, is AgentAction.OpenSettings, is AgentAction.OpenCalendar, is AgentAction.SetTorch,
             is AgentAction.SetDeviceControl,
             is AgentAction.Note,
+            // dictate_note opens the notes app's own editor to take a note by voice (a
+            // separate process no screen reflects); a delivered intent is its own evidence,
+            // exactly like the create_note dispatch above.
+            is AgentAction.DictateNote,
             // pick_file opens the platform document picker (a system service no screen
             // reflects); a delivered picker intent is its own evidence, exactly like the
             // note/contact/calendar dispatches above.
@@ -1320,6 +1324,7 @@ class TaskOrchestrator(
                 action is AgentAction.OpenSettings ||
                 action is AgentAction.OpenCalendar ||
                 action is AgentAction.Note ||
+                action is AgentAction.DictateNote ||
                 action is AgentAction.PickFile ||
                 action is AgentAction.SetTorch ||
                 action is AgentAction.SetDeviceControl ||
