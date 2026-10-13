@@ -35,6 +35,15 @@ did not pass. A sandbox with no toolchain is not a pass — install the toolchai
 stop and report. A one-character typo merged unverified broke `main` once
 already (`PlannerPromptBuilder` missing comma, PR #44).
 
+The required `Verify (unit tests + APK)` check must reflect the *gate*, not the
+artifact upload. The `Upload debug APK` / `Upload Debug APK` steps in
+`.github/workflows/verify.yml` and `main.yml` carry `continue-on-error: true`: an
+Actions storage-quota (or any transient upload) failure is infra, not a code
+result, and must never redden a passing gate (a full quota did exactly that on
+`main` once — `Failed to CreateArtifact: Artifact storage quota has been hit`).
+The gate itself still fails closed above the upload if the APK did not build, so
+do not remove `continue-on-error` from these steps.
+
 ## Delivery rules (do not regress)
 - Work on a branch; open a PR; let the **Verify (unit tests + APK)** check go
   green before merge. Branch protection on `main` requires it. Do NOT self-merge
