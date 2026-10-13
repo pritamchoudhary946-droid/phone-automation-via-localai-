@@ -1,9 +1,9 @@
 {
   "project_done": false,
-  "sessions_done": 45,
+  "sessions_done": 46,
   "session_cap": 48,
-  "current_milestone": "Capability: set_device_control end-to-end. A single registry-driven device-control primitive (control,value) that resolves before the a11y gate; the torch control is the first backed control (torch on/off), device-free DeviceControl resolver, parser/serializer/executor/prompt wiring, self-evidencing honest result.",
-  "milestone_status": "done",
+  "current_milestone": "Capability: ringer_mode as a second backed device control. DeviceControl generalised to a typed DeviceControlOp (Torch/RingerMode); set_device_control now backs ringer_mode (silent/vibrate/normal) via the existing RingerModeController read-back, resolved before the a11y gate, honestly (RINGER_UNAVAILABLE when unwired, UNSUPPORTED_DEVICE_CONTROL for an unknown control).",
+  "milestone_status": "in_progress",
   "done_items": [
     "capability 2026-10-13 (session 43): scheduled automations are now a reachable, end-to-end surface. TaskOrchestrator.scheduleAutomation(skillName, intervalMinutes, enabled) requires a matching saved skill (null otherwise, so no dead automation persists), clamps the interval via AutomationGate.intervalMinutes, persists an AutomationEntity and re-syncs the worker; cancelAutomation(id) removes it and re-syncs; deleteSkill(name) removes the skill AND every automation scheduled against it (no orphans); automationIsArmed(id) is the run-time gate (master switch AND the row still enabled AND still persisted); skillExists(name) guard.",
     "capability 2026-10-13 (session 43): AgentDao.AutomationDao gains getAutomationsForSkill(skillName) and getAutomationById(id); upsertAutomation now returns the inserted row id so scheduleAutomation can report it. AutomationGate exposes MIN_INTERVAL_MINUTES (15) used by both the clamp and the UI floor.",
@@ -220,20 +220,22 @@
     "validation 2026-10-13 (session 45, full gate): bash .github/scripts/verify.sh -> BUILD SUCCESSFUL in 3m18s, 'VERIFY OK'; :app:testDebugUnitTest -> 500 tests 0 failures 0 errors 0 skipped (JUnit XML aggregate); :app:assembleDebug -> BUILD SUCCESSFUL, app-debug.apk produced (66 MB). Pre-merge gate satisfied (fail-closed gate actually run with toolchain present).",
     "AGENTS.md 2026-10-13 (session 45): documented set_device_control as a pre-a11y-gate, registry-driven device-control primitive (DeviceControl resolver, torch backed control, UNSUPPORTED_DEVICE_CONTROL) and added it to the Phase 9 self-evidencing tool list."
   ],
-  "in_progress": [],
+  "in_progress": [
+    "generalise DeviceControl to DeviceControlOp and wire ringer_mode through the executor, prompt and validation; add regression tests; run full gate; open+merge PR"
+  ],
   "next_items": [
     "Optional: surface LOCATION_ARRIVE with a permissioned opt-in region provider (currently honestly null, so it never matches).",
     "Optional: an explicit per-automation 'last fired' timestamp shown in the Automations tab.",
     "Optional hardening: run the Android Lint gate (:app:lintDebug) and fix any real findings."
   ],
-  "branch": "auto/jarvis-autonomy-20261013-0941",
+  "branch": "auto/jarvis-autonomy-20261013-1131",
   "open_pr": 81,
   "risky_actions_done": [],
   "blockers": [],
-  "last_run_id": "auto/jarvis-autonomy-20261013-0941",
-  "last_updated": "2026-10-13T09:50:00Z",
-  "carryover_milestone": null,
-  "milestone_attempts": 2,
+  "last_run_id": "auto/jarvis-autonomy-20261013-1131",
+  "last_updated": "2026-10-13T11:45:00Z",
+  "carryover_milestone": "ringer_mode device control",
+  "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
   "last_report": "set_device_control capability (registry-driven device control, torch backed) landed and validated: verify.sh VERIFY OK, 500 tests 0 failures, debug APK built",

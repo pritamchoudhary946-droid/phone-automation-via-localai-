@@ -47,6 +47,7 @@ import com.example.agent.AppInfoResult
 import com.example.agent.TorchController
 import com.example.agent.TorchResult
 import com.example.agent.DeviceControl
+import com.example.agent.DeviceControlOp
 import com.example.agent.SpeakController
 import com.example.agent.SpeakResult
 import com.example.agent.SettingsController
@@ -3159,18 +3160,83 @@ class CapabilityUpgradeTest {
     fun deviceControlResolvesTorchOnAndOffAliases() {
         // The resolver is the single truth for the accepted (control, value) vocabulary
         // shared by the parser, the executor and the prompt catalogue.
-        assertEquals(true, DeviceControl.resolve("torch", "on"))
-        assertEquals(true, DeviceControl.resolve("Torch", "ENABLE"))
-        assertEquals(true, DeviceControl.resolve(" torch ", "yes"))
-        assertEquals(false, DeviceControl.resolve("torch", "off"))
-        assertEquals(false, DeviceControl.resolve("torch", "disable"))
-        assertEquals(false, DeviceControl.resolve("torch", "0"))
+        assertEquals(DeviceControlOp.Torch(true), DeviceControl.resolve("torch", "on"))
+        assertEquals(DeviceControlOp.Torch(true), DeviceControl.resolve("Torch", "ENABLE"))
+        assertEquals(DeviceControlOp.Torch(true), DeviceControl.resolve(" torch ", "yes"))
+        assertEquals(DeviceControlOp.Torch(false), DeviceControl.resolve("torch", "off"))
+        assertEquals(DeviceControlOp.Torch(false), DeviceControl.resolve("torch", "disable"))
+        assertEquals(DeviceControlOp.Torch(false), DeviceControl.resolve("torch", "0"))
         // An unknown control or a non-on/off value must resolve to null (refuse honestly).
         assertNull(DeviceControl.resolve("wifi", "on"))
         assertNull(DeviceControl.resolve("torch", "maybe"))
         assertNull(DeviceControl.resolve("", "on"))
         assertEquals("on", DeviceControl.describeValue("torch", "enable"))
         assertEquals("off", DeviceControl.describeValue("torch", "disabled"))
+    }
+
+    @Test
+    fun deviceControlResolvesRingerModeAliases() {
+        // ringer_mode is the second backed control, mapped to the closed RingerMode enum so
+        // an invalid mode can never index AudioManager incorrectly.
+        assertEquals(DeviceControlOp.RingerMode(RingerMode.SILENT), DeviceControl.resolve("ringer_mode", "silent"))
+        assertEquals(DeviceControlOp.RingerMode(RingerMode.VIBRATE), DeviceControl.resolve("Ringer_Mode", "VIBRATE"))
+        assertEquals(DeviceControlOp.RingerMode(RingerMode.NORMAL), DeviceControl.resolve(" ringer_mode ", "normal"))
+        // A torch-only value must not be accepted for ringer_mode, and vice versa.
+        assertNull(DeviceControl.resolve("ringer_mode", "on"))
+        assertNull(DeviceControl.resolve("torch", "silent"))
+        assertEquals("silent", DeviceControl.describeValue("ringer_mode", "silent"))
+        assertTrue(DeviceControl.isKnown("ringer_mode"))
+    }
+
+    @Test
+    fun setDeviceControlRingerModeReachesTheRingerController() {
+        // The ringer_mode control reuses the existing RingerModeController read-back, so it
+        // must resolve before the a11y gate (AudioManager-backed, not tree-backed).
+        val recorder = RecordingRingerModeController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            ringerModeController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("ringer_mode", "silent"))
+        }
+        assertTrue("ringer_mode control must apply without a bound a11y service: $result", result.success)
+        assertEquals("RINGER_MODE", result.method)
+        assertEquals(listOf(RingerMode.SILENT), recorder.calls)
+    }
+
+    @Test
+    fun setDeviceControlRingerModeRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            ringerModeController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("ringer_mode", "silent"))
+        }
+        assertFalse("no ringer controller must not be a fake success", result.success)
+        assertEquals("RINGER_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setDeviceControlRingerModeUnchangedIsReportedAsFailure() {
+        // The ringer controller reads the mode back; a request the platform ignored must not
+        // be dressed up as success.
+        val recorder = RecordingRingerModeController(
+            RingerModeResult(false, "RINGER_UNCHANGED", "Ringer mode stayed at normal")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            ringerModeController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("ringer_mode", "silent"))
+        }
+        assertFalse(result.success)
+        assertEquals("RINGER_UNCHANGED", result.method)
     }
 
     @Test
@@ -3230,7 +3296,8 @@ class CapabilityUpgradeTest {
         val json = """
         {"steps":[
           {"id":1,"seq":1,"desc":"Torch on","action":"set_device_control","params":{"control":"torch","value":"on"},"expect":"light on","verify":"NONE"},
-          {"id":2,"seq":2,"desc":"Torch off","action":"set_device_control","params":{"setting":"Torch","state":"disable"},"expect":"light off","verify":"NONE"}
+          {"id":2,"seq":2,"desc":"Torch off","action":"set_device_control","params":{"setting":"Torch","state":"disable"},"expect":"light off","verify":"NONE"},
+          {"id":3,"seq":3,"desc":"Go silent","action":"set_device_control","params":{"control":"ringer_mode","value":"silent"},"expect":"silent","verify":"NONE"}
         ]}
         """.trimIndent()
         val result = TaskPlanParser().parse(json, "device control")
@@ -3238,6 +3305,7 @@ class CapabilityUpgradeTest {
         val steps = (result as PlanParseResult.Success).plan.steps
         assertEquals(AgentAction.SetDeviceControl("torch", "on"), steps[0].action)
         assertEquals(AgentAction.SetDeviceControl("torch", "disable"), steps[1].action)
+        assertEquals(AgentAction.SetDeviceControl("ringer_mode", "silent"), steps[2].action)
     }
 
     @Test
@@ -3245,8 +3313,11 @@ class CapabilityUpgradeTest {
         val registry = ToolRegistry()
         assertTrue(registry.validateAction(AgentAction.SetDeviceControl("torch", "on")) is ToolValidationResult.Valid)
         assertTrue(registry.validateAction(AgentAction.SetDeviceControl("torch", "off")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("ringer_mode", "silent")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("ringer_mode", "vibrate")) is ToolValidationResult.Valid)
         assertTrue(registry.validateAction(AgentAction.SetDeviceControl("wifi", "on")) is ToolValidationResult.Invalid)
         assertTrue(registry.validateAction(AgentAction.SetDeviceControl("torch", "maybe")) is ToolValidationResult.Invalid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("ringer_mode", "on")) is ToolValidationResult.Invalid)
     }
 
     @Test
@@ -3292,6 +3363,7 @@ class CapabilityUpgradeTest {
             )
         )
         assertTrue("prompt catalogue is missing set_device_control", prompt.contains("set_device_control"))
+        assertTrue("prompt catalogue must advertise the ringer_mode control", prompt.contains("ringer_mode"))
     }
 
     @Test
@@ -4816,11 +4888,13 @@ class CapabilityUpgradeTest {
         }
     }
 
-    private class RecordingRingerModeController : RingerModeController {
+    private class RecordingRingerModeController(
+        private val result: RingerModeResult? = null
+    ) : RingerModeController {
         val calls = mutableListOf<RingerMode>()
         override fun set(mode: RingerMode): RingerModeResult {
             calls += mode
-            return RingerModeResult(true, "RINGER_MODE", "Ringer mode set to ${mode.key}")
+            return result ?: RingerModeResult(true, "RINGER_MODE", "Ringer mode set to ${mode.key}")
         }
     }
 

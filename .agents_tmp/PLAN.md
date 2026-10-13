@@ -1,6 +1,26 @@
 
 ---
 
+## SESSION 46 (2026-10-13) - milestone: ringer_mode as a second backed device control
+
+Where reached: IN PROGRESS -> implementing. `DeviceControl` is generalised from a
+Boolean resolver to a typed `DeviceControlOp` (Torch / RingerMode), so the
+registry-driven `set_device_control` primitive backs a second control: `ringer_mode`
+(silent/vibrate/normal) mapped to the existing `RingerModeController` read-back.
+- `DeviceControl.resolve(control,value)` -> `DeviceControlOp?` (null = refuse honestly).
+- `AndroidDeviceAutomation.execute` SetDeviceControl branch now dispatches by op variant:
+  torch -> TorchController, ringer_mode -> RingerModeController (RINGER_UNAVAILABLE when
+  unwired), unknown -> UNSUPPORTED_DEVICE_CONTROL. Still resolved before the a11y gate.
+- Prompt catalogue advertises both controls; validation accepts ringer_mode, rejects a
+  torch-only value on ringer_mode.
+- Tests: resolver typed-op assertions, ringer_mode reaches the controller without an a11y
+  service, unwired ringer controller refuses honestly, RINGER_UNCHANGED is not masked,
+  parser maps a ringer_mode step, validation accepts/rejects correctly.
+
+Validation: pending full gate below.
+
+---
+
 ## SESSION 44 (2026-10-13) - milestone: event-driven automations (plan 9.2)
 
 Where reached: DONE and validated. Phase 9.2 event triggers are now a reachable,
