@@ -77,7 +77,9 @@ Notes:
 `AgentAction` is the only executable surface. Beyond launch/tap/type/scroll:
 `LongPress`, `ScrollUntilFound` (bounded swipe-to-find), `ReadText` (visible-text
 digest), `WaitForText` (bounded wait), `OpenNotifications`, `OpenQuickSettings`,
-`PressRecents`, `Submit` (press the send/search/enter affordance),
+`PressRecents`, `OpenPowerDialog` (opens the system power menu - power off / restart /
+emergency - for the user to choose an item; it only opens the menu and never selects
+power off), `Submit` (press the send/search/enter affordance),
 `OpenUrl`/`DeepLink` (external navigation), `Drag`, `CopyText`/`PasteText`,
 `ClearText` (empty the focused/named field via `ACTION_SET_TEXT ""` before
 retyping), `ReadPageContent` (UI-tree digest), and the in-loop web tools
@@ -92,6 +94,17 @@ retyping), `ReadPageContent` (UI-tree digest), and the in-loop web tools
    `toVerificationTarget`/`toolNameFor`) — omitting `toParams` silently drops the
    action's parameters on skill replay (e.g. a `ScrollUntilFound` direction), so a
    learned skill would replay with the wrong defaults.
+Global system-UI actions (`open_notifications`, `open_quick_settings`, `open_recents`,
+`power_dialog`) are the exception to the self-evidencing rule: they are dispatched
+through `AccessibilityService.performGlobalAction` and produce a real, visible system
+overlay, so `power_dialog` is verified from fresh screen evidence
+(`UiObservation.hasPowerMenu()` - the power off/restart choices, optionally
+corroborated by the SystemUI package, never a stray "power" glyph) rather than treated
+as its own evidence. It is deliberately *not* in `selfEvidencingToolSatisfied`. The goal
+gate (`verifyGoalPostcondition`) and the step check (`verifyAction`) both refuse a
+power-off/restart goal via the pure `goalTargetsPowerState`: the primitive only opens
+the menu and the user chooses the item (section 3.5), so the model can never claim the
+device was powered off or restarted.
 An action the native layer cannot execute must not appear in the catalogue
 (see the `ask_confirmation` exclusion in `PlannerPromptBuilder.availableActions`).
 Corollary (regression found 2026-10-11): every advertised tool needs a real branch

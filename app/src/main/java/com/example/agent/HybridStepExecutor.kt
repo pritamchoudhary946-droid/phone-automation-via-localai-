@@ -307,7 +307,8 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
             AgentAction.ReadDeviceStatus,
             AgentAction.OpenNotifications,
             AgentAction.OpenQuickSettings,
-            AgentAction.PressRecents -> FastPathDecision.Execute(
+            AgentAction.PressRecents,
+            AgentAction.OpenPowerDialog -> FastPathDecision.Execute(
                 action,
                 "deterministic system/read action"
             )

@@ -990,7 +990,7 @@ class TaskOrchestrator(
                     delay(300)
                     val postObservation = deviceAutomation.observe()
 
-                    val verdict = verifyAction(action, effectiveStep, previousObservation, postObservation, execResult)
+                    val verdict = verifyAction(action, effectiveStep, previousObservation, postObservation, execResult, plan)
 
                     val newStatus = if (verdict.satisfied) PlanStepStatus.COMPLETED else PlanStepStatus.PENDING
                     val attempted = effectiveStep.withAttempt().withStatus(newStatus)
@@ -1184,6 +1184,23 @@ class TaskOrchestrator(
         if (lastRequired.action is AgentAction.OpenItem) {
             return verifyOpenedItem(lastRequired.action, lastRequired.verification, pre, post)
         }
+        // The power menu is a distinct system surface: when the goal is simply to open
+        // it, the fresh screen can prove the goal directly, so it needs no synthetic
+        // success - and a goal to actually power off/restart is refused, because the
+        // primitive only opens the menu and the user makes that choice.
+        if (lastRequired.action is AgentAction.OpenPowerDialog) {
+            if (goalTargetsPowerState(plan.goal)) {
+                return PostconditionVerdict(
+                    false,
+                    "The power menu was opened, but powering off/restarting is the user's choice"
+                )
+            }
+            return if (post.hasPowerMenu()) {
+                PostconditionVerdict(true, "System power menu verified on screen")
+            } else {
+                PostconditionVerdict(false, "Power menu did not open on screen")
+            }
+        }
         val method = when {
             lastRequired.action is AgentAction.OpenApp -> VerificationMethod.FOREGROUND_PACKAGE
             lastRequired.action is AgentAction.Home -> VerificationMethod.HOME_FOREGROUND
@@ -1291,7 +1308,8 @@ class TaskOrchestrator(
         step: PlanStep,
         pre: UiObservation,
         post: UiObservation,
-        result: ActionResult
+        result: ActionResult,
+        plan: TaskPlan? = null
     ): PostconditionVerdict {
         if (!result.success) {
             return PostconditionVerdict(false, "Failed: ${result.message} [method: ${result.method}]")
@@ -1369,6 +1387,30 @@ class TaskOrchestrator(
                 action.getDisplayName()
             }
             return PostconditionVerdict(true, "$detail completed: ${result.message}")
+        }
+        // Opening the power menu is the one global system action whose completion is
+        // genuinely observable: the menu is a distinct system surface (power off /
+        // restart / emergency), so most plan declarations verify it directly from the
+        // fresh screen. A NONE declaration cannot, though - NONE is never a success
+        // shortcut (PostconditionVerifier) - so a power_dialog step with no declared
+        // postcondition would be retried and never complete. Accept it only when the
+        // fresh screen really exposes the power menu (never merely because a "power"
+        // glyph is on screen), and never when the goal itself is to power the device
+        // off or restart it (the primitive only opens the menu; the user chooses).
+        if (action is AgentAction.OpenPowerDialog) {
+            if (goalTargetsPowerState(plan?.goal ?: "")) {
+                return PostconditionVerdict(
+                    false,
+                    "The power menu was opened, but powering off/restarting is the user's choice; do not claim it"
+                )
+            }
+            if (step.verification == VerificationMethod.NONE) {
+                return if (post.hasPowerMenu()) {
+                    PostconditionVerdict(true, "System power menu verified on screen")
+                } else {
+                    PostconditionVerdict(false, "Power menu did not open on screen")
+                }
+            }
         }
         if (action is AgentAction.OpenSearch) {
             // A text-entry step that was re-routed into opening the search interface
@@ -1466,6 +1508,19 @@ class TaskOrchestrator(
     }
 
     private data class PostconditionVerdict(val satisfied: Boolean, val detail: String)
+
+    /**
+     * True when the user's goal is to change the device power state (power off /
+     * restart / reboot). The power-menu primitive only *opens* the menu, so such a
+     * goal must never be reported as achieved - the user makes that choice. Used to
+     * refuse a false success on an [AgentAction.OpenPowerDialog] step or goal.
+     */
+    private fun goalTargetsPowerState(goal: String): Boolean {
+        val g = goal.lowercase()
+        val powerOff = listOf("power off", "switch off", "shut down", "shutdown", "turn off the phone", "turn off my phone", "turn off the device").any { g.contains(it) }
+        val restart = listOf("restart", "reboot").any { g.contains(it) }
+        return powerOff || restart
+    }
 
     /** True when the fresh observation exposes an editable/input control. */
     private fun observationHasEditableField(observation: UiObservation): Boolean =

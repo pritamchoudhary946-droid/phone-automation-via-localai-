@@ -70,6 +70,7 @@ open class ToolRegistry {
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
         const val TOOL_OPEN_QUICK_SETTINGS = "open_quick_settings"
         const val TOOL_OPEN_RECENTS = "open_recents"
+        const val TOOL_OPEN_POWER_DIALOG = "power_dialog"
         const val TOOL_NAVIGATE_BACK = "navigate_back"
         const val TOOL_NAVIGATE_HOME = "navigate_home"
         const val TOOL_WAIT = "wait"
@@ -374,6 +375,11 @@ open class ToolRegistry {
         TOOL_OPEN_RECENTS to ToolDefinition(
             name = TOOL_OPEN_RECENTS,
             description = "Opens the recent-apps switcher via the system global action",
+            requiredParameters = emptyList()
+        ),
+        TOOL_OPEN_POWER_DIALOG to ToolDefinition(
+            name = TOOL_OPEN_POWER_DIALOG,
+            description = "Opens the system power menu (power off / restart) via the system global action; the user chooses an item there",
             requiredParameters = emptyList()
         ),
         TOOL_NAVIGATE_BACK to ToolDefinition(
@@ -798,6 +804,7 @@ open class ToolRegistry {
             is AgentAction.OpenNotifications,
             is AgentAction.OpenQuickSettings,
             is AgentAction.PressRecents,
+            is AgentAction.OpenPowerDialog,
             is AgentAction.Screenshot -> ToolValidationResult.Valid
         }
     }
