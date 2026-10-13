@@ -369,13 +369,19 @@ without inventing a bespoke action per setting, so a new control is a mapping, n
 new tool. It is resolved *before* the a11y gate (device-backed, like `set_torch`).
 The pure, unit-tested `com.example.agent.DeviceControl.resolve(control, value)` is the
 single truth for the accepted vocabulary: it trims and lower-cases both fields and
-accepts the on/off aliases `on`/`off`/`enable`/`disable`/`yes`/`no`/`true`/`false`/`1`/`0`
-(case-insensitively), returning a typed op or **null** for an unknown control or value.
-Today the only backed control is `torch`, dispatched to the existing `TorchController`
-(read-back `TORCH_ON`/`TORCH_OFF`, `TORCH_UNCHANGED` on an ignored request). Because the
-resolver rejects anything it cannot run, an unknown control is refused honestly
-(`UNSUPPORTED_DEVICE_CONTROL` at execute, `Invalid` at validation) and never dispatched —
-so the prompt can never advertise a control the executor cannot execute. Carried through
+returns a typed `DeviceControlOp` or **null** for an unknown control or a value invalid
+for that control. Two controls are backed, each reusing an existing honest read-back
+primitive so no new action class is needed:
+- `torch` — value `on`/`off` (on/off aliases `on`/`off`/`enable`/`disable`/`yes`/`no`/
+  `true`/`false`/`1`/`0`, case-insensitively) dispatched to the existing `TorchController`
+  (read-back `TORCH_ON`/`TORCH_OFF`, `TORCH_UNCHANGED` on an ignored request).
+- `ringer_mode` — value `silent`/`vibrate`/`normal` dispatched to the existing
+  `RingerModeController` (read-back `RINGER_MODE`, `RINGER_UNCHANGED` on an ignored
+  request). This makes "go silent at night" a scheduled-automation action, distinct from
+  muting one audio stream.
+Because the resolver rejects anything it cannot run, an unknown control is refused
+honestly (`UNSUPPORTED_DEVICE_CONTROL` at execute, `Invalid` at validation) and never
+dispatched — so the prompt can never advertise a control the executor cannot execute. Carried through
 `ToolRegistry` (const `TOOL_SET_DEVICE_CONTROL`, definition, validation), `TaskPlanParser`
 (control/value aliases), `HybridStepExecutor.decide` (deterministic fast path),
 `PlannerPromptBuilder.ACTION_CATALOG`, and `TaskPlanSerializer` (`toParams` carries both
@@ -710,7 +716,8 @@ output is off, read live per call by `AgentPlanner`.
   `set_torch` reports `TORCH_ON`/`TORCH_OFF` only after `CameraManager.TorchCallback`
   confirmed the state moved (`TORCH_UNCHANGED` / `TORCH_UNAVAILABLE` otherwise), and
   `set_device_control` reports the backed control's honest result (its `torch` control
-  reuses `set_torch`'s read-back; an unknown control is `UNSUPPORTED_DEVICE_CONTROL`), and
+  reuses `set_torch`'s read-back, its `ringer_mode` control reuses `RingerModeController`'s
+  read-back, and an unknown control is `UNSUPPORTED_DEVICE_CONTROL`), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the
   utterance (`TTS_UNAVAILABLE` / `SPEAK_DISABLED` otherwise), and `summarize_text`
   reports `SUMMARY_OK` only with a non-blank digest from the configured summarizer

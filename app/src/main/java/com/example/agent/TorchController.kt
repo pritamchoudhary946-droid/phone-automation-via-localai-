@@ -16,41 +16,67 @@ data class TorchResult(
 )
 
 /**
+ * A resolved, typed device-control request produced by [DeviceControl.resolve]. Each
+ * variant names the exact primitive the executor dispatches, so the resolver (not the
+ * executor) owns the accepted vocabulary and an unrecognised control/value can never
+ * reach a controller.
+ */
+sealed interface DeviceControlOp {
+    /** Turn the flashlight on ([on] = true) or off. */
+    data class Torch(val on: Boolean) : DeviceControlOp
+
+    /** Switch the ringer to [mode] (silent / vibrate / normal). */
+    data class RingerMode(val mode: com.example.agent.RingerMode) : DeviceControlOp
+}
+
+/**
  * Pure, device-free resolver for [AgentAction.SetDeviceControl]. A scheduled automation
  * stores one trigger action as `control` + `value` strings; this maps the supported
- * `control` ("torch") and its on/off value to the boolean the executor dispatches, so
- * the parsing is unit-testable without a device and the executor/prompt/serializer all
- * agree on the accepted vocabulary.
+ * controls to the typed [DeviceControlOp] the executor dispatches, so the parsing is
+ * unit-testable without a device and the executor/prompt/serializer all agree on the
+ * accepted vocabulary.
+ *
+ * Two controls are backed today, both reusing an existing honest read-back primitive:
+ * `torch` (on/off -> the [TorchController] camera-hardware toggle) and `ringer_mode`
+ * (silent/vibrate/normal -> the [RingerModeController] system-audio setting). A new
+ * control is a mapping here plus a dispatch arm, never a new tool.
  */
 object DeviceControl {
     const val TORCH = "torch"
+    const val RINGER_MODE = "ringer_mode"
 
     /** The controls `set_device_control` understands. */
-    fun keys(): List<String> = listOf(TORCH)
+    fun keys(): List<String> = listOf(TORCH, RINGER_MODE)
 
     /**
-     * Resolves the boolean for a ([control], [value]) pair, or null when the control is
-     * unknown or the value is not an on/off alias. Null means "refuse honestly" - no tap
-     * or intent is built for an unrecognised request.
+     * Resolves a ([control], [value]) pair into the typed op the executor dispatches, or
+     * null when the control is unknown or the value is not valid for it. Null means
+     * "refuse honestly" - no tap or intent is built for an unrecognised request.
      */
-    fun resolve(control: String, value: String): Boolean? {
+    fun resolve(control: String, value: String): DeviceControlOp? {
         val normalisedControl = control.trim().lowercase()
-        if (normalisedControl != TORCH) return null
-        return when (value.trim().lowercase()) {
-            "on", "true", "enable", "enabled", "1", "yes", "start" -> true
-            "off", "false", "disable", "disabled", "0", "no", "stop" -> false
+        val normalisedValue = value.trim().lowercase()
+        return when (normalisedControl) {
+            TORCH -> onOff(normalisedValue)?.let { DeviceControlOp.Torch(it) }
+            RINGER_MODE -> com.example.agent.RingerMode.fromKey(normalisedValue)?.let { DeviceControlOp.RingerMode(it) }
             else -> null
         }
     }
 
+    private fun onOff(value: String): Boolean? = when (value) {
+        "on", "true", "enable", "enabled", "1", "yes", "start" -> true
+        "off", "false", "disable", "disabled", "0", "no", "stop" -> false
+        else -> null
+    }
+
     /** True when [control] is a control the executor understands. */
-    fun isKnown(control: String): Boolean = resolve(control, "on") != null
+    fun isKnown(control: String): Boolean = keys().any { it == control.trim().lowercase() }
 
     /** Canonical display value for a (control, value) pair, for honest UI wording. */
     fun describeValue(control: String, value: String): String =
-        when (resolve(control, value)) {
-            true -> "on"
-            false -> "off"
+        when (val op = resolve(control, value)) {
+            is DeviceControlOp.Torch -> if (op.on) "on" else "off"
+            is DeviceControlOp.RingerMode -> op.mode.key
             null -> value.trim()
         }
 }

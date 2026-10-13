@@ -567,22 +567,32 @@ class AndroidDeviceAutomation(
             val result = controller.setTorch(action.on)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
-        // set_device_control drives a device control (currently the torch) from an explicit
-        // control/value pair, so a scheduled automation has a declarative action it can
-        // replay. It resolves the pair through DeviceControl first (an unknown control or a
-        // non-on/off value is refused honestly, no dispatch), then delegates to the same
-        // torch controller for the honest read-back. Like set_torch it is resolved before
-        // the a11y-service gate (CameraManager-backed, not tree-backed).
+        // set_device_control drives a device control from an explicit control/value pair,
+        // so a scheduled automation has a declarative action it can replay. It resolves the
+        // pair through DeviceControl first (an unknown control or a value invalid for that
+        // control is refused honestly, no dispatch), then delegates to the existing honest
+        // read-back controller for the named control: torch -> TorchController, ringer_mode
+        // -> RingerModeController. Like set_torch/set_ringer_mode it is resolved before the
+        // a11y-service gate (both are system-service backed, not tree-backed).
         if (action is AgentAction.SetDeviceControl) {
-            val on = DeviceControl.resolve(action.control, action.value)
-                ?: return@withContext ActionResult(
+            when (val op = DeviceControl.resolve(action.control, action.value)) {
+                is DeviceControlOp.Torch -> {
+                    val controller = torchController
+                        ?: return@withContext ActionResult(false, "TORCH_UNAVAILABLE", "Flashlight control is not available")
+                    val result = controller.setTorch(op.on)
+                    return@withContext ActionResult(result.success, result.method, result.message)
+                }
+                is DeviceControlOp.RingerMode -> {
+                    val controller = ringerModeController
+                        ?: return@withContext ActionResult(false, "RINGER_UNAVAILABLE", "Ringer mode control is not available")
+                    val result = controller.set(op.mode)
+                    return@withContext ActionResult(result.success, result.method, result.message)
+                }
+                null -> return@withContext ActionResult(
                     false, "UNSUPPORTED_DEVICE_CONTROL",
-                    "Unknown device control '${action.control}'='${action.value}'; expected control=${DeviceControl.keys().joinToString("/")} and value on/off"
+                    "Unknown device control '${action.control}'='${action.value}'; expected control=${DeviceControl.keys().joinToString("/")} and a value valid for it"
                 )
-            val controller = torchController
-                ?: return@withContext ActionResult(false, "TORCH_UNAVAILABLE", "Flashlight control is not available")
-            val result = controller.setTorch(on)
-            return@withContext ActionResult(result.success, result.method, result.message)
+            }
         }
         // Speech output is likewise service-free: it drives the platform TTS engine, so
         // it is resolved before the a11y-service gate. This is the "say good morning" /
