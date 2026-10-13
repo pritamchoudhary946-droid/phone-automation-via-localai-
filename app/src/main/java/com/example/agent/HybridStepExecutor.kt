@@ -278,6 +278,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic note-editor dispatch"
             )
 
+            is AgentAction.SummarizeText -> FastPathDecision.Execute(
+                action,
+                "deterministic text summarisation through the configured summarizer"
+            )
+
             is AgentAction.PlayMedia -> FastPathDecision.Execute(
                 action,
                 "deterministic media transport control"

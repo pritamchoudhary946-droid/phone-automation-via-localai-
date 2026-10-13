@@ -2170,3 +2170,23 @@ physical-device pass is claimed unless it actually ran on the device.
   ./gradlew :app:assembleDebug --no-daemon -> BUILD SUCCESSFUL, app-debug.apk produced.
 - Next: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT),
   split-screen/multi-window handling.
+
+
+---
+
+## SESSION 39 (2026-10-13) - milestone: summarize_text capability
+
+Status: DONE. New `AgentAction.SummarizeText(text, maxChars)` + tool `summarize_text`
+(condense a captured block of text through the configured cloud summarizer). Closes the
+section 2.1 gap "read then summarise" (read_text/read_page_content -> summarize_text).
+- Service-free: resolved before the a11y gate (like speak/create_note).
+- Self-evidencing: the digest is carried as `ActionResult.readText`; `verifyAction`
+  accepts a NONE-verified summarise from its non-empty digest, `selfEvidencingToolSatisfied`
+  counts it as goal evidence. A failed summarise still fails the run (not masked).
+- Honest: SUMMARY_UNAVAILABLE / SUMMARY_FAILED / INVALID_SUMMARY_INPUT; never fabricates.
+- All seven action seams + OmniAgentApplication wired; `NanoSummarizer.promptFor` keeps the
+  loop digest and the memory digest identical.
+- Validation: `:app:testDebugUnitTest --tests com.example.CapabilityUpgradeTest` ->
+  BUILD SUCCESSFUL, 208 tests, 0 failures.
+- Next: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT); a
+  capture->summarise->act end-to-end benchmark test.

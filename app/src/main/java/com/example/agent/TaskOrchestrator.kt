@@ -971,7 +971,10 @@ class TaskOrchestrator(
             is AgentAction.Note,
             // Speech output acts on the platform TTS engine (no screen reflects it), and
             // the executor reports SPOKEN only once the engine accepted the utterance.
-            is AgentAction.Speak -> true
+            is AgentAction.Speak,
+            // summarize_text acts on the configured summarizer, not the screen; a
+            // completed digest is its own evidence (the executor never fabricates one).
+            is AgentAction.SummarizeText -> true
             else -> false
         }
     }
@@ -1121,14 +1124,19 @@ class TaskOrchestrator(
         // ReadNotifications allowance is unreachable and every triage read fails).
         // read_device_status is the same shape: the battery/screen/ringer/connectivity
         // digest it reads back is carried as readText and IS the goal evidence.
+        // summarize_text is the same shape: the digest it produces is carried as
+        // readText and IS the goal evidence, so a NONE-verified summarise step is
+        // satisfied by the non-empty digest it returned (empty -> failure).
         if (step.verification == VerificationMethod.NONE &&
             (action is AgentAction.ReadText || action is AgentAction.ReadPageContent ||
-                action is AgentAction.ReadNotifications || action is AgentAction.ReadDeviceStatus)
+                action is AgentAction.ReadNotifications || action is AgentAction.ReadDeviceStatus ||
+                action is AgentAction.SummarizeText)
         ) {
             val captured = result.readText
             val what = when (action) {
                 is AgentAction.ReadNotifications -> "notification digest"
                 is AgentAction.ReadDeviceStatus -> "device status"
+                is AgentAction.SummarizeText -> "summary"
                 else -> "visible text"
             }
             return if (!captured.isNullOrBlank()) {

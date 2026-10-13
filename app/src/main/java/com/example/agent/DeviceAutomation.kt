@@ -3,6 +3,7 @@ package com.example.agent
 import com.example.accessibility.AgentAccessibilityService
 import com.example.accessibility.UiNode
 import com.example.accessibility.UiTreeSnapshot
+import com.example.model.NanoSummarizer
 import com.example.notifications.NotificationBus
 import com.example.notifications.NotificationSource
 import com.example.perception.TargetResolver
@@ -250,7 +251,12 @@ class AndroidDeviceAutomation(
     // create_note dispatches the notes app's own compose intent, not an accessibility-tree
     // control, so like the contact/calendar inserts it is resolved before the a11y-service
     // gate. An unwired controller gets an honest "unavailable" result, never a silent no-op.
-    private val noteController: NoteController? = null
+    private val noteController: NoteController? = null,
+    // summarize_text condenses a block of text through the configured summarizer (the
+    // remote LLM API), not the accessibility tree, so like Speak/ReadNotifications it is
+    // resolved before the a11y-service gate. An unwired summarizer gets an honest
+    // "unavailable" result, never a fabricated digest.
+    private val nanoSummarizer: NanoSummarizer = com.example.model.UnavailableNanoSummarizer
 ) : DeviceAutomation {
 
     companion object {
@@ -605,6 +611,39 @@ class AndroidDeviceAutomation(
                 ?: return@withContext ActionResult(false, "NOTE_UNAVAILABLE", "Note dispatch is not available")
             val result = creator.createNote(action.title, action.content)
             return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // summarize_text condenses a block of text through the configured summarizer (the
+        // remote LLM API), not the accessibility tree, so like Speak it is resolved before
+        // the a11y-service gate. The digest is carried as readText so it flows into a later
+        // step as a `{{name}}` variable and self-evidences this NONE-verified step; an
+        // unwired summarizer and a failed/empty generation are honest failures, never a
+        // fabricated summary. The input is validated (non-blank, bounded) before any call.
+        if (action is AgentAction.SummarizeText) {
+            if (action.text.isBlank()) {
+                return@withContext ActionResult(false, "INVALID_SUMMARY_INPUT", "summarize_text needs non-blank text")
+            }
+            if (!nanoSummarizer.isAvailable()) {
+                return@withContext ActionResult(
+                    false, "SUMMARY_UNAVAILABLE",
+                    "No summarizer is configured. Add an API key in Setup to summarise text."
+                )
+            }
+            val maxChars = action.maxChars.coerceIn(ToolRegistry.MIN_SUMMARY_CHARS, ToolRegistry.MAX_SUMMARY_CHARS)
+            val digest = try {
+                nanoSummarizer.summarize(action.text, maxChars)
+            } catch (e: Exception) {
+                null
+            }
+            return@withContext if (digest.isNullOrBlank()) {
+                ActionResult(false, "SUMMARY_FAILED", "The summarizer returned no summary")
+            } else {
+                ActionResult(
+                    success = true,
+                    method = "SUMMARY_OK",
+                    message = digest,
+                    readText = digest.take(ActionResult.MAX_CAPTURED_CHARS)
+                )
+            }
         }
         val service = serviceProvider()
             ?: return@withContext ActionResult(false, "NO_SERVICE", "Accessibility Service unavailable")
