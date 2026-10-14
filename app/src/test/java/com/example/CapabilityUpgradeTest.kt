@@ -6141,13 +6141,37 @@ class CapabilityUpgradeTest {
             }
         }
         val engine = modelEngine(
-            """{"steps":[{"id":1,"seq":1,"desc":"Clear the notifications","action":"dismiss_notification","params":{}}]}"""
+            """{"steps":[{"id":1,"seq":1,"desc":"Clear the notifications","action":"dismiss_notification","params":{},"verify":"NONE"}]}"""
         )
         val orchestrator = newOrchestrator(engine, automation)
         orchestrator.startTask("dismiss my notifications", maxSteps = 3)
 
         val terminal = awaitTerminal(orchestrator)
         assertTrue("dismiss_notification with NONE verification must complete, got $terminal", terminal is OrchestratorState.Completed)
+        assertTrue(automation.executed.any { it is AgentAction.DismissNotification })
+    }
+
+    @Test
+    fun dismissNotificationFailureIsNotMaskedByTheSelfEvidencingRule() = kotlinx.coroutines.runBlocking {
+        // The self-evidencing rule accepts only a genuinely successful dismissal: an
+        // honest failure (empty shade / missing access) must fail the step, never pass.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.DismissNotification -> ActionResult(false, "DISMISS_NONE", "No active notification from com.slack to dismiss")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Clear Slack","action":"dismiss_notification","params":{"packageName":"com.slack"},"verify":"NONE","maxRetries":0}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("dismiss the Slack notification", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("an honest dismissal failure must fail the run, got $terminal", terminal is OrchestratorState.Failed)
     }
 
     @Test
@@ -6239,8 +6263,8 @@ class CapabilityUpgradeTest {
 
     @Test
     fun dismissNotificationDescribesItselfForTheStepLog() {
-        assertEquals("Dismiss all notifications", AgentAction.DismissNotification().describe())
-        assertEquals("Dismiss notifications from com.slack", AgentAction.DismissNotification("com.slack").describe())
+        assertEquals("Dismiss all notifications", AgentAction.DismissNotification().getDisplayName())
+        assertEquals("Dismiss notifications from com.slack", AgentAction.DismissNotification("com.slack").getDisplayName())
     }
 
     @Test
