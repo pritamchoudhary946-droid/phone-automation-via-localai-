@@ -4,7 +4,7 @@
 
 ## SESSION 59 (2026-10-14) - milestone: `dismiss_notification` (the "act" half of notification triage)
 
-Status: DONE + VALIDATED (unit tests). Turns the app's read-only notification triage into
+Status: DONE + VALIDATED + MERGED (PR #103, section 18 auto-merge). Turns the app's read-only notification triage into
 action: `NotificationTriage.offeredActions` already *offered* `dismiss` for every posted
 notification, but nothing could take it - the app could read and suggest, never act.
 New `AgentAction.DismissNotification(packageName: String? = null)` + the
@@ -28,11 +28,12 @@ the system shade, not the accessibility tree, so no screen read or UI tap remove
   TaskPlanParser aliases, HybridStepExecutor dispatch, PlannerPromptBuilder gating,
   DeviceAutomation dispatch + `notificationDismisser`/`triageEnabled`, OmniAgentApplication DI,
   AGENTS.md.
-- Validation: `./gradlew :app:testDebugUnitTest --no-daemon` -> BUILD SUCCESSFUL, 588 tests,
-  0 failures 0 errors 0 skipped (15 dismiss_notification tests pass). Fixed a test-compile slip
-  in the carried-over WIP (`.describe()` -> `.getDisplayName()`).
-- Next: finish the run's pre-merge gate (assembleDebug APK) and merge the PR; queue the
-  capture->summarise->act end-to-end benchmark.
+- Validation (continuation run, section 16.8): `bash .github/scripts/verify.sh` -> VERIFY OK,
+  BUILD SUCCESSFUL in 6m48s; 588 unit tests, 0 failures 0 errors 0 skipped (36 dismiss_notification
+  test references pass); `:app:assembleDebug` -> app-debug.apk (66,272,485 bytes). GitHub CI
+  could-not-run: Actions runner infra outage (runner_name=None, 0 steps) on the branch and main.
+- Next: queue the capture->summarise->act end-to-end benchmark; further DeviceControl-backed
+  controls (nfc/hotspot); share the hasPowerMenu signal with the vision fallback.
 
 
 ## SESSION 57 (2026-10-14) - milestone: `auto_rotate` device control (COMPLETED, MERGED)
