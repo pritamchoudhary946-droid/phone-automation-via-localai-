@@ -408,7 +408,7 @@ new tool. It is resolved *before* the a11y gate (device-backed, like `set_torch`
 The pure, unit-tested `com.example.agent.DeviceControl.resolve(control, value)` is the
 single truth for the accepted vocabulary: it trims and lower-cases both fields and
 returns a typed `DeviceControlOp` or **null** for an unknown control or a value invalid
-for that control. Five controls are backed, each reusing an existing honest read-back
+for that control. Six controls are backed, each reusing an existing honest read-back
 primitive so no new action class is needed:
 - `torch` — value `on`/`off` (on/off aliases `on`/`off`/`enable`/`disable`/`yes`/`no`/
   `true`/`false`/`1`/`0`, case-insensitively) dispatched to the existing `TorchController`
@@ -461,6 +461,20 @@ primitive so no new action class is needed:
   phone rings / which notifications interrupt): it chooses *which output device* audio plays
   through, a system audio setting no accessibility-tree read or UI tap can change reliably on
   an arbitrary screen.
+- `auto_rotate` — value `on`/`off` (aliases `enable`/`unlock`/`unlocked`/
+  `rotate`/`auto`/`automatic` -> on; `disable`/`lock`/`locked`/`fixed`/`portrait` -> off;
+  `true`/`false`/`1`/`0`/`yes`/`no`, case-insensitively), dispatched to
+  `AutoRotateController` (`AndroidAutoRotateController` over
+  `Settings.System.ACCELEROMETER_ROTATION`, guarded by `Settings.System.canWrite`).
+  `AutoRotateMode` is a *closed* enum (ON/OFF), so an invalid value can never index the
+  platform. It is a sibling of `brightness`: both write a `Settings.System` display
+  setting under the same single `WRITE_SETTINGS` special access. Read-back `AUTO_ROTATE_SET`,
+  `AUTO_ROTATE_UNCHANGED` on an ignored write, `AUTO_ROTATE_PERMISSION` when
+  `WRITE_SETTINGS` special access is not granted, `AUTO_ROTATE_UNAVAILABLE` when the
+  controller is unwired, `AUTO_ROTATE_ERROR` on a write failure. This is the "lock the
+  screen rotation" / "turn on auto-rotate" / "stop the screen rotating" primitive, a
+  system display setting no accessibility-tree read or UI tap can set reliably on an
+  arbitrary screen (it lives in quick settings, usually off-screen).
 Because the resolver rejects anything it cannot run, an unknown control is refused
 honestly (`UNSUPPORTED_DEVICE_CONTROL` at execute, `Invalid` at validation) and never
 dispatched — so the prompt can never advertise a control the executor cannot execute. Carried through
