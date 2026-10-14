@@ -23,22 +23,23 @@
     "Optional: LOCATION_ARRIVE with a permissioned opt-in region provider.",
     "Optional: an :app:lintDebug gate in verify.sh."
   ],
-  "branch": "auto/jarvis-autonomy-20261013-2331",
+  "branch": null,
   "open_pr": null,
   "risky_actions_done": [
+    "2026-10-13 (session 55): merged PR #96 (squash) into main (6f6efcb) - `set_clipboard` capability, auto-merge per section 18; branch auto/jarvis-autonomy-20261013-2331 deleted. CI 'Verify' and 'Build Android APK' both completed success on the branch head before merge.",
     "2026-10-13 (session 53): completed and validated the read_clipboard capability (fix-forward on the main compile break); full gate verify.sh -> VERIFY OK, 545 tests 0 failures, APK built; merged PR #94 (squash) into main per section 18; branch auto/jarvis-autonomy-20261013-2158 deleted.",
     "2026-10-13 (session 50): merged PR #89 (squash) into main (eab1909) - CI hardening, auto-merge per section 18; branch auto/jarvis-autonomy-20261013-1631 deleted.",
     "2026-10-13 (session 51): merged PR #91 (squash) into main (ae6eb7c) - dnd device control, auto-merge per section 18; branch auto/jarvis-autonomy-20261013-1931 deleted.",
     "2026-10-13 (session 52): merged PR #93 (squash) into main (1267556) - brightness device control, auto-merge per section 18; branch auto/jarvis-autonomy-20261013-2031 deleted. NOTE: #93 left main not compiling (missing TaskOrchestrator.clipboardReadEnabled param); fixed forward this run."
   ],
-  "blockers": "Session cap reached (sessions_done 55 >= session_cap 48) without project_done; the `set_clipboard` milestone is DONE and validated (full gate VERIFY OK, 554 tests 0 failures, APK built), PR pending merge. Human review requested: raise `session_cap` to continue capability work, or set `project_done`. No technical blockers; the toolchain is present and the full gate passes.",
+  "blockers": "Session cap reached (sessions_done 55 >= session_cap 48) without project_done; the `set_clipboard` milestone is DONE and validated (full gate VERIFY OK, 554 tests 0 failures, APK built) and MERGED (PR #96, main 6f6efcb). No milestone is in flight. Human review requested: raise `session_cap` to continue capability work, or set `project_done`. No technical blockers; the toolchain is present and the full gate passes.",
   "last_run_id": "jarvis-20261013-2331",
-  "last_updated": "2026-10-14T00:05:00Z",
+  "last_updated": "2026-10-14T00:15:00Z",
   "carryover_milestone": null,
   "milestone_attempts": 1,
   "max_attempts_per_milestone": 3,
   "blocked_items": [],
-  "last_report": "session 55 (2026-10-13): landed the `set_clipboard` capability - the write half of the clipboard trio (copy a chosen value, incl. a captured {{name}}, to the clipboard). Full gate verify.sh -> VERIFY OK, 554 tests 0 failures 0 errors 0 skipped, app-debug.apk (66 MB) built. Opt-in, service-free, read-back-verified. sessions_done 55 >= session_cap 48 -> outer stop; human review requested.",
+  "last_report": "session 55 (2026-10-13): landed AND MERGED the `set_clipboard` capability - the write half of the clipboard trio (copy a chosen value, incl. a captured {{name}}, to the clipboard). Full gate verify.sh -> VERIFY OK, 554 tests 0 failures 0 errors 0 skipped, app-debug.apk (66 MB) built. Opt-in, service-free, read-back-verified. PR #96 squash-merged into main (6f6efcb) after CI 'Verify' + 'Build Android APK' both succeeded; branch deleted. sessions_done 55 >= session_cap 48 -> outer stop; human review requested.",
   "report": {
     "summary": "Landed one coherent capability milestone: `set_clipboard`, the write half of the clipboard trio. Jarvis can now copy a chosen piece of text to the device clipboard - 'copy this to the clipboard' / 'put this on my clipboard' / 'copy this address so I can paste it' - including a value captured by an earlier read step via a `{{name}}` variable. It is opt-in (off by default: a write clobbers whatever the user had copied), gated both in the executor and the planner prompt, service-free (works without a bound a11y service), and honest (the writer reads the clip back and reports success only when the clipboard actually holds the text).",
     "evidence_reviewed": "RUN_STATE.json / AGENTS.md / PLAN.md (sessions 52-55); the branch diff main...HEAD across every action-vocabulary seam; ClipboardWriter.kt and the AndroidDeviceAutomation.execute SetClipboard branch (resolved before the a11y gate); PlanVariables.substitute; PlannerPromptBuilder.availableActions/ACTION_CATALOG gating; ToolRegistry const/definition/validation (MAX_CLIPBOARD_CHARS); TaskPlanParser aliases; TaskPlanSerializer toParams/toolNameFor; HybridStepExecutor.decide; CapabilitySettings (KEY_CLIPBOARD_WRITE) + SettingsScreen toggle (toggle_clipboard_write) + OmniAgentApplication DI. Full gate output and JUnit XML (554 tests).",
