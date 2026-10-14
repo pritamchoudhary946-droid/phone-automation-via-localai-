@@ -658,6 +658,29 @@ output is off, read live per call by `AgentPlanner`.
   step via the same self-evidencing rule as `read_clipboard`. The `text` field is fed by
   `PlanVariableStore.substitute` (`{{name}}`), so cross-app passing reaches it. Keep the
   writer service-free, honest and the gate live.
+- `DismissNotification` is the *act* half of the smart-triage capability: `NotificationTriage`
+  already *offers* a `dismiss` action for every posted notification (and a bulk dismiss),
+  but until this tool nothing could take it - the app could read and suggest, not act.
+  Posted notifications live in the system shade, not the accessibility tree, so no screen
+  read or UI tap removes them reliably; it is `NotificationListenerService`-backed and,
+  like `ReadNotifications`, must NOT sit behind the accessibility-service gate:
+  `AndroidDeviceAutomation.execute` resolves it (the same `triageEnabled` consent check,
+  then `NotificationDismisser.dismiss(packageName)`) *before* `serviceProvider()`, and an
+  unwired dismisser returns `DISMISS_UNAVAILABLE` (never a silent no-op). It is opt-in under
+  the *same* `notificationTriageEnabled` flag as the read (a dismissal is a consequential
+  action): with the flag off the executor refuses `TRIAGE_DISABLED` and never touches the
+  user's notifications, and the *prompt* withholds `dismiss_notification` from both
+  `availableActions(...)` and `ACTION_CATALOG` while off (the same live `() -> Boolean`
+  rule, default `{ false }`). `AndroidNotificationDismisser` treats the live
+  notification-access connection as the evidence: a dismissal is success only against a
+  live connection, a blank package dismisses every notification (`DISMISSED_ALL`), a
+  package matching nothing is an honest `DISMISS_NONE` (never a fake success), a missing
+  connection is `DISMISS_UNAVAILABLE` and a platform refusal is `DISMISS_PERMISSION`. A
+  NONE-verified `dismiss_notification` step self-satisfies from that confirmed dismissal
+  (no screen reflects it), exactly like `read_notifications`/`set_clipboard`, while an
+  honest failure still fails the run. The `packageName` field is fed by
+  `PlanVariableStore.substitute` (`{{name}}`), so a package captured by an earlier read
+  can be the dismissal target. Keep the dismisser service-free, honest and the gate live.
 
 ## Jarvis Phase 5 autonomy & self-healing (do not regress)
 - The execution loop replaces "retry the same action N times then fail" with a

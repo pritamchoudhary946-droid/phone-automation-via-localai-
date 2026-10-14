@@ -1,5 +1,40 @@
 ---
 
+---
+
+## SESSION 59 (2026-10-14) - milestone: `dismiss_notification` (the "act" half of notification triage)
+
+Status: DONE + VALIDATED (unit tests). Turns the app's read-only notification triage into
+action: `NotificationTriage.offeredActions` already *offered* `dismiss` for every posted
+notification, but nothing could take it - the app could read and suggest, never act.
+New `AgentAction.DismissNotification(packageName: String? = null)` + the
+`NotificationDismisser` boundary / `AndroidNotificationDismisser`, which removes notifications
+through the live `AgentNotificationListenerService` connection (posted notifications live in
+the system shade, not the accessibility tree, so no screen read or UI tap removes them).
+- Service-free: resolved *before* the a11y gate (like `read_notifications`/`set_clipboard`);
+  an unwired dismisser returns `DISMISS_UNAVAILABLE`, never a silent no-op.
+- Opt-in under the *same* `notificationTriageEnabled` flag as the read (a dismissal is a
+  consequential action); flag off -> `TRIAGE_DISABLED` and the prompt withholds the tool from
+  both `availableActions(...)` and `ACTION_CATALOG` (live `() -> Boolean`, default `{ false }`).
+- Honest: a blank package dismisses everything (`DISMISSED_ALL`); a package matching nothing is
+  `DISMISS_NONE`; no live connection is `DISMISS_UNAVAILABLE`; a platform refusal is
+  `DISMISS_PERMISSION`. Never a fake success.
+- Self-evidencing: a NONE-verified `dismiss_notification` step self-satisfies from the
+  confirmed dismissal (no screen reflects it), like `read_notifications`/`set_clipboard`;
+  an honest failure still fails the run.
+- `packageName` is fed by `PlanVariableStore.substitute` (`{{name}}`), so a package captured by
+  an earlier read can be the dismissal target.
+- Wired: ToolRegistry (`TOOL_DISMISS_NOTIFICATION` const + ToolDefinition + validation),
+  TaskPlanParser aliases, HybridStepExecutor dispatch, PlannerPromptBuilder gating,
+  DeviceAutomation dispatch + `notificationDismisser`/`triageEnabled`, OmniAgentApplication DI,
+  AGENTS.md.
+- Validation: `./gradlew :app:testDebugUnitTest --no-daemon` -> BUILD SUCCESSFUL, 588 tests,
+  0 failures 0 errors 0 skipped (15 dismiss_notification tests pass). Fixed a test-compile slip
+  in the carried-over WIP (`.describe()` -> `.getDisplayName()`).
+- Next: finish the run's pre-merge gate (assembleDebug APK) and merge the PR; queue the
+  capture->summarise->act end-to-end benchmark.
+
+
 ## SESSION 57 (2026-10-14) - milestone: `auto_rotate` device control (COMPLETED, MERGED)
 
 Where reached: COMPLETED. The `auto_rotate` milestone was found present but UNRECORDED and
