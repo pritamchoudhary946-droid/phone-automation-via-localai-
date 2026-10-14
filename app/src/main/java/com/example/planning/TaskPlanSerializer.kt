@@ -145,6 +145,7 @@ object TaskPlanSerializer {
             .put("control", control)
             .put("value", value)
         is AgentAction.SetClipboard -> JSONObject().put("text", text)
+        is AgentAction.DismissNotification -> packageName?.takeIf { it.isNotBlank() }?.let { JSONObject().put("packageName", it) }
         is AgentAction.Speak -> JSONObject().put("text", text)
         is AgentAction.PlayMedia -> JSONObject().put("transport", transport)
         else -> null
@@ -265,6 +266,7 @@ object TaskPlanSerializer {
         is AgentAction.ReadDeviceStatus -> com.example.agent.ToolRegistry.TOOL_READ_DEVICE_STATUS
         is AgentAction.ReadClipboard -> com.example.agent.ToolRegistry.TOOL_READ_CLIPBOARD
         is AgentAction.SetClipboard -> com.example.agent.ToolRegistry.TOOL_SET_CLIPBOARD
+        is AgentAction.DismissNotification -> com.example.agent.ToolRegistry.TOOL_DISMISS_NOTIFICATION
         is AgentAction.OpenNotifications -> com.example.agent.ToolRegistry.TOOL_OPEN_NOTIFICATIONS
         is AgentAction.OpenQuickSettings -> com.example.agent.ToolRegistry.TOOL_OPEN_QUICK_SETTINGS
         is AgentAction.PressRecents -> com.example.agent.ToolRegistry.TOOL_OPEN_RECENTS

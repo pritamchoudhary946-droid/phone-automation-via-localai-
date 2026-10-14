@@ -53,6 +53,36 @@ object NotificationBus : NotificationSource {
  */
 class AgentNotificationListenerService : NotificationListenerService() {
 
+    override fun onListenerConnected() {
+        instance = this
+    }
+
+    override fun onListenerDisconnected() {
+        if (instance === this) instance = null
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        super.onDestroy()
+    }
+
+    /**
+     * Removes the active notifications posted by [packageName] and returns how many
+     * were cancelled. `activeNotifications` is the platform's own list, so a count of
+     * zero is an honest "nothing to dismiss", not a silent no-op.
+     */
+    fun dismissPackage(packageName: String): Int {
+        val active = activeNotifications ?: return 0
+        var removed = 0
+        for (sbn in active) {
+            if (sbn.packageName == packageName) {
+                cancelNotification(sbn.key)
+                removed++
+            }
+        }
+        return removed
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val n = sbn ?: return
         val extras = n.notification?.extras ?: return
@@ -69,5 +99,16 @@ class AgentNotificationListenerService : NotificationListenerService() {
                 canReply = canReply
             )
         )
+    }
+
+    companion object {
+        /**
+         * The live bound listener, or null when notification access is not granted.
+         * Mirrors [com.example.accessibility.AgentAccessibilityService.instance]; the
+         * dismisser reaches the platform connection through it.
+         */
+        @Volatile
+        var instance: AgentNotificationListenerService? = null
+            private set
     }
 }

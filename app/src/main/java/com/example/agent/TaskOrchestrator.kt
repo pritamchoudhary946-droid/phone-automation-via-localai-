@@ -1140,6 +1140,11 @@ class TaskOrchestrator(
             // set_clipboard writes the system clipboard (a service no screen reflects);
             // the writer reads the value back, so a successful write is its own evidence.
             is AgentAction.SetClipboard,
+            // dismiss_notification removes notifications through the platform's
+            // notification-access connection - a system-service side effect no screen
+            // reflects; the dismisser reports success only against a live connection, so
+            // a completed dismissal is its own evidence (exactly like the reads above).
+            is AgentAction.DismissNotification,
             // Device-control actions act on a system service no screen reflects; a
             // completed, honestly-read-back volume/media/ringer command is its own
             // evidence, exactly like the read actions above.
@@ -1387,6 +1392,7 @@ class TaskOrchestrator(
                 action is AgentAction.SetTorch ||
                 action is AgentAction.SetDeviceControl ||
                 action is AgentAction.SetClipboard ||
+                action is AgentAction.DismissNotification ||
                 action is AgentAction.Speak ||
                 action is AgentAction.ReadNotifications)
         ) {

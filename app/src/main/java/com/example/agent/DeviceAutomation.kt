@@ -326,7 +326,15 @@ class AndroidDeviceAutomation(
     // result rather than a silent no-op. The write is read back, so success is reported
     // only when the clipboard actually holds the text.
     private val clipboardWriter: ClipboardWriter? = null,
-    private val clipboardWriteEnabled: () -> Boolean = { false }
+    private val clipboardWriteEnabled: () -> Boolean = { false },
+    // Dismissing notifications (dismiss_notification) is the *act* half of the triage
+    // capability: posted notifications live in the system shade, not the accessibility
+    // tree, so no screen read or UI tap removes them reliably. Like ReadNotifications it
+    // is resolved before the a11y-service gate. An unwired dismisser gets an honest
+    // "unavailable" result rather than a silent no-op, and the real implementation never
+    // reports a dismissal it did not perform (a missing notification access or an empty
+    // shade fails the step).
+    private val notificationDismisser: NotificationDismisser? = null
 ) : DeviceAutomation {
 
     companion object {
@@ -483,6 +491,26 @@ class AndroidDeviceAutomation(
             val writer = clipboardWriter
                 ?: return@withContext ActionResult(false, "CLIPBOARD_WRITE_UNAVAILABLE", "Clipboard write is not available")
             val result = writer.write(action.text)
+            return@withContext ActionResult(result.success, result.method, result.message)
+        }
+        // Dismissing notifications is likewise service-free: it removes them through the
+        // platform's notification-access connection, so it is resolved before the
+        // a11y-service gate (like the triage read above). This is the *act* half of the
+        // triage capability - the offered "dismiss" action the app could previously only
+        // suggest. The dismisser never reports a dismissal it did not perform.
+        if (action is AgentAction.DismissNotification) {
+            // Consent before capability, exactly like the triage read above: refusal is
+            // honest rather than a silent no-op.
+            if (!triageEnabled()) {
+                return@withContext ActionResult(
+                    false,
+                    "TRIAGE_DISABLED",
+                    "Notification triage is off. Enable it in Settings to dismiss notifications."
+                )
+            }
+            val dismisser = notificationDismisser
+                ?: return@withContext ActionResult(false, "DISMISS_UNAVAILABLE", "Notification dismissal is not available")
+            val result = dismisser.dismiss(action.packageName)
             return@withContext ActionResult(result.success, result.method, result.message)
         }
         // The clock alarm is likewise service-free: it is dispatched through the platform

@@ -268,6 +268,11 @@ class HybridStepExecutor(private val appDirectory: AppDirectory) {
                 "deterministic clipboard write"
             )
 
+            is AgentAction.DismissNotification -> FastPathDecision.Execute(
+                action,
+                "deterministic notification dismissal"
+            )
+
             is AgentAction.Speak -> FastPathDecision.Execute(
                 action,
                 "deterministic on-device speech output"
