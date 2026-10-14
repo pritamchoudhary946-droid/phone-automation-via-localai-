@@ -279,7 +279,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // and opt-in like the read. It reads the value back, so an ignored write is
                 // reported as failure, never a fake success.
                 clipboardWriter = com.example.agent.AndroidClipboardWriter(this),
-                clipboardWriteEnabled = { settings.clipboardWriteEnabled }
+                clipboardWriteEnabled = { settings.clipboardWriteEnabled },
+                // Notification-dismiss primitive: the *act* half of triage. Removes
+                // notifications through the app's own notification-access connection,
+                // service-free and gated live by the same triage opt-in as the read. It
+                // reports success only against a live connection, so an ungranted access
+                // or an empty shade is an honest failure, never a fake success.
+                notificationDismisser = com.example.agent.AndroidNotificationDismisser()
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),

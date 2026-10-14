@@ -69,6 +69,7 @@ open class ToolRegistry {
         const val TOOL_READ_DEVICE_STATUS = "read_device_status"
         const val TOOL_READ_CLIPBOARD = "read_clipboard"
         const val TOOL_SET_CLIPBOARD = "set_clipboard"
+        const val TOOL_DISMISS_NOTIFICATION = "dismiss_notification"
         const val TOOL_OPEN_NOTIFICATIONS = "open_notifications"
         const val TOOL_OPEN_QUICK_SETTINGS = "open_quick_settings"
         const val TOOL_OPEN_RECENTS = "open_recents"
@@ -101,6 +102,8 @@ open class ToolRegistry {
         const val MAX_EVENT_DURATION_MINUTES = 24 * 60
         /** Longest text a single set_clipboard step may put on the clipboard. */
         const val MAX_CLIPBOARD_CHARS = 2000
+        /** Longest package name a single dismiss_notification step may target. */
+        const val MAX_PACKAGE_NAME_CHARS = 255
     }
 
     private val tools = mapOf(
@@ -376,6 +379,12 @@ open class ToolRegistry {
             description = "Copies a given piece of text to the device clipboard. Use for 'copy this to the clipboard', 'put this on my clipboard', 'copy this address so I can paste it' - provide the text to copy (it may reference a value captured earlier with {{name}}). The write is read back, so it never reports success unless the clipboard actually holds the text",
             requiredParameters = listOf("text"),
             optionalParameters = listOf("content", "value", "message", "body")
+        ),
+        TOOL_DISMISS_NOTIFICATION to ToolDefinition(
+            name = TOOL_DISMISS_NOTIFICATION,
+            description = "Dismisses active notifications - the act half of notification triage. Use for 'clear that notification' / 'dismiss my notifications' / 'get rid of the Slack notification'. Omit packageName to dismiss every notification, or pass a package name to dismiss only that app's. Reports honestly: it never claims a dismissal when notification access is missing or the shade is empty",
+            requiredParameters = emptyList(),
+            optionalParameters = listOf("packageName", "package_name", "package", "app", "appQuery")
         ),
         TOOL_OPEN_NOTIFICATIONS to ToolDefinition(
             name = TOOL_OPEN_NOTIFICATIONS,
@@ -790,6 +799,18 @@ open class ToolRegistry {
                     action.text.length > MAX_CLIPBOARD_CHARS ->
                         ToolValidationResult.Invalid("set_clipboard text is too long (max $MAX_CLIPBOARD_CHARS chars)")
                     else -> ToolValidationResult.Valid
+                }
+            }
+            // dismiss_notification's only parameter is an optional package to narrow the
+            // dismissal; an over-long one is rejected so a malformed plan cannot hand the
+            // platform nonsense. A blank package (dismiss everything) is valid.
+            is AgentAction.DismissNotification -> {
+                if ((action.packageName?.length ?: 0) > MAX_PACKAGE_NAME_CHARS) {
+                    ToolValidationResult.Invalid(
+                        "dismiss_notification packageName is too long (max $MAX_PACKAGE_NAME_CHARS chars)"
+                    )
+                } else {
+                    ToolValidationResult.Valid
                 }
             }
             is AgentAction.Wait -> {

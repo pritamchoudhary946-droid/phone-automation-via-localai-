@@ -347,6 +347,9 @@ class TaskPlanParser(private val toolRegistry: ToolRegistry = ToolRegistry()) {
             ToolRegistry.TOOL_SET_CLIPBOARD -> AgentAction.SetClipboard(
                 text = str(params, "text", "content", "value", "message", "body")
             )
+            ToolRegistry.TOOL_DISMISS_NOTIFICATION -> AgentAction.DismissNotification(
+                packageName = str(params, "packageName", "package_name", "package", "app", "appQuery").ifBlank { null }
+            )
             ToolRegistry.TOOL_OPEN_NOTIFICATIONS -> AgentAction.OpenNotifications
             ToolRegistry.TOOL_OPEN_QUICK_SETTINGS -> AgentAction.OpenQuickSettings
             ToolRegistry.TOOL_OPEN_RECENTS -> AgentAction.PressRecents

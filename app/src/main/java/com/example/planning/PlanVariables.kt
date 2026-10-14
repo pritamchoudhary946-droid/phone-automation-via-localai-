@@ -124,6 +124,11 @@ class PlanVariableStore {
         // too - otherwise "copy this address so I can paste it" would copy the literal
         // placeholder instead of the captured value.
         is AgentAction.SetClipboard -> action.copy(text = substitute(action.text))
+        // The target package can be a value captured earlier in the run (e.g. a package
+        // named by an earlier read), so the same cross-app passing that feeds
+        // set_clipboard must feed dismiss_notification too - otherwise the step would
+        // dismiss a literal "{{pkg}}" that matches nothing.
+        is AgentAction.DismissNotification -> action.copy(packageName = action.packageName?.let(::substitute))
         // The text summarised can be a value captured earlier in the run, so the same
         // cross-app passing that feeds enter_text/share/email must feed summarize_text
         // too - otherwise "read the message, then summarise it" would condense the

@@ -409,6 +409,21 @@ sealed class AgentAction {
      * so Jarvis never writes the clipboard unless the user allows it.
      */
     data class SetClipboard(val text: String) : AgentAction()
+    /**
+     * Dismisses active notifications - the *act* half of the smart-triage capability.
+     *
+     * [com.example.notifications.NotificationTriage] already *offers* a `dismiss`
+     * action for every posted notification (and a bulk "dismiss all"), but until now
+     * nothing could take it: the app could read and offer, not act. Posted
+     * notifications live in the system shade, not in the accessibility tree, so no
+     * screen read or UI tap removes them reliably. Like [ReadNotifications] this is a
+     * service-backed action resolved before the accessibility-service gate; the
+     * [packageName] optionally narrows the dismissal to one app (blank = every
+     * notification), so a triage offer ("dismiss the Slack notification") becomes a
+     * concrete step. It reports honestly: a missing notification access, an empty
+     * shade, or a platform refusal fails the step rather than claiming a dismissal.
+     */
+    data class DismissNotification(val packageName: String? = null) : AgentAction()
     object OpenNotifications : AgentAction()
     object OpenQuickSettings : AgentAction()
     object PressRecents : AgentAction()
@@ -510,6 +525,7 @@ sealed class AgentAction {
             is ReadDeviceStatus -> "Read device status"
             is ReadClipboard -> "Read clipboard"
             is SetClipboard -> "Copy ${text.length} chars to clipboard"
+            is DismissNotification -> if (packageName.isNullOrBlank()) "Dismiss all notifications" else "Dismiss notifications from $packageName"
             is OpenNotifications -> "Open notification shade"
             is OpenQuickSettings -> "Open quick settings"
             is PressRecents -> "Open recents"

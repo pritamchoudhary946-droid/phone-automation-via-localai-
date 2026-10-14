@@ -16,6 +16,9 @@ import com.example.agent.ClipboardReader
 import com.example.agent.ClipboardReadResult
 import com.example.agent.ClipboardWriter
 import com.example.agent.ClipboardWriteResult
+import com.example.agent.NotificationDismisser
+import com.example.agent.NotificationDismissResult
+import com.example.agent.AndroidNotificationDismisser
 import com.example.agent.AirplaneMode
 import com.example.agent.AirplaneModeController
 import com.example.agent.AirplaneModeResult
@@ -6031,6 +6034,225 @@ class CapabilityUpgradeTest {
         assertEquals("the placeholder must resolve to the captured value", "12 Baker Street", (resolved as AgentAction.SetClipboard).text)
     }
 
+    // --- dismiss_notification: the act half of notification triage, opt-in and service-free ---
+
+    @Test
+    fun dismissNotificationExecutesWithoutAnAccessibilityService() {
+        // Posted notifications live in the system shade, not the a11y tree, so dismissal
+        // must resolve before the a11y-service gate (like read_notifications). Before this
+        // it would fall through to NO_SERVICE and the offered "dismiss" action could never
+        // be taken.
+        val dismisser = RecordingNotificationDismisser(NotificationDismissResult(true, "DISMISSED_ALL", "Dismissed all notifications"))
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            triageEnabled = { true },
+            notificationDismisser = dismisser
+        )
+
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.DismissNotification()) }
+
+        assertTrue("dismissal must succeed without a bound a11y service: $result", result.success)
+        assertEquals("DISMISSED_ALL", result.method)
+        assertEquals("the dismisser must be asked once, for all notifications", listOf<String?>(null), dismisser.calls)
+    }
+
+    @Test
+    fun dismissNotificationPassesThePackageThrough() {
+        val dismisser = RecordingNotificationDismisser(NotificationDismissResult(true, "DISMISSED", "Dismissed 1 notification(s) from com.slack"))
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            triageEnabled = { true },
+            notificationDismisser = dismisser
+        )
+
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.DismissNotification("com.slack")) }
+
+        assertTrue(result.success)
+        assertEquals("the package must reach the dismisser unchanged", listOf<String?>("com.slack"), dismisser.calls)
+    }
+
+    @Test
+    fun dismissNotificationRefusesHonestlyWhenTriageOff() {
+        // Consent before capability: with the triage opt-in off (the default) the executor
+        // must refuse clearly and must never touch the user's notifications.
+        val dismisser = RecordingNotificationDismisser(NotificationDismissResult(true, "DISMISSED_ALL", "Dismissed all notifications"))
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            triageEnabled = { false },
+            notificationDismisser = dismisser
+        )
+
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.DismissNotification()) }
+
+        assertFalse("an opted-out dismissal must not succeed", result.success)
+        assertEquals("TRIAGE_DISABLED", result.method)
+        assertEquals("an opted-out dismissal must never reach the dismisser", 0, dismisser.calls.size)
+    }
+
+    @Test
+    fun dismissNotificationRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            triageEnabled = { true },
+            notificationDismisser = null
+        )
+
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.DismissNotification()) }
+
+        assertFalse("an unwired dismisser must not be a fake success", result.success)
+        assertEquals("DISMISS_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun dismissNotificationPropagatesAnHonestFailureFromTheDismisser() {
+        // The real dismisser reports "nothing to dismiss" / "access missing" as failure;
+        // the executor must surface that, never flip it into a success.
+        val dismisser = RecordingNotificationDismisser(NotificationDismissResult(false, "DISMISS_NONE", "No active notification from com.slack to dismiss"))
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            triageEnabled = { true },
+            notificationDismisser = dismisser
+        )
+
+        val result = kotlinx.coroutines.runBlocking { automation.execute(AgentAction.DismissNotification("com.slack")) }
+
+        assertFalse("an honest dismisser failure must stay a failure", result.success)
+        assertEquals("DISMISS_NONE", result.method)
+    }
+
+    @Test
+    fun dismissNotificationStepCompletesFromItsOwnDismissalWithoutAScreenChange() = kotlinx.coroutines.runBlocking {
+        // Same self-evidencing class as set_clipboard/read_notifications: a confirmed
+        // dismissal is its own goal evidence (no screen reflects it), so a NONE-verified
+        // step must complete rather than retry to exhaustion.
+        val automation = FakeDeviceAutomation().apply {
+            defaultObservation = observation("com.android.launcher", "Home screen", 1)
+            executeResult = { action ->
+                when (action) {
+                    is AgentAction.DismissNotification ->
+                        ActionResult(true, "DISMISSED_ALL", "Dismissed all notifications")
+                    else -> ActionResult(true, "OK", "ok")
+                }
+            }
+        }
+        val engine = modelEngine(
+            """{"steps":[{"id":1,"seq":1,"desc":"Clear the notifications","action":"dismiss_notification","params":{}}]}"""
+        )
+        val orchestrator = newOrchestrator(engine, automation)
+        orchestrator.startTask("dismiss my notifications", maxSteps = 3)
+
+        val terminal = awaitTerminal(orchestrator)
+        assertTrue("dismiss_notification with NONE verification must complete, got $terminal", terminal is OrchestratorState.Completed)
+    }
+
+    @Test
+    fun parserMapsDismissNotificationToTheAction() {
+        val parsed = TaskPlanParser().parse(
+            """{"steps":[{"id":1,"seq":1,"desc":"Clear Slack","action":"dismiss_notification","params":{"packageName":"com.slack"}}]}""",
+            "dismiss the Slack notification"
+        )
+        assertTrue("plan must parse: $parsed", parsed is PlanParseResult.Success)
+        val step = (parsed as PlanParseResult.Success).plan.steps.first()
+        assertTrue("dismiss_notification must map to AgentAction.DismissNotification", step.action is AgentAction.DismissNotification)
+        assertEquals("the package param must be carried", "com.slack", (step.action as AgentAction.DismissNotification).packageName)
+    }
+
+    @Test
+    fun parserLeavesDismissNotificationPackageNullWhenBlank() {
+        val parsed = TaskPlanParser().parse(
+            """{"steps":[{"id":1,"seq":1,"desc":"Clear all","action":"dismiss_notification","params":{}}]}""",
+            "dismiss my notifications"
+        )
+        assertTrue("plan must parse: $parsed", parsed is PlanParseResult.Success)
+        val step = (parsed as PlanParseResult.Success).plan.steps.first()
+        assertNull("a missing package must stay null (dismiss everything)", (step.action as AgentAction.DismissNotification).packageName)
+    }
+
+    @Test
+    fun validationAcceptsDismissNotificationAndRejectsAnOversizedPackage() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.DismissNotification()) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.DismissNotification("com.slack")) is ToolValidationResult.Valid)
+        val oversized = "x".repeat(ToolRegistry.MAX_PACKAGE_NAME_CHARS + 1)
+        assertTrue(
+            "an oversized package must be rejected",
+            registry.validateAction(AgentAction.DismissNotification(oversized)) is ToolValidationResult.Invalid
+        )
+    }
+
+    @Test
+    fun dismissNotificationIsWithheldFromThePromptAndToolListUntilOptedIn() {
+        // The capability is opt-in (same live gate as read_notifications), so the planner
+        // must not be told about it while the toggle is off; both the tool list and the
+        // schema line must be withheld, and both must reappear once it is on.
+        val off = PlannerPromptBuilder.availableActions(ToolRegistry(), notificationTriageEnabled = false)
+        assertFalse("dismiss_notification must not be advertised while off", off.contains(ToolRegistry.TOOL_DISMISS_NOTIFICATION))
+
+        val on = PlannerPromptBuilder.availableActions(ToolRegistry(), notificationTriageEnabled = true)
+        assertTrue("dismiss_notification must be advertised once opted in", on.contains(ToolRegistry.TOOL_DISMISS_NOTIFICATION))
+
+        val request = PlanningRequest(
+            userCommand = "dismiss my notifications",
+            desiredOutcome = "notifications cleared",
+            foregroundPackage = "com.android.launcher",
+            screenSummary = "Home",
+            completedStepsSummary = "",
+            lastActionResult = null,
+            remainingStepBudget = 5,
+            availableActions = off
+        )
+        val promptOff = PlannerPromptBuilder.buildPlanningPrompt(request, notificationTriageEnabled = false)
+        assertFalse("the schema line must be withheld while off", promptOff.contains("- dismiss_notification:"))
+        val promptOn = PlannerPromptBuilder.buildPlanningPrompt(request, notificationTriageEnabled = true)
+        assertTrue("the schema line must appear once opted in", promptOn.contains("- dismiss_notification:"))
+    }
+
+    @Test
+    fun dismissNotificationSkillKeepsItsToolNameAndPackageOnReplay() {
+        val plan = TaskPlan(
+            goal = "notification dismissal",
+            fromModel = true,
+            steps = listOf(planStep(1, AgentAction.DismissNotification("com.slack"), "dismiss_notification"))
+        )
+        val restored = TaskPlanSerializer.fromJson(TaskPlanSerializer.toJson(plan), goalOverride = plan.goal)
+        assertTrue("a saved skill must replay dismiss_notification", restored != null)
+        val action = restored!!.steps.first().action
+        assertTrue("replayed step must be DismissNotification", action is AgentAction.DismissNotification)
+        assertEquals("the package must survive replay", "com.slack", (action as AgentAction.DismissNotification).packageName)
+    }
+
+    @Test
+    fun dismissNotificationResolvesACapturedVariableBeforeExecution() {
+        // Cross-app data passing: a package named by an earlier read step can be the
+        // dismissal target ("find which app spammed me, then dismiss it").
+        val store = com.example.planning.PlanVariableStore()
+        store.set("pkg", "com.slack")
+        val resolved = store.substitute(AgentAction.DismissNotification("{{pkg}}"))
+        assertTrue(resolved is AgentAction.DismissNotification)
+        assertEquals("the placeholder must resolve to the captured package", "com.slack", (resolved as AgentAction.DismissNotification).packageName)
+    }
+
+    @Test
+    fun dismissNotificationDescribesItselfForTheStepLog() {
+        assertEquals("Dismiss all notifications", AgentAction.DismissNotification().describe())
+        assertEquals("Dismiss notifications from com.slack", AgentAction.DismissNotification("com.slack").describe())
+    }
+
+    @Test
+    fun androidNotificationDismisserReportsHonestlyWhenNotificationAccessIsMissing() {
+        // With no live listener connection there is no platform connection to remove a
+        // notification through, so the real dismisser must fail honestly - never claim a
+        // dismissal that did not happen.
+        val result = AndroidNotificationDismisser().dismiss(null)
+        assertFalse("a missing notification access must not be a fake success", result.success)
+        assertEquals("DISMISS_UNAVAILABLE", result.method)
+    }
+
 
 
     // --- Current date/time (relative-time resolution for set_alarm) ---
@@ -6117,6 +6339,14 @@ class CapabilityUpgradeTest {
         override fun write(text: String): ClipboardWriteResult {
             writes += text
             return ClipboardWriteResult(true, "SET_CLIPBOARD", "Copied ${text.length} chars to the clipboard")
+        }
+    }
+
+    private class RecordingNotificationDismisser(private val result: NotificationDismissResult) : NotificationDismisser {
+        val calls = mutableListOf<String?>()
+        override fun dismiss(packageName: String?): NotificationDismissResult {
+            calls += packageName
+            return result
         }
     }
 

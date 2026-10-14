@@ -90,6 +90,7 @@ object PlannerPromptBuilder {
         """- dictate_note: {"title":"<optional>"}   (opens the notes app ready to take a note by voice / dictation; use for "dictate a note" / "take a voice note" / "make a note by speaking" / "start a voice memo in notes" - an optional title labels the note; it only opens the notes app for the user to speak into, so never claim the note was spoken or saved)""",
         """- summarize_text: {"text":"<the text to condense>","maxChars":<optional int>}   (condenses a block of text to a short digest; use for "summarise this page" / "give me the gist of that message" / "summarise the thread" - often pass the value an earlier read step captured as {{name}}; the digest is returned to the loop and can itself be captured, and it never fabricates a summary when the summarizer is unavailable)""",
         """- read_notifications: {}   (reads recent on-device notifications)""",
+        """- dismiss_notification: {"packageName":"<optional package to clear>"}   (dismisses active notifications - the act half of notification triage; use for "clear that notification" / "dismiss my notifications" / "get rid of the Slack notification" - omit packageName to dismiss every notification, or pass a package to clear only that app's; it reports honestly and never claims a dismissal when notification access is missing or the shade is empty)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
         """- read_clipboard: {}   (reads the device clipboard's current text; use for "read the code I just copied" / "what did I just copy" - add "captures":["<name>"] to reuse the value as {{name}} in a later step; opt-in)""",
         """- set_clipboard: {"text":"<text to copy>"}   (copies the given text to the device clipboard; use for "copy this to the clipboard" / "put this on my clipboard" / "copy this address so I can paste it" - the text may be a value captured earlier as {{name}}; the write is read back, so never claim it copied unless the clipboard actually holds the text; opt-in)""",
@@ -113,6 +114,7 @@ object PlannerPromptBuilder {
     ): String =
         ACTION_CATALOG_LINES
             .filter { notificationTriageEnabled || !it.startsWith("- ${ToolRegistry.TOOL_READ_NOTIFICATIONS}:") }
+            .filter { notificationTriageEnabled || !it.startsWith("- ${ToolRegistry.TOOL_DISMISS_NOTIFICATION}:") }
             .filter { voiceOutputEnabled || !it.startsWith("- ${ToolRegistry.TOOL_SPEAK}:") }
             .filter { clipboardReadEnabled || !it.startsWith("- ${ToolRegistry.TOOL_READ_CLIPBOARD}:") }
             .filter { clipboardWriteEnabled || !it.startsWith("- ${ToolRegistry.TOOL_SET_CLIPBOARD}:") }
@@ -268,6 +270,7 @@ object PlannerPromptBuilder {
             // always rejected, burning attempts and step budget.
             .filter { it != ToolRegistry.TOOL_ASK_CONFIRMATION }
             .filter { notificationTriageEnabled || it != ToolRegistry.TOOL_READ_NOTIFICATIONS }
+            .filter { notificationTriageEnabled || it != ToolRegistry.TOOL_DISMISS_NOTIFICATION }
             .filter { voiceOutputEnabled || it != ToolRegistry.TOOL_SPEAK }
             .filter { clipboardReadEnabled || it != ToolRegistry.TOOL_READ_CLIPBOARD }
             .filter { clipboardWriteEnabled || it != ToolRegistry.TOOL_SET_CLIPBOARD }
