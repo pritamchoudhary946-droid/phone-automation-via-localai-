@@ -1,9 +1,10 @@
 ---
 
-## SESSION 56 (2026-10-14) - milestone: `audio_device` device control (DONE pending full gate)
+## SESSION 56 (2026-10-14) - milestone: `audio_device` device control (DONE)
 
-Where reached: implementation complete, targeted tests green, PR #98 opened
-(`auto/jarvis-autonomy-20261014-0031`). Full pre-merge gate running.
+Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261014-0031`, PR #98).
+Full pre-merge gate `bash .github/scripts/verify.sh` -> VERIFY OK, 560 tests 0 failures
+0 errors 0 skipped, `app-debug.apk` (66 MB) produced. 6 new audio_device tests pass.
 
 New capability: a fifth backed `set_device_control` control - `audio_device`, the
 "put it on speaker" / "switch to the headset" primitive. The active audio-output route
