@@ -291,6 +291,12 @@ class AndroidDeviceAutomation(
     // result, never a silent no-op. The controller reads the level back, so an ignored write
     // (or missing WRITE_SETTINGS access) is reported as failure, not a fake success.
     private val screenBrightnessController: ScreenBrightnessController? = null,
+    // The audio output route is a system audio setting (AudioManager), not an
+    // accessibility-tree control, so like the ringer/torch/dnd/brightness primitives it is
+    // resolved before the a11y-service gate. An unwired controller gets an honest
+    // "unavailable" result, never a silent no-op. The controller reads the active route
+    // back, so a request the device ignored is reported as failure, not a fake success.
+    private val audioDeviceController: AudioDeviceController? = null,
     // The clipboard is a system service (ClipboardManager), not an accessibility-tree
     // control, so like the ringer/torch/dnd/brightness primitives it is resolved before
     // the a11y-service gate. It is opt-in: the executor refuses honestly when clipboard
@@ -677,6 +683,12 @@ class AndroidDeviceAutomation(
                     val controller = screenBrightnessController
                         ?: return@withContext ActionResult(false, "BRIGHTNESS_UNAVAILABLE", "Screen brightness control is not available")
                     val result = controller.set(op.target)
+                    return@withContext ActionResult(result.success, result.method, result.message)
+                }
+                is DeviceControlOp.AudioDevice -> {
+                    val controller = audioDeviceController
+                        ?: return@withContext ActionResult(false, "AUDIO_DEVICE_UNAVAILABLE", "Audio output control is not available")
+                    val result = controller.set(op.mode)
                     return@withContext ActionResult(result.success, result.method, result.message)
                 }
                 null -> return@withContext ActionResult(

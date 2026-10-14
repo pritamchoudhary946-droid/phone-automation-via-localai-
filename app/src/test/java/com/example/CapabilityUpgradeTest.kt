@@ -18,6 +18,9 @@ import com.example.agent.ClipboardWriter
 import com.example.agent.ClipboardWriteResult
 import com.example.agent.AudioAdjustResult
 import com.example.agent.AudioController
+import com.example.agent.AudioDeviceController
+import com.example.agent.AudioDeviceMode
+import com.example.agent.AudioDeviceResult
 import com.example.agent.AudioStream
 import com.example.agent.CalendarController
 import com.example.agent.CalendarResult
@@ -3783,6 +3786,106 @@ class CapabilityUpgradeTest {
         assertTrue(registry.validateAction(AgentAction.SetDeviceControl("brightness", "maybe")) is ToolValidationResult.Invalid)
     }
 
+    @Test
+    fun deviceControlResolvesAudioDeviceAliases() {
+        // audio_device is a fifth backed control. Speaker/headset names (and natural aliases)
+        // map to the closed AudioDeviceMode enum; an unknown value or a value that belongs to
+        // another control is refused (null), never dispatched.
+        assertEquals(DeviceControlOp.AudioDevice(AudioDeviceMode.SPEAKER), DeviceControl.resolve("audio_device", "speaker"))
+        assertEquals(DeviceControlOp.AudioDevice(AudioDeviceMode.SPEAKER), DeviceControl.resolve("AUDIO_DEVICE", "speakerphone"))
+        assertEquals(DeviceControlOp.AudioDevice(AudioDeviceMode.HEADSET), DeviceControl.resolve(" audio_device ", "headset"))
+        assertEquals(DeviceControlOp.AudioDevice(AudioDeviceMode.HEADSET), DeviceControl.resolve("audio_device", "earpiece"))
+        assertEquals(DeviceControlOp.AudioDevice(AudioDeviceMode.HEADSET), DeviceControl.resolve("audio_device", "headphones"))
+
+        assertNull(DeviceControl.resolve("audio_device", "bluetooth"))
+        assertNull(DeviceControl.resolve("audio_device", "on"))
+
+        assertEquals("speaker", DeviceControl.describeValue("audio_device", "speakerphone"))
+        assertTrue(DeviceControl.isKnown("audio_device"))
+    }
+
+    @Test
+    fun setDeviceControlAudioDeviceReachesTheAudioDeviceController() {
+        // audio_device drives AudioManager, so it must resolve before the a11y gate
+        // (system-audio backed, service-free like torch/ringer_mode/dnd/brightness).
+        val recorder = RecordingAudioDeviceController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            audioDeviceController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("audio_device", "speaker"))
+        }
+        assertTrue("audio_device control must apply without a bound a11y service: $result", result.success)
+        assertEquals("AUDIO_DEVICE", result.method)
+        assertEquals(listOf(AudioDeviceMode.SPEAKER), recorder.calls)
+    }
+
+    @Test
+    fun setDeviceControlAudioDeviceRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            audioDeviceController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("audio_device", "speaker"))
+        }
+        assertFalse("no audio-device controller must not be a fake success", result.success)
+        assertEquals("AUDIO_DEVICE_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setDeviceControlAudioDeviceUnchangedIsReportedAsFailure() {
+        // The controller reads the active route back; a request the device ignored must not be
+        // dressed up as success.
+        val recorder = RecordingAudioDeviceController(
+            AudioDeviceResult(false, "AUDIO_DEVICE_UNCHANGED", "Audio stayed on earpiece")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            audioDeviceController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("audio_device", "speaker"))
+        }
+        assertFalse(result.success)
+        assertEquals("AUDIO_DEVICE_UNCHANGED", result.method)
+    }
+
+    @Test
+    fun validationAcceptsAudioDeviceControl() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("audio_device", "speaker")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("audio_device", "headset")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("audio_device", "bluetooth")) is ToolValidationResult.Invalid)
+    }
+
+    @Test
+    fun setDeviceControlAudioDeviceSkillKeepsItsControlAndValueOnReplay() {
+        // A learned/scheduled "put it on speaker" control must replay the same route, not a default.
+        val plan = com.example.planning.TaskPlan(
+            goal = "put it on speaker",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "audio_device speaker",
+                    action = AgentAction.SetDeviceControl("audio_device", "speaker"),
+                    rawActionName = "set_device_control", expectedPostcondition = "audio routed to speaker",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved audio_device skill must be replayable", restored != null)
+        assertEquals(AgentAction.SetDeviceControl("audio_device", "speaker"), restored!!.steps[0].action)
+    }
+
 
     @Test
     fun setDeviceControlRingerModeReachesTheRingerController() {
@@ -5835,6 +5938,16 @@ class CapabilityUpgradeTest {
                 is BrightnessTarget.Relative -> target.delta
             }
             return result ?: BrightnessResult(true, "BRIGHTNESS_SET", "Screen brightness set to $pct%")
+        }
+    }
+
+    private class RecordingAudioDeviceController(
+        private val result: AudioDeviceResult? = null
+    ) : AudioDeviceController {
+        val calls = mutableListOf<AudioDeviceMode>()
+        override fun set(mode: AudioDeviceMode): AudioDeviceResult {
+            calls += mode
+            return result ?: AudioDeviceResult(true, "AUDIO_DEVICE", "Audio output set to ${mode.key}")
         }
     }
 

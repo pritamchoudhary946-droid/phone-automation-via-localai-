@@ -1,5 +1,40 @@
 ---
 
+## SESSION 56 (2026-10-14) - milestone: `audio_device` device control (DONE)
+
+Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261014-0031`, PR #98).
+Full pre-merge gate `bash .github/scripts/verify.sh` -> VERIFY OK, 560 tests 0 failures
+0 errors 0 skipped, `app-debug.apk` (66 MB) produced. 6 new audio_device tests pass.
+
+New capability: a fifth backed `set_device_control` control - `audio_device`, the
+"put it on speaker" / "switch to the headset" primitive. The active audio-output route
+is a system audio setting (`AudioManager`) no accessibility-tree read or UI tap changes
+reliably on an arbitrary screen, so it is resolved *before* the a11y gate like
+torch/ringer_mode/dnd/brightness. Distinct from the volume controls (how loud) and
+ringer/dnd (whether the phone rings): it chooses *which output device* audio plays
+through.
+
+- `AudioDeviceMode` closed enum (SPEAKER/HEADSET) + `AudioDeviceController` /
+  `AndroidAudioDeviceController` over `AudioManager` (API 31+ communication-device APIs,
+  older speakerphone flag). Reads the active route back: `AUDIO_DEVICE` only on a
+  confirmed change, `AUDIO_DEVICE_UNCHANGED` on an ignored request,
+  `AUDIO_DEVICE_UNAVAILABLE`/`AUDIO_DEVICE_PERMISSION`/`AUDIO_DEVICE_ERROR` otherwise -
+  never a fake success.
+- Wired across the mapping seams: `DeviceControlOp.AudioDevice` + `DeviceControl.resolve`
+  (+ `describeValue`/`keys`), `DeviceAutomation.execute` dispatch,
+  `PlannerPromptBuilder.ACTION_CATALOG`, `ToolRegistry` description,
+  `OmniAgentApplication` DI. Validation is resolver-driven (unknown value -> Invalid).
+- `AGENTS.md` documents the control and its self-evidencing rule.
+
+Validation: targeted `CapabilityUpgradeTest` BUILD SUCCESSFUL, 6 new audio_device tests
+present and passing (resolver aliases, reaches-controller-without-a11y-service,
+refuses-honestly-when-unwired, unchanged-is-failure, validation, skill-replay). Full gate
+`bash .github/scripts/verify.sh` in progress.
+
+Remaining: confirm the full gate, then merge per section 18.
+
+---
+
 ## SESSION 54 (2026-10-13) - milestone: `set_clipboard` capability (the write half) (DONE)
 
 Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261013-2331`).
