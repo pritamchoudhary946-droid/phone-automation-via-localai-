@@ -1,5 +1,43 @@
 ---
 
+## SESSION 57 (2026-10-14) - milestone: `auto_rotate` device control (COMPLETED, MERGED)
+
+Where reached: COMPLETED. The `auto_rotate` milestone was found present but UNRECORDED and
+unmerged in the working tree at run start (RUN_STATE said `audio_device` was done and no
+milestone was in flight). Per section 16.8 this run completed that same milestone first:
+verified the source wiring, added the missing AGENTS.md documentation, ran the full
+pre-merge gate, committed, opened a PR and merged it. No new milestone started.
+
+New capability: a sixth backed `set_device_control` control - `auto_rotate`, the
+"lock the screen rotation" / "turn on auto-rotate" / "stop the screen rotating" primitive.
+Screen-rotation lock is a system display setting (`Settings.System.ACCELEROMETER_ROTATION`)
+no accessibility-tree read or UI tap changes reliably on an arbitrary screen (it lives in
+quick settings, usually off-screen), so it is resolved *before* the a11y gate like
+torch/ringer_mode/dnd/brightness/audio_device. It is a sibling of `brightness`: both write
+a `Settings.System` display setting under the same single `WRITE_SETTINGS` special access.
+
+- `AutoRotateMode` closed enum (ON/OFF; invalid value -> null, never indexes the platform)
+  + `AutoRotateController` / `AndroidAutoRotateController` over
+  `Settings.System.ACCELEROMETER_ROTATION`, guarded by `Settings.System.canWrite`.
+- Honest read-back: `AUTO_ROTATE_SET` only on a confirmed write, `AUTO_ROTATE_UNCHANGED` on an
+  ignored write, `AUTO_ROTATE_PERMISSION` when `WRITE_SETTINGS` is not granted,
+  `AUTO_ROTATE_UNAVAILABLE` when unwired, `AUTO_ROTATE_ERROR` on a write failure. Never a
+  fake success.
+- Carried through `DeviceControlOp.AutoRotate` + `DeviceControl.resolve` (+`describeValue`
+  /`keys`), `DeviceAutomation.execute` dispatch, `PlannerPromptBuilder.ACTION_CATALOG`,
+  `ToolRegistry` description, `OmniAgentApplication` DI. `AGENTS.md` documents the control
+  and its self-evidencing rule (now "Six controls are backed").
+
+Validation this run: full pre-merge gate `bash .github/scripts/verify.sh` (SKIP_APK=1 for
+the fast unit-test pass) -> VERIFY OK, BUILD SUCCESSFUL, 313 unit tests 0 failures 0 errors
+(includes `CapabilityUpgradeTest`, which contains the auto_rotate tests). APK build recorded
+in the run report.
+
+Next: continue `set_device_control` as mapping-only additions (e.g. airplane-mode, as in
+`next_items`); or the vision-fallback power-menu signal; or `:app:lintDebug` in verify.sh.
+
+---
+
 ## SESSION 56 (2026-10-14) - milestone: `audio_device` device control (DONE, MERGED)
 
 Where reached: DONE, validated and MERGED (PR #98 squash-merged into main `0e4633d`;

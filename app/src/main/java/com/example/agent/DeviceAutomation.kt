@@ -297,6 +297,13 @@ class AndroidDeviceAutomation(
     // "unavailable" result, never a silent no-op. The controller reads the active route
     // back, so a request the device ignored is reported as failure, not a fake success.
     private val audioDeviceController: AudioDeviceController? = null,
+    // Whether the screen follows the device orientation is a system display setting
+    // (Settings.System.ACCELEROMETER_ROTATION), not an accessibility-tree control, so like
+    // the ringer/torch/dnd/brightness primitives it is resolved before the a11y-service
+    // gate. An unwired controller gets an honest "unavailable" result, never a silent
+    // no-op. The controller reads the state back, so an ignored write (or missing
+    // WRITE_SETTINGS access) is reported as failure, not a fake success.
+    private val autoRotateController: AutoRotateController? = null,
     // The clipboard is a system service (ClipboardManager), not an accessibility-tree
     // control, so like the ringer/torch/dnd/brightness primitives it is resolved before
     // the a11y-service gate. It is opt-in: the executor refuses honestly when clipboard
@@ -657,8 +664,10 @@ class AndroidDeviceAutomation(
         // pair through DeviceControl first (an unknown control or a value invalid for that
         // control is refused honestly, no dispatch), then delegates to the existing honest
         // read-back controller for the named control: torch -> TorchController, ringer_mode
-        // -> RingerModeController, dnd -> DndController. Like set_torch/set_ringer_mode it is
-        // resolved before the a11y-service gate (all are system-service backed, not tree-backed).
+        // -> RingerModeController, dnd -> DndController, brightness -> ScreenBrightnessController,
+        // audio_device -> AudioDeviceController, auto_rotate -> AutoRotateController. Like
+        // set_torch/set_ringer_mode it is resolved before the a11y-service gate (all are
+        // system-service backed, not tree-backed).
         if (action is AgentAction.SetDeviceControl) {
             when (val op = DeviceControl.resolve(action.control, action.value)) {
                 is DeviceControlOp.Torch -> {
@@ -688,6 +697,12 @@ class AndroidDeviceAutomation(
                 is DeviceControlOp.AudioDevice -> {
                     val controller = audioDeviceController
                         ?: return@withContext ActionResult(false, "AUDIO_DEVICE_UNAVAILABLE", "Audio output control is not available")
+                    val result = controller.set(op.mode)
+                    return@withContext ActionResult(result.success, result.method, result.message)
+                }
+                is DeviceControlOp.AutoRotate -> {
+                    val controller = autoRotateController
+                        ?: return@withContext ActionResult(false, "AUTO_ROTATE_UNAVAILABLE", "Screen auto-rotation control is not available")
                     val result = controller.set(op.mode)
                     return@withContext ActionResult(result.success, result.method, result.message)
                 }

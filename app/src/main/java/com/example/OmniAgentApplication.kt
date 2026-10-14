@@ -253,6 +253,13 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // reliably on an arbitrary screen). It reads the active route back, so an
                 // ignored request is reported as failure, not a fake success.
                 audioDeviceController = com.example.agent.AndroidAudioDeviceController(this),
+                // Screen auto-rotation lock: backs the `auto_rotate` control of
+                // set_device_control via Settings.System.ACCELEROMETER_ROTATION, a system
+                // display setting like the brightness primitive (no UI tap toggles the
+                // rotation lock reliably on an arbitrary screen). It reads the state back, so
+                // an ignored write - or a missing WRITE_SETTINGS grant - is reported as
+                // failure, not a fake success.
+                autoRotateController = com.example.agent.AndroidAutoRotateController(this),
                 // Clipboard-read primitive: reads the system ClipboardManager, service-free
                 // like the device-status/notification reads (no screen reflects the
                 // clipboard). It is opt-in (the clipboard can hold another app's secret)

@@ -311,7 +311,7 @@ open class ToolRegistry {
         ),
         TOOL_SET_DEVICE_CONTROL to ToolDefinition(
             name = TOOL_SET_DEVICE_CONTROL,
-            description = "Sets a device control to an explicit value. Use for a scheduled automation's action, e.g. 'turn the flashlight on when charging starts', 'go silent at night', 'turn on do not disturb', 'dim the screen', 'put it on speaker'. The controls are torch (value on/off), ringer_mode (value silent/vibrate/normal), dnd (value off/priority/alarms/none), brightness (value dim/low/medium/high/max, a percentage like 40 or 40%, or brighter/dimmer to move from the current level) and audio_device (value speaker/headset to route the audio output). It reads the state back, so a change the device ignored is reported as a failure, never a fake success",
+            description = "Sets a device control to an explicit value. Use for a scheduled automation's action, e.g. 'turn the flashlight on when charging starts', 'go silent at night', 'turn on do not disturb', 'dim the screen', 'put it on speaker', 'lock the screen rotation'. The controls are torch (value on/off), ringer_mode (value silent/vibrate/normal), dnd (value off/priority/alarms/none), brightness (value dim/low/medium/high/max, a percentage like 40 or 40%, or brighter/dimmer to move from the current level), audio_device (value speaker/headset to route the audio output) and auto_rotate (value on/off to unlock/lock the screen's auto-rotation). It reads the state back, so a change the device ignored is reported as a failure, never a fake success",
             requiredParameters = listOf("control", "value"),
             optionalParameters = listOf("setting", "target", "name", "state", "on")
         ),
