@@ -298,7 +298,14 @@ class AndroidDeviceAutomation(
     // gets an honest "unavailable" result rather than a silent no-op. Its non-empty text
     // is carried as readText so a NONE-verified read self-satisfies.
     private val clipboardReader: ClipboardReader? = null,
-    private val clipboardReadEnabled: () -> Boolean = { false }
+    private val clipboardReadEnabled: () -> Boolean = { false },
+    // The clipboard write half (set_clipboard): the same ClipboardManager service, so it
+    // is likewise resolved before the a11y-service gate. Opt-in too (a live
+    // clipboardWriteEnabled gate), and an unwired writer gets an honest "unavailable"
+    // result rather than a silent no-op. The write is read back, so success is reported
+    // only when the clipboard actually holds the text.
+    private val clipboardWriter: ClipboardWriter? = null,
+    private val clipboardWriteEnabled: () -> Boolean = { false }
 ) : DeviceAutomation {
 
     companion object {
@@ -439,6 +446,23 @@ class AndroidDeviceAutomation(
             val result = reader.read()
             val digest = result.message.take(ActionResult.MAX_CAPTURED_CHARS).ifBlank { null }
             return@withContext ActionResult(result.success, result.method, result.message, digest)
+        }
+        // The clipboard write is likewise service-free (the same ClipboardManager), so it
+        // is resolved before the a11y-service gate. This is the write half of the
+        // copy/paste duo "copy this to the clipboard"; opt-in (SECRETS), and the write is
+        // read back by the writer, so a write that did not take fails the step.
+        if (action is AgentAction.SetClipboard) {
+            if (!clipboardWriteEnabled()) {
+                return@withContext ActionResult(
+                    false,
+                    "CLIPBOARD_WRITE_DISABLED",
+                    "Writing the clipboard is off. Enable it in Settings to copy text to the clipboard."
+                )
+            }
+            val writer = clipboardWriter
+                ?: return@withContext ActionResult(false, "CLIPBOARD_WRITE_UNAVAILABLE", "Clipboard write is not available")
+            val result = writer.write(action.text)
+            return@withContext ActionResult(result.success, result.method, result.message)
         }
         // The clock alarm is likewise service-free: it is dispatched through the platform
         // AlarmClock intent, so it is resolved before the a11y-service gate. This is the

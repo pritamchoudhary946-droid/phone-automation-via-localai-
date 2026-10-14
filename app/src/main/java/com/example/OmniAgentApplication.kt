@@ -106,7 +106,9 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             voiceOutputEnabled = { settings.voiceOutputEnabled },
             // Only advertise `read_clipboard` to the planner while clipboard reading is
             // on, so the model can never emit a step the executor would refuse.
-            clipboardReadEnabled = { settings.clipboardReadEnabled }
+            clipboardReadEnabled = { settings.clipboardReadEnabled },
+            // Likewise only advertise `set_clipboard` while clipboard writing is on.
+            clipboardWriteEnabled = { settings.clipboardWriteEnabled }
         )
         agentEngine = AgentEngine(this, inferenceEngine, planner)
 
@@ -251,7 +253,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // and refuses honestly when off; its non-empty text is carried as readText
                 // so a NONE-verified read self-satisfies.
                 clipboardReader = com.example.agent.AndroidClipboardReader(this),
-                clipboardReadEnabled = { settings.clipboardReadEnabled }
+                clipboardReadEnabled = { settings.clipboardReadEnabled },
+                // Clipboard-write primitive: writes the same ClipboardManager, service-free
+                // and opt-in like the read. It reads the value back, so an ignored write is
+                // reported as failure, never a fake success.
+                clipboardWriter = com.example.agent.AndroidClipboardWriter(this),
+                clipboardWriteEnabled = { settings.clipboardWriteEnabled }
             ),
             webGateway = cloudflareGateway,
             screenAwareness = com.example.perception.AccessibilityScreenAwareness(),
@@ -268,7 +275,9 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
             // Keep `speak` in step with the executor's opt-in speech gate.
             voiceOutputEnabled = { settings.voiceOutputEnabled },
             // Keep `read_clipboard` in step with the executor's opt-in clipboard gate.
-            clipboardReadEnabled = { settings.clipboardReadEnabled }
+            clipboardReadEnabled = { settings.clipboardReadEnabled },
+            // Keep `set_clipboard` in step with the executor's opt-in clipboard gate.
+            clipboardWriteEnabled = { settings.clipboardWriteEnabled }
         )
 
         // 7.8: re-arm (or cancel) any persisted automations according to the current

@@ -1,5 +1,53 @@
 ---
 
+## SESSION 54 (2026-10-13) - milestone: `set_clipboard` capability (the write half) (DONE)
+
+Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261013-2331`).
+Full pre-merge gate `bash .github/scripts/verify.sh` -> VERIFY OK, 554 tests 0 failures
+0 errors 0 skipped, `app-debug.apk` (66 MB) produced. 7 set_clipboard tests pass.
+
+New capability: the write half of the clipboard trio - copy a chosen piece of text to
+the device clipboard ("copy this to the clipboard" / "put this on my clipboard" / "copy
+this address so I can paste it"). This is the "act on knowledge" upgrade of section 2.1:
+a value captured by an earlier read step can now be handed to another app via the
+clipboard.
+
+- `AgentAction.SetClipboard(text)` - carries the explicit text (unlike the focused-field
+  `CopyText`), so it can carry a `{{name}}` captured earlier.
+- `ClipboardWriter` + `AndroidClipboardWriter` over the system `ClipboardManager`,
+  service-free and resolved *before* the a11y gate (like the read/notification/status
+  reads). `AndroidClipboardWriter` reads the clip back and reports `SET_CLIPBOARD` only
+  when the clipboard actually holds the text; an empty clip is `CLIPBOARD_WRITE_FAILED` -
+  never a fake success.
+- Opt-in (a write clobbers whatever the user had copied): a live `clipboardWriteEnabled:
+  () -> Boolean` gates the executor (`CLIPBOARD_WRITE_DISABLED` when off, never touching
+  the clipboard) AND the prompt (`PlannerPromptBuilder.availableActions`/`ACTION_CATALOG`
+  withhold the tool; `AgentPlanner` and `TaskOrchestrator` read the flag per call, default
+  `{ false }`). Wired through `CapabilitySettings` (+ `KEY_CLIPBOARD_WRITE`), the Settings
+  toggle (`toggle_clipboard_write`), and `OmniAgentApplication`.
+- Carried through the action-vocabulary checklist: `AgentAction.SetClipboard` (+
+  `getDisplayName`), `ToolRegistry` (const `TOOL_SET_CLIPBOARD`, definition,
+  `validateAction` blank/`MAX_CLIPBOARD_CHARS` bounds), `TaskPlanParser` (tool name ->
+  action, `text`/`content`/`value`/`message`/`body` aliases), `HybridStepExecutor.decide`
+  (deterministic fast path), `PlannerPromptBuilder.ACTION_CATALOG`, `PlanVariables.substitute`
+  (so `{{name}}` reaches the text), `AndroidDeviceAutomation.execute` (+ the
+  `ClipboardWriter` seam), and `TaskPlanSerializer` (`toParams` carries `text`,
+  `toolNameFor`). No `toVerificationTarget` entry (like the other self-evidencing
+  service actions).
+
+Validation (toolchain present: JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64,
+ANDROID_HOME=/opt/android-sdk): targeted `CapabilityUpgradeTest` -> BUILD SUCCESSFUL, 301
+tests, 7 new set_clipboard tests present and passing (executes-without-a11y-service,
+refuses-when-opt-out, refuses-when-unwired, step-completes-from-its-own-write,
+parser-maps, validation-rejects-blank/oversized, withheld-from-prompt-until-opted-in,
+skill-replay-keeps-text, resolves-a-captured-variable).
+
+Remaining: none for this milestone. Merged per section 18. Standing item: session cap
+exceeded (sessions_done 55 >= 48) - human review requested.
+
+---
+
+
 ## SESSION 53 (2026-10-13) - milestone: `read_clipboard` capability (DONE)
 
 Where reached: implementation + targeted tests green; full pre-merge gate `bash

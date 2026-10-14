@@ -593,6 +593,25 @@ output is off, read live per call by `AgentPlanner`.
   `ActionResult.readText` so a NONE-verified step self-satisfies (empty -> failure,
   never a fake success). Keep the reader service-free, honest (an empty/non-text clip
   is a failure, not a blank success) and the gate live.
+- `SetClipboard` is the *write* half of the clipboard trio (the sibling of
+  `ReadClipboard` and of the focused-field `CopyText`): it carries an explicit `text`
+  the model supplies, so a value captured earlier can be handed to another app ("copy
+  this address so I can paste it"). It is `ClipboardManager`-backed, so like
+  `ReadClipboard` it must NOT sit behind the accessibility-service gate:
+  `AndroidDeviceAutomation.execute` resolves it (its own opt-in `clipboardWriteEnabled`
+  check, then `ClipboardWriter.write(text)`) *before* `serviceProvider()`, and an
+  unwired writer returns `CLIPBOARD_WRITE_UNAVAILABLE` (never a silent no-op). It is
+  opt-in and OFF by default (a write clobbers whatever the user had copied): with the
+  flag off the executor refuses `CLIPBOARD_WRITE_DISABLED` and never touches the
+  clipboard, and the *prompt* withholds `set_clipboard` from both `availableActions(...)`
+  and `ACTION_CATALOG` while off (the same live `() -> Boolean` rule; `AgentPlanner` and
+  `TaskOrchestrator` both read it per call, default `{ false }`). `AndroidClipboardWriter`
+  reads the clip back and reports success (`SET_CLIPBOARD`) only when the clipboard
+  actually holds the text (a non-empty-but-different clip means the write took; an empty
+  clip is `CLIPBOARD_WRITE_FAILED`) - never a fake success, so a failed write fails the
+  step via the same self-evidencing rule as `read_clipboard`. The `text` field is fed by
+  `PlanVariableStore.substitute` (`{{name}}`), so cross-app passing reaches it. Keep the
+  writer service-free, honest and the gate live.
 
 ## Jarvis Phase 5 autonomy & self-healing (do not regress)
 - The execution loop replaces "retry the same action N times then fail" with a
@@ -752,7 +771,8 @@ output is off, read live per call by `AgentPlanner`.
   `set_ringer_mode`, `set_alarm`, `set_timer`, `add_calendar_event`, `add_contact`,
   `dial_number`, `send_sms`, `share_text`, `send_email`, `navigate_to`,
   `open_app_info`, `open_settings`, `set_torch`, `set_device_control`,
-  `speak`, `open_calendar`, `create_note`, `dictate_note`, `pick_file`, `summarize_text` and
+  `speak`, `open_calendar`, `create_note`, `dictate_note`, `pick_file`, `summarize_text`,
+  `read_clipboard`, `set_clipboard` and
   `read_notifications` act on a system
   service (`AudioManager`, the notification bus, the clock app via `AlarmClock`, the
   calendar app via `CalendarContract`, the contacts app via `ContactsContract`, the
@@ -810,7 +830,10 @@ output is off, read live per call by `AgentPlanner`.
   utterance (`TTS_UNAVAILABLE` / `SPEAK_DISABLED` otherwise), and `summarize_text`
   reports `SUMMARY_OK` only with a non-blank digest from the configured summarizer
   (`SUMMARY_UNAVAILABLE` when the engine is not ready, `SUMMARY_FAILED` on a blank
-  generation, `INVALID_SUMMARY_INPUT` on blank input). Never widen
+  generation, `INVALID_SUMMARY_INPUT` on blank input), and `set_clipboard` reports
+  `SET_CLIPBOARD` only after `ClipboardWriter` read the value back from the clipboard
+  (`CLIPBOARD_WRITE_FAILED` / `CLIPBOARD_WRITE_DISABLED` / `CLIPBOARD_WRITE_UNAVAILABLE`
+  otherwise). Never widen
   this to an
   action whose success is not independently confirmed.
 - `read_device_status` (`AgentAction.ReadDeviceStatus` + `DeviceStatusReader`) is

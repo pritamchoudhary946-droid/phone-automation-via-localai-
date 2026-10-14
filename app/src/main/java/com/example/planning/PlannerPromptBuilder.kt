@@ -92,6 +92,7 @@ object PlannerPromptBuilder {
         """- read_notifications: {}   (reads recent on-device notifications)""",
         """- read_device_status: {}   (reads the device's own state: battery level/charging, screen on/off, ringer mode, connectivity)""",
         """- read_clipboard: {}   (reads the device clipboard's current text; use for "read the code I just copied" / "what did I just copy" - add "captures":["<name>"] to reuse the value as {{name}} in a later step; opt-in)""",
+        """- set_clipboard: {"text":"<text to copy>"}   (copies the given text to the device clipboard; use for "copy this to the clipboard" / "put this on my clipboard" / "copy this address so I can paste it" - the text may be a value captured earlier as {{name}}; the write is read back, so never claim it copied unless the clipboard actually holds the text; opt-in)""",
         """- web_search:  {"query":"<text>"}   read_url: {"url":"https://..."}""",
         """- open_notifications: {}   open_quick_settings: {}   open_recents: {}   power_dialog: {}   (power_dialog opens the system power menu - power off / restart / emergency - for the user to choose an item; it only opens the menu and never selects power off itself, so never claim the device was powered off or restarted)""",
         """- navigate_back: {}   navigate_home: {}   wait: {"durationMs":<int>}""",
@@ -107,19 +108,22 @@ object PlannerPromptBuilder {
     private fun actionCatalog(
         notificationTriageEnabled: Boolean,
         voiceOutputEnabled: Boolean = false,
-        clipboardReadEnabled: Boolean = false
+        clipboardReadEnabled: Boolean = false,
+        clipboardWriteEnabled: Boolean = false
     ): String =
         ACTION_CATALOG_LINES
             .filter { notificationTriageEnabled || !it.startsWith("- ${ToolRegistry.TOOL_READ_NOTIFICATIONS}:") }
             .filter { voiceOutputEnabled || !it.startsWith("- ${ToolRegistry.TOOL_SPEAK}:") }
             .filter { clipboardReadEnabled || !it.startsWith("- ${ToolRegistry.TOOL_READ_CLIPBOARD}:") }
+            .filter { clipboardWriteEnabled || !it.startsWith("- ${ToolRegistry.TOOL_SET_CLIPBOARD}:") }
             .joinToString("\n")
 
     fun buildPlanningPrompt(
         request: PlanningRequest,
         notificationTriageEnabled: Boolean = false,
         voiceOutputEnabled: Boolean = false,
-        clipboardReadEnabled: Boolean = false
+        clipboardReadEnabled: Boolean = false,
+        clipboardWriteEnabled: Boolean = false
     ): String = buildString {
         appendLine("Task: produce the ordered subgoals needed to satisfy the user command.")
         appendLine("User command: \"${request.userCommand}\"")
@@ -155,7 +159,7 @@ object PlannerPromptBuilder {
         appendLine(sanitizeUntrusted(request.screenSummary).take(MAX_SCREEN_CHARS))
         appendLine()
         appendLine(SCHEMA_HINT)
-        appendLine(actionCatalog(notificationTriageEnabled, voiceOutputEnabled, clipboardReadEnabled))
+        appendLine(actionCatalog(notificationTriageEnabled, voiceOutputEnabled, clipboardReadEnabled, clipboardWriteEnabled))
     }
 
     fun buildStepDecisionPrompt(request: StepDecisionRequest): String = buildString {
@@ -254,7 +258,8 @@ object PlannerPromptBuilder {
         registry: ToolRegistry,
         notificationTriageEnabled: Boolean = false,
         voiceOutputEnabled: Boolean = false,
-        clipboardReadEnabled: Boolean = false
+        clipboardReadEnabled: Boolean = false,
+        clipboardWriteEnabled: Boolean = false
     ): List<String> =
         registry.getRegisteredTools()
             .map { it.name }
@@ -265,6 +270,7 @@ object PlannerPromptBuilder {
             .filter { notificationTriageEnabled || it != ToolRegistry.TOOL_READ_NOTIFICATIONS }
             .filter { voiceOutputEnabled || it != ToolRegistry.TOOL_SPEAK }
             .filter { clipboardReadEnabled || it != ToolRegistry.TOOL_READ_CLIPBOARD }
+            .filter { clipboardWriteEnabled || it != ToolRegistry.TOOL_SET_CLIPBOARD }
 
     /**
      * Neutralises instruction-like content in untrusted, app-controlled text before
