@@ -408,7 +408,7 @@ new tool. It is resolved *before* the a11y gate (device-backed, like `set_torch`
 The pure, unit-tested `com.example.agent.DeviceControl.resolve(control, value)` is the
 single truth for the accepted vocabulary: it trims and lower-cases both fields and
 returns a typed `DeviceControlOp` or **null** for an unknown control or a value invalid
-for that control. Four controls are backed, each reusing an existing honest read-back
+for that control. Five controls are backed, each reusing an existing honest read-back
 primitive so no new action class is needed:
 - `torch` — value `on`/`off` (on/off aliases `on`/`off`/`enable`/`disable`/`yes`/`no`/
   `true`/`false`/`1`/`0`, case-insensitively) dispatched to the existing `TorchController`
@@ -447,6 +447,20 @@ primitive so no new action class is needed:
   display panel, usually off-screen). It needs the `WRITE_SETTINGS` special permission
   declared in the manifest (`tools:ignore="ProtectedPermissions"`); the user grants it
   from Settings, and the controller reports `BRIGHTNESS_PERMISSION` honestly until then.
+- `audio_device` � value `speaker`/`headset` (aliases `speakerphone`/`loudspeaker`/
+  `handsfree` -> speaker; `earpiece`/`headphones`/`earphone`/`receiver` -> headset),
+  dispatched to `AudioDeviceController` (`AndroidAudioDeviceController` over the system
+  `AudioManager`). `AudioDeviceMode` is a *closed* enum (SPEAKER/HEADSET), so an invalid
+  route can never index the platform. On API 31+ it uses the documented communication-device
+  APIs (`setCommunicationDevice`/`getCommunicationDevice`) and reads the active route back;
+  on older releases it falls back to the speakerphone flag. Read-back `AUDIO_DEVICE`,
+  `AUDIO_DEVICE_UNCHANGED` on an ignored request, `AUDIO_DEVICE_UNAVAILABLE` when the audio
+  service or the requested output is absent, `AUDIO_DEVICE_PERMISSION`/`AUDIO_DEVICE_ERROR`
+  otherwise. This is the "put it on speaker" / "switch to the headset" primitive, distinct
+  from the volume controls (`adjust_volume`, how loud) and `ringer_mode`/`dnd` (whether the
+  phone rings / which notifications interrupt): it chooses *which output device* audio plays
+  through, a system audio setting no accessibility-tree read or UI tap can change reliably on
+  an arbitrary screen.
 Because the resolver rejects anything it cannot run, an unknown control is refused
 honestly (`UNSUPPORTED_DEVICE_CONTROL` at execute, `Invalid` at validation) and never
 dispatched — so the prompt can never advertise a control the executor cannot execute. Carried through
@@ -825,7 +839,10 @@ output is off, read live per call by `AgentPlanner`.
   read-back, its `dnd` control reuses `DndController`'s interrupt-filter read-back, its
   `brightness` control reuses `ScreenBrightnessController`'s `Settings.System` read-back -
   `BRIGHTNESS_SET` only on a confirmed write, `BRIGHTNESS_PERMISSION`/`BRIGHTNESS_UNCHANGED`
-  otherwise - and an unknown control is `UNSUPPORTED_DEVICE_CONTROL`), and
+  otherwise - its `audio_device` control reuses `AudioDeviceController`'s active-route
+  read-back - `AUDIO_DEVICE` only on a confirmed route change, `AUDIO_DEVICE_UNCHANGED`/
+  `AUDIO_DEVICE_UNAVAILABLE` otherwise - and an unknown control is
+  `UNSUPPORTED_DEVICE_CONTROL`), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the
   utterance (`TTS_UNAVAILABLE` / `SPEAK_DISABLED` otherwise), and `summarize_text`
   reports `SUMMARY_OK` only with a non-blank digest from the configured summarizer

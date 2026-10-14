@@ -247,6 +247,12 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // an arbitrary screen). It reads the level back, so an ignored write - or a
                 // missing WRITE_SETTINGS grant - is reported as failure, not a fake success.
                 screenBrightnessController = com.example.agent.AndroidScreenBrightnessController(this),
+                // Audio-output routing: backs the `audio_device` control of
+                // set_device_control via AudioManager, a system audio setting like the
+                // ringer/torch/dnd/brightness primitives (no UI tap switches the output route
+                // reliably on an arbitrary screen). It reads the active route back, so an
+                // ignored request is reported as failure, not a fake success.
+                audioDeviceController = com.example.agent.AndroidAudioDeviceController(this),
                 // Clipboard-read primitive: reads the system ClipboardManager, service-free
                 // like the device-status/notification reads (no screen reflects the
                 // clipboard). It is opt-in (the clipboard can hold another app's secret)

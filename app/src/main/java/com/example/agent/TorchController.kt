@@ -33,6 +33,9 @@ sealed interface DeviceControlOp {
 
     /** Set the screen brightness to [target] (a named level, percentage or relative step). */
     data class Brightness(val target: com.example.agent.BrightnessTarget, val value: String) : DeviceControlOp
+
+    /** Route audio output to [mode] (speaker / headset). */
+    data class AudioDevice(val mode: com.example.agent.AudioDeviceMode) : DeviceControlOp
 }
 
 /**
@@ -47,17 +50,19 @@ sealed interface DeviceControlOp {
  * (silent/vibrate/normal -> the [RingerModeController] system-audio setting), `dnd`
  * (off/priority/alarms/none -> the [DndController] system notification-policy setting) and
  * `brightness` (a named level, a 0-100 percentage, or a relative "brighter"/"dimmer" step
- * -> the [ScreenBrightnessController] system display setting). A new control is a mapping
- * here plus a dispatch arm, never a new tool.
+ * -> the [ScreenBrightnessController] system display setting) and `audio_device`
+ * (speaker/headset -> the [AudioDeviceController] system audio routing). A new control is
+ * a mapping here plus a dispatch arm, never a new tool.
  */
 object DeviceControl {
     const val TORCH = "torch"
     const val RINGER_MODE = "ringer_mode"
     const val DND = "dnd"
     const val BRIGHTNESS = "brightness"
+    const val AUDIO_DEVICE = "audio_device"
 
     /** The controls `set_device_control` understands. */
-    fun keys(): List<String> = listOf(TORCH, RINGER_MODE, DND, BRIGHTNESS)
+    fun keys(): List<String> = listOf(TORCH, RINGER_MODE, DND, BRIGHTNESS, AUDIO_DEVICE)
 
     /**
      * Resolves a ([control], [value]) pair into the typed op the executor dispatches, or
@@ -72,6 +77,7 @@ object DeviceControl {
             RINGER_MODE -> com.example.agent.RingerMode.fromKey(normalisedValue)?.let { DeviceControlOp.RingerMode(it) }
             DND -> com.example.agent.DndMode.fromKey(normalisedValue)?.let { DeviceControlOp.Dnd(it) }
             BRIGHTNESS -> resolveBrightness(normalisedValue)?.let { DeviceControlOp.Brightness(it, normalisedValue) }
+            AUDIO_DEVICE -> com.example.agent.AudioDeviceMode.fromKey(normalisedValue)?.let { DeviceControlOp.AudioDevice(it) }
             else -> null
         }
     }
@@ -118,6 +124,7 @@ object DeviceControl {
                         ?: "${target.level * 100 / com.example.agent.ScreenBrightness.MAX_LEVEL}%"
                 is com.example.agent.BrightnessTarget.Relative -> if (target.delta > 0) "brighter" else "dimmer"
             }
+            is DeviceControlOp.AudioDevice -> op.mode.key
             null -> value.trim()
         }
 }
