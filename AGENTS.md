@@ -408,7 +408,7 @@ new tool. It is resolved *before* the a11y gate (device-backed, like `set_torch`
 The pure, unit-tested `com.example.agent.DeviceControl.resolve(control, value)` is the
 single truth for the accepted vocabulary: it trims and lower-cases both fields and
 returns a typed `DeviceControlOp` or **null** for an unknown control or a value invalid
-for that control. Six controls are backed, each reusing an existing honest read-back
+for that control. Seven controls are backed, each reusing an existing honest read-back
 primitive so no new action class is needed:
 - `torch` â€” value `on`/`off` (on/off aliases `on`/`off`/`enable`/`disable`/`yes`/`no`/
   `true`/`false`/`1`/`0`, case-insensitively) dispatched to the existing `TorchController`
@@ -475,6 +475,24 @@ primitive so no new action class is needed:
   screen rotation" / "turn on auto-rotate" / "stop the screen rotating" primitive, a
   system display setting no accessibility-tree read or UI tap can set reliably on an
   arbitrary screen (it lives in quick settings, usually off-screen).
+- `airplane_mode` — value `on`/`off` (aliases `enable`/`enabled`/`flight`/`flight_mode`/
+  `airplane`/`activate` -> on; `disable`/`normal`/`ground`/`deactivate` -> off;
+  `true`/`false`/`1`/`0`/`yes`/`no`, case-insensitively), dispatched to
+  `AirplaneModeController` (`AndroidAirplaneModeController` over
+  `Settings.Global.AIRPLANE_MODE_ON`). `AirplaneMode` is a *closed* enum (ON/OFF), so an
+  invalid value can never index the platform. Unlike `brightness`/`auto_rotate`, the
+  platform protects this global setting with a *signature* permission that ordinary apps
+  are not granted, so the controller attempts the guarded write and then **reads the state
+  back**: it reports `AIRPLANE_MODE_SET` only on a confirmed change, `AIRPLANE_MODE_UNCHANGED`
+  when the write was ignored, and `AIRPLANE_MODE_PERMISSION` when the write was refused
+  (`SecurityException`) — and in the refused/ignored case it opens the documented
+  `Settings.ACTION_AIRPLANE_MODE_SETTINGS` panel so the user can finish the change, the same
+  "open the panel, the user chooses" pattern as `open_settings`. It never claims the setting
+  changed unless the read-back confirms it. Read-back `AIRPLANE_MODE_SET`,
+  `AIRPLANE_MODE_UNCHANGED`, `AIRPLANE_MODE_PERMISSION`, `AIRPLANE_MODE_UNAVAILABLE` when the
+  controller is unwired. This is the "turn on airplane mode" / "go offline" / "turn the
+  radios off" primitive, a global system setting no accessibility-tree read or UI tap can
+  set reliably on an arbitrary screen (it lives in quick settings, usually off-screen).
 Because the resolver rejects anything it cannot run, an unknown control is refused
 honestly (`UNSUPPORTED_DEVICE_CONTROL` at execute, `Invalid` at validation) and never
 dispatched â€” so the prompt can never advertise a control the executor cannot execute. Carried through
@@ -855,7 +873,13 @@ output is off, read live per call by `AgentPlanner`.
   `BRIGHTNESS_SET` only on a confirmed write, `BRIGHTNESS_PERMISSION`/`BRIGHTNESS_UNCHANGED`
   otherwise - its `audio_device` control reuses `AudioDeviceController`'s active-route
   read-back - `AUDIO_DEVICE` only on a confirmed route change, `AUDIO_DEVICE_UNCHANGED`/
-  `AUDIO_DEVICE_UNAVAILABLE` otherwise - and an unknown control is
+  `AUDIO_DEVICE_UNAVAILABLE` otherwise - its `auto_rotate` control reuses
+  `AutoRotateController`'s `Settings.System` read-back - `AUTO_ROTATE_SET` only on a
+  confirmed write, `AUTO_ROTATE_PERMISSION`/`AUTO_ROTATE_UNCHANGED` otherwise - its
+  `airplane_mode` control reuses `AirplaneModeController`'s `Settings.Global` read-back -
+  `AIRPLANE_MODE_SET` only on a confirmed change, `AIRPLANE_MODE_PERMISSION` (write refused)
+  / `AIRPLANE_MODE_UNCHANGED` (write ignored) otherwise, opening the airplane-mode settings
+  panel for the user to finish - and an unknown control is
   `UNSUPPORTED_DEVICE_CONTROL`), and
   `speak` reports `SPOKEN` only after the platform `TextToSpeech` engine accepted the
   utterance (`TTS_UNAVAILABLE` / `SPEAK_DISABLED` otherwise), and `summarize_text`

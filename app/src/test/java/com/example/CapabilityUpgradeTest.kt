@@ -16,6 +16,9 @@ import com.example.agent.ClipboardReader
 import com.example.agent.ClipboardReadResult
 import com.example.agent.ClipboardWriter
 import com.example.agent.ClipboardWriteResult
+import com.example.agent.AirplaneMode
+import com.example.agent.AirplaneModeController
+import com.example.agent.AirplaneModeResult
 import com.example.agent.AudioAdjustResult
 import com.example.agent.AudioController
 import com.example.agent.AudioDeviceController
@@ -3992,6 +3995,126 @@ class CapabilityUpgradeTest {
         assertEquals(AgentAction.SetDeviceControl("auto_rotate", "off"), restored!!.steps[0].action)
     }
 
+    @Test
+    fun deviceControlResolvesAirplaneModeAliases() {
+        // airplane_mode is a seventh backed control. On/off names (and natural aliases like
+        // flight/ground) map to the closed AirplaneMode enum; an unknown value or a value that
+        // belongs to another control is refused (null), never dispatched.
+        assertEquals(DeviceControlOp.AirplaneMode(AirplaneMode.ON), DeviceControl.resolve("airplane_mode", "on"))
+        assertEquals(DeviceControlOp.AirplaneMode(AirplaneMode.ON), DeviceControl.resolve("AIRPLANE_MODE", "flight"))
+        assertEquals(DeviceControlOp.AirplaneMode(AirplaneMode.ON), DeviceControl.resolve(" airplane_mode ", "enable"))
+        assertEquals(DeviceControlOp.AirplaneMode(AirplaneMode.OFF), DeviceControl.resolve("airplane_mode", "off"))
+        assertEquals(DeviceControlOp.AirplaneMode(AirplaneMode.OFF), DeviceControl.resolve("airplane_mode", "ground"))
+
+        assertNull(DeviceControl.resolve("airplane_mode", "maybe"))
+        assertNull(DeviceControl.resolve("airplane_mode", "speaker"))
+
+        assertEquals("on", DeviceControl.describeValue("airplane_mode", "flight"))
+        assertTrue(DeviceControl.isKnown("airplane_mode"))
+    }
+
+    @Test
+    fun setDeviceControlAirplaneModeReachesTheAirplaneModeController() {
+        // airplane_mode writes a Settings.Global radio setting, so it must resolve before the
+        // a11y gate (system-setting backed, service-free like torch/ringer_mode/dnd/brightness).
+        val recorder = RecordingAirplaneModeController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            airplaneModeController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("airplane_mode", "on"))
+        }
+        assertTrue("airplane_mode control must apply without a bound a11y service: $result", result.success)
+        assertEquals("AIRPLANE_MODE", result.method)
+        assertEquals(listOf(AirplaneMode.ON), recorder.calls)
+    }
+
+    @Test
+    fun setDeviceControlAirplaneModeRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            airplaneModeController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("airplane_mode", "on"))
+        }
+        assertFalse("no airplane-mode controller must not be a fake success", result.success)
+        assertEquals("AIRPLANE_MODE_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setDeviceControlAirplaneModeUnchangedIsReportedAsFailure() {
+        // The controller reads the state back; a signature-protected write the device ignored
+        // must not be dressed up as success.
+        val recorder = RecordingAirplaneModeController(
+            AirplaneModeResult(false, "AIRPLANE_MODE_UNCHANGED", "Airplane mode did not change; the request was ignored")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            airplaneModeController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("airplane_mode", "on"))
+        }
+        assertFalse(result.success)
+        assertEquals("AIRPLANE_MODE_UNCHANGED", result.method)
+    }
+
+    @Test
+    fun setDeviceControlAirplaneModePermissionDeniedIsReportedHonestly() {
+        // Modern Android protects AIRPLANE_MODE_ON with a signature permission. A refusal must
+        // surface as an honest failure, not a success.
+        val recorder = RecordingAirplaneModeController(
+            AirplaneModeResult(false, "AIRPLANE_MODE_PERMISSION", "Changing airplane mode needs a system permission this app does not have")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            airplaneModeController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("airplane_mode", "on"))
+        }
+        assertFalse(result.success)
+        assertEquals("AIRPLANE_MODE_PERMISSION", result.method)
+    }
+
+    @Test
+    fun validationAcceptsAirplaneModeControl() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("airplane_mode", "on")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("airplane_mode", "off")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("airplane_mode", "flight")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("airplane_mode", "maybe")) is ToolValidationResult.Invalid)
+    }
+
+    @Test
+    fun setDeviceControlAirplaneModeSkillKeepsItsControlAndValueOnReplay() {
+        // A learned/scheduled "go offline" control must replay the same value, not a default.
+        val plan = com.example.planning.TaskPlan(
+            goal = "turn on airplane mode",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "airplane_mode on",
+                    action = AgentAction.SetDeviceControl("airplane_mode", "on"),
+                    rawActionName = "set_device_control", expectedPostcondition = "airplane mode on",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved airplane_mode skill must be replayable", restored != null)
+        assertEquals(AgentAction.SetDeviceControl("airplane_mode", "on"), restored!!.steps[0].action)
+    }
+
 
     @Test
     fun setDeviceControlRingerModeReachesTheRingerController() {
@@ -6064,6 +6187,16 @@ class CapabilityUpgradeTest {
         override fun set(mode: AutoRotateMode): AutoRotateResult {
             calls += mode
             return result ?: AutoRotateResult(true, "AUTO_ROTATE", "Screen auto-rotation set to ${mode.key}")
+        }
+    }
+
+    private class RecordingAirplaneModeController(
+        private val result: AirplaneModeResult? = null
+    ) : AirplaneModeController {
+        val calls = mutableListOf<AirplaneMode>()
+        override fun set(mode: AirplaneMode): AirplaneModeResult {
+            calls += mode
+            return result ?: AirplaneModeResult(true, "AIRPLANE_MODE", "Airplane mode set to ${mode.key}")
         }
     }
 

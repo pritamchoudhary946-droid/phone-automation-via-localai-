@@ -39,6 +39,9 @@ sealed interface DeviceControlOp {
 
     /** Lock/unlock screen auto-rotation to [mode] (on / off). */
     data class AutoRotate(val mode: com.example.agent.AutoRotateMode) : DeviceControlOp
+
+    /** Turn airplane mode on/off to [mode] (on / off). */
+    data class AirplaneMode(val mode: com.example.agent.AirplaneMode) : DeviceControlOp
 }
 
 /**
@@ -48,15 +51,17 @@ sealed interface DeviceControlOp {
  * unit-testable without a device and the executor/prompt/serializer all agree on the
  * accepted vocabulary.
  *
- * Six controls are backed today, each reusing an existing honest read-back primitive:
+ * Seven controls are backed today, each reusing an existing honest read-back primitive:
  * `torch` (on/off -> the [TorchController] camera-hardware toggle), `ringer_mode`
  * (silent/vibrate/normal -> the [RingerModeController] system-audio setting), `dnd`
  * (off/priority/alarms/none -> the [DndController] system notification-policy setting),
  * `brightness` (a named level, a 0-100 percentage, or a relative "brighter"/"dimmer" step
  * -> the [ScreenBrightnessController] system display setting), `audio_device`
  * (speaker/headset -> the [AudioDeviceController] system audio routing) and `auto_rotate`
- * (on/off -> the [AutoRotateController] system display rotation lock). A new control is
- * a mapping here plus a dispatch arm, never a new tool.
+ * (on/off -> the [AutoRotateController] system display rotation lock). `airplane_mode`
+ * (on/off -> the [AirplaneModeController] system-radio setting) is the seventh, opening
+ * the panel when the signature-protected write is refused. A new control is a mapping
+ * here plus a dispatch arm, never a new tool.
  */
 object DeviceControl {
     const val TORCH = "torch"
@@ -65,9 +70,10 @@ object DeviceControl {
     const val BRIGHTNESS = "brightness"
     const val AUDIO_DEVICE = "audio_device"
     const val AUTO_ROTATE = "auto_rotate"
+    const val AIRPLANE_MODE = "airplane_mode"
 
     /** The controls `set_device_control` understands. */
-    fun keys(): List<String> = listOf(TORCH, RINGER_MODE, DND, BRIGHTNESS, AUDIO_DEVICE, AUTO_ROTATE)
+    fun keys(): List<String> = listOf(TORCH, RINGER_MODE, DND, BRIGHTNESS, AUDIO_DEVICE, AUTO_ROTATE, AIRPLANE_MODE)
 
     /**
      * Resolves a ([control], [value]) pair into the typed op the executor dispatches, or
@@ -84,6 +90,7 @@ object DeviceControl {
             BRIGHTNESS -> resolveBrightness(normalisedValue)?.let { DeviceControlOp.Brightness(it, normalisedValue) }
             AUDIO_DEVICE -> com.example.agent.AudioDeviceMode.fromKey(normalisedValue)?.let { DeviceControlOp.AudioDevice(it) }
             AUTO_ROTATE -> com.example.agent.AutoRotateMode.fromKey(normalisedValue)?.let { DeviceControlOp.AutoRotate(it) }
+            AIRPLANE_MODE -> com.example.agent.AirplaneMode.fromKey(normalisedValue)?.let { DeviceControlOp.AirplaneMode(it) }
             else -> null
         }
     }
@@ -132,6 +139,7 @@ object DeviceControl {
             }
             is DeviceControlOp.AudioDevice -> op.mode.key
             is DeviceControlOp.AutoRotate -> op.mode.key
+            is DeviceControlOp.AirplaneMode -> op.mode.key
             null -> value.trim()
         }
 }

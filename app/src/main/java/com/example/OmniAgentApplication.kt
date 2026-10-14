@@ -260,6 +260,14 @@ class OmniAgentApplication : Application(), ComponentCallbacks2 {
                 // an ignored write - or a missing WRITE_SETTINGS grant - is reported as
                 // failure, not a fake success.
                 autoRotateController = com.example.agent.AndroidAutoRotateController(this),
+                // Airplane-mode primitive: backs the `airplane_mode` control of
+                // set_device_control via Settings.Global.AIRPLANE_MODE_ON, a global system
+                // setting like the brightness/auto-rotate primitives (no UI tap toggles the
+                // radios reliably on an arbitrary screen). The setting is signature-protected
+                // on modern Android, so it reads the state back and reports an ignored/refused
+                // write as failure (and opens the airplane-mode settings for the user to
+                // finish), never a fake success.
+                airplaneModeController = com.example.agent.AndroidAirplaneModeController(this),
                 // Clipboard-read primitive: reads the system ClipboardManager, service-free
                 // like the device-status/notification reads (no screen reflects the
                 // clipboard). It is opt-in (the clipboard can hold another app's secret)

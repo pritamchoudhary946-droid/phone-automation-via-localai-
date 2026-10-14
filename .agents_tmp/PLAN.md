@@ -2688,3 +2688,19 @@ section 2.1 gap "read then summarise" (read_text/read_page_content -> summarize_
   BUILD SUCCESSFUL, 208 tests, 0 failures.
 - Next: file/document picking (ACTION_GET_CONTENT / ACTION_OPEN_DOCUMENT); a
   capture->summarise->act end-to-end benchmark test.
+
+
+---
+
+## SESSION 58 (2026-10-14) - milestone: airplane_mode device-control primitive
+
+Status: DONE + VALIDATED. Seventh backed `set_device_control` control (`airplane_mode`,
+value on/off). New `AirplaneModeController` interface + `AndroidAirplaneModeController`
+over `Settings.Global.AIRPLANE_MODE_ON`; `AirplaneMode` closed enum (ON/OFF). Resolved
+before the a11y gate (device-backed global setting, like brightness/auto_rotate). Because
+the write is signature-protected the controller attempts the guarded write, reads the
+state back, and reports `AIRPLANE_MODE_PERMISSION`/`AIRPLANE_MODE_UNCHANGED` honestly,
+opening `ACTION_AIRPLANE_MODE_SETTINGS` for the user to finish - never a fake success.
+- Wired through: TorchController (DeviceControlOp.AirplaneMode + resolver + key()),
+  DeviceAutomation dispatch arm, OmniAgentApplication, PlannerPromptBuilder, AGENTS.md.
+- Validation: testDebugUnitTest -> 573 tests 0 failures; assembleDebug -> APK produced.

@@ -304,6 +304,14 @@ class AndroidDeviceAutomation(
     // no-op. The controller reads the state back, so an ignored write (or missing
     // WRITE_SETTINGS access) is reported as failure, not a fake success.
     private val autoRotateController: AutoRotateController? = null,
+    // Whether the device's radios are disabled is a global system setting
+    // (Settings.Global.AIRPLANE_MODE_ON), not an accessibility-tree control, so like the
+    // ringer/torch/dnd/brightness primitives it is resolved before the a11y-service gate.
+    // An unwired controller gets an honest "unavailable" result, never a silent no-op. The
+    // setting is signature-protected on modern Android, so the controller reads the state
+    // back and reports an ignored/refused write as failure (and opens the settings panel
+    // for the user to complete it), never a fake success.
+    private val airplaneModeController: AirplaneModeController? = null,
     // The clipboard is a system service (ClipboardManager), not an accessibility-tree
     // control, so like the ringer/torch/dnd/brightness primitives it is resolved before
     // the a11y-service gate. It is opt-in: the executor refuses honestly when clipboard
@@ -665,7 +673,8 @@ class AndroidDeviceAutomation(
         // control is refused honestly, no dispatch), then delegates to the existing honest
         // read-back controller for the named control: torch -> TorchController, ringer_mode
         // -> RingerModeController, dnd -> DndController, brightness -> ScreenBrightnessController,
-        // audio_device -> AudioDeviceController, auto_rotate -> AutoRotateController. Like
+        // audio_device -> AudioDeviceController, auto_rotate -> AutoRotateController,
+        // airplane_mode -> AirplaneModeController. Like
         // set_torch/set_ringer_mode it is resolved before the a11y-service gate (all are
         // system-service backed, not tree-backed).
         if (action is AgentAction.SetDeviceControl) {
@@ -703,6 +712,12 @@ class AndroidDeviceAutomation(
                 is DeviceControlOp.AutoRotate -> {
                     val controller = autoRotateController
                         ?: return@withContext ActionResult(false, "AUTO_ROTATE_UNAVAILABLE", "Screen auto-rotation control is not available")
+                    val result = controller.set(op.mode)
+                    return@withContext ActionResult(result.success, result.method, result.message)
+                }
+                is DeviceControlOp.AirplaneMode -> {
+                    val controller = airplaneModeController
+                        ?: return@withContext ActionResult(false, "AIRPLANE_MODE_UNAVAILABLE", "Airplane mode control is not available")
                     val result = controller.set(op.mode)
                     return@withContext ActionResult(result.success, result.method, result.message)
                 }
