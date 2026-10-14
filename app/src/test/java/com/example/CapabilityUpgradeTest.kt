@@ -21,6 +21,9 @@ import com.example.agent.AudioController
 import com.example.agent.AudioDeviceController
 import com.example.agent.AudioDeviceMode
 import com.example.agent.AudioDeviceResult
+import com.example.agent.AutoRotateController
+import com.example.agent.AutoRotateMode
+import com.example.agent.AutoRotateResult
 import com.example.agent.AudioStream
 import com.example.agent.CalendarController
 import com.example.agent.CalendarResult
@@ -3886,6 +3889,109 @@ class CapabilityUpgradeTest {
         assertEquals(AgentAction.SetDeviceControl("audio_device", "speaker"), restored!!.steps[0].action)
     }
 
+    @Test
+    fun deviceControlResolvesAutoRotateAliases() {
+        // auto_rotate is a sixth backed control. On/off names (and natural aliases like
+        // unlock/lock) map to the closed AutoRotateMode enum; an unknown value or a value that
+        // belongs to another control is refused (null), never dispatched.
+        assertEquals(DeviceControlOp.AutoRotate(AutoRotateMode.ON), DeviceControl.resolve("auto_rotate", "on"))
+        assertEquals(DeviceControlOp.AutoRotate(AutoRotateMode.ON), DeviceControl.resolve("AUTO_ROTATE", "unlock"))
+        assertEquals(DeviceControlOp.AutoRotate(AutoRotateMode.ON), DeviceControl.resolve(" auto_rotate ", "enabled"))
+        assertEquals(DeviceControlOp.AutoRotate(AutoRotateMode.OFF), DeviceControl.resolve("auto_rotate", "off"))
+        assertEquals(DeviceControlOp.AutoRotate(AutoRotateMode.OFF), DeviceControl.resolve("auto_rotate", "lock"))
+        assertEquals(DeviceControlOp.AutoRotate(AutoRotateMode.OFF), DeviceControl.resolve("auto_rotate", "portrait"))
+
+        assertNull(DeviceControl.resolve("auto_rotate", "maybe"))
+        assertNull(DeviceControl.resolve("auto_rotate", "speaker"))
+
+        assertEquals("on", DeviceControl.describeValue("auto_rotate", "unlock"))
+        assertTrue(DeviceControl.isKnown("auto_rotate"))
+    }
+
+    @Test
+    fun setDeviceControlAutoRotateReachesTheAutoRotateController() {
+        // auto_rotate writes a Settings.System display setting, so it must resolve before the
+        // a11y gate (system-display backed, service-free like torch/ringer_mode/dnd/brightness).
+        val recorder = RecordingAutoRotateController()
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            autoRotateController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("auto_rotate", "off"))
+        }
+        assertTrue("auto_rotate control must apply without a bound a11y service: $result", result.success)
+        assertEquals("AUTO_ROTATE", result.method)
+        assertEquals(listOf(AutoRotateMode.OFF), recorder.calls)
+    }
+
+    @Test
+    fun setDeviceControlAutoRotateRefusesHonestlyWhenUnwired() {
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            autoRotateController = null
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("auto_rotate", "off"))
+        }
+        assertFalse("no auto-rotate controller must not be a fake success", result.success)
+        assertEquals("AUTO_ROTATE_UNAVAILABLE", result.method)
+    }
+
+    @Test
+    fun setDeviceControlAutoRotateUnchangedIsReportedAsFailure() {
+        // The controller reads the state back; a write the device ignored must not be dressed
+        // up as success.
+        val recorder = RecordingAutoRotateController(
+            AutoRotateResult(false, "AUTO_ROTATE_UNCHANGED", "The screen auto-rotation did not change")
+        )
+        val automation = AndroidDeviceAutomation(
+            appDirectory = AppDirectory(context),
+            serviceProvider = { null },
+            autoRotateController = recorder
+        )
+        val result = kotlinx.coroutines.runBlocking {
+            automation.execute(AgentAction.SetDeviceControl("auto_rotate", "off"))
+        }
+        assertFalse(result.success)
+        assertEquals("AUTO_ROTATE_UNCHANGED", result.method)
+    }
+
+    @Test
+    fun validationAcceptsAutoRotateControl() {
+        val registry = ToolRegistry()
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("auto_rotate", "on")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("auto_rotate", "off")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("auto_rotate", "lock")) is ToolValidationResult.Valid)
+        assertTrue(registry.validateAction(AgentAction.SetDeviceControl("auto_rotate", "maybe")) is ToolValidationResult.Invalid)
+    }
+
+    @Test
+    fun setDeviceControlAutoRotateSkillKeepsItsControlAndValueOnReplay() {
+        // A learned/scheduled "lock the screen rotation" control must replay the same value,
+        // not a default.
+        val plan = com.example.planning.TaskPlan(
+            goal = "lock the screen rotation",
+            fromModel = true,
+            steps = listOf(
+                com.example.planning.PlanStep(
+                    id = 1, sequence = 1, description = "auto_rotate off",
+                    action = AgentAction.SetDeviceControl("auto_rotate", "off"),
+                    rawActionName = "set_device_control", expectedPostcondition = "auto-rotation locked",
+                    verification = com.example.planning.VerificationMethod.NONE
+                )
+            )
+        )
+        val restored = com.example.planning.TaskPlanSerializer.fromJson(
+            com.example.planning.TaskPlanSerializer.toJson(plan),
+            goalOverride = plan.goal
+        )
+        assertTrue("a saved auto_rotate skill must be replayable", restored != null)
+        assertEquals(AgentAction.SetDeviceControl("auto_rotate", "off"), restored!!.steps[0].action)
+    }
+
 
     @Test
     fun setDeviceControlRingerModeReachesTheRingerController() {
@@ -5948,6 +6054,16 @@ class CapabilityUpgradeTest {
         override fun set(mode: AudioDeviceMode): AudioDeviceResult {
             calls += mode
             return result ?: AudioDeviceResult(true, "AUDIO_DEVICE", "Audio output set to ${mode.key}")
+        }
+    }
+
+    private class RecordingAutoRotateController(
+        private val result: AutoRotateResult? = null
+    ) : AutoRotateController {
+        val calls = mutableListOf<AutoRotateMode>()
+        override fun set(mode: AutoRotateMode): AutoRotateResult {
+            calls += mode
+            return result ?: AutoRotateResult(true, "AUTO_ROTATE", "Screen auto-rotation set to ${mode.key}")
         }
     }
 
