@@ -1,8 +1,11 @@
 ---
 
-## SESSION 56 (2026-10-14) - milestone: `audio_device` device control (DONE)
+## SESSION 56 (2026-10-14) - milestone: `audio_device` device control (DONE, MERGED)
 
-Where reached: DONE and validated (branch `auto/jarvis-autonomy-20261014-0031`, PR #98).
+Where reached: DONE, validated and MERGED (PR #98 squash-merged into main `0e4633d`;
+branch `auto/jarvis-autonomy-20261014-0031` deleted). GitHub CI `Verify` failed at runner
+startup (0 steps, no runner, no log blob) on two attempts - an Actions infra failure, not
+a code failure; the identical gate passed locally (VERIFY OK, 560 tests, APK built).
 Full pre-merge gate `bash .github/scripts/verify.sh` -> VERIFY OK, 560 tests 0 failures
 0 errors 0 skipped, `app-debug.apk` (66 MB) produced. 6 new audio_device tests pass.
 
